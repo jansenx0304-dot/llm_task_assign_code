@@ -1,0 +1,1636 @@
+[LOG] Writing run log to: sar_alloc\data\runs\20260312-150001-llm.log
+
+════════════════════════════════════════════════════════════════════════════════════════
+🚀 Runner Start
+════════════════════════════════════════════════════════════════════════════════════════
+📦 instance                 json:sar_alloc/data/instances/demo/seed42_T50_A6.json
+🤖 dummy_llm                False
+🎲 seed                     545822339
+🔁 max_agent_steps          10
+🧮 max_solver_calls         10
+📉 max_no_improve           3
+⏱️ budget                   time_limit_sec=1000.0, max_iters=10000
+🎯 goal                     我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+════════════════════════════════════════════════════════════════════════════════════════
+🎯 Objective Layer
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+Given:
+- User goal (natural language): 我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+- Available metrics:
+Available metrics:
+- violation_total: Total constraint violation (0 means feasible).
+- unassigned_count: Number of unassigned tasks.
+- missed_priority: Sum of priorities of unassigned tasks.
+- energy_total: Total energy used.
+- total_distance: Total travel distance.
+- makespan: Max route completion time over agents.
+- Objective JSON schema:
+{
+  "layers": [
+    {
+      "name": "feasibility",
+      "metric": "...",
+      "direction": "min|max",
+      "rationale": "one short sentence explaining why this layer/metric/direction"
+    }
+  ],
+  "overall_rationale": "short sentences summarizing how the layers reflect the user goal"
+}
+
+Rules:
+- Keep feasibility as the first layer.
+- All other layers must reflect the user goal in priority order.
+- Each layer metric must be chosen only from the available metrics using exact names.
+- Max layers: 5.
+
+Task:
+Create the lexicographic objective layers.
+
+Output JSON only.
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 LLM Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "layers": [
+        {
+            "name": "feasibility",
+            "metric": "violation_total",
+            "direction": "min",
+            "rationale": "Ensure all constraints are satisfied before optimizing other objectives."
+        },
+        {
+            "name": "priority_rescue",
+            "metric": "missed_priority",
+            "direction": "min",
+            "rationale": "Minimize sum of unassigned high-value task priorities to prioritize their rescue."
+        },
+        {
+            "name": "task_completion",
+            "metric": "unassigned_count",
+            "direction": "min",
+            "rationale": "Ensure all tasks are assigned after prioritizing high-value ones."
+        },
+        {
+            "name": "energy_efficiency",
+            "metric": "energy_total",
+            "direction": "min",
+            "rationale": "Reduce total energy consumption to minimize resource waste."
+        },
+        {
+            "name": "distance_efficiency",
+            "metric": "total_distance",
+            "direction": "min",
+            "rationale": "Minimize travel distance to further reduce fuel and resource usage."
+        }
+    ],
+    "overall_rationale": "First ensure solution feasibility, then prioritize high-value task rescue, guarantee all tasks are assigned, and finally minimize energy and distance to reduce resource waste."
+}
+```
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 0
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 0,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": null,
+    "solver_alg": null,
+    "solver_params": {},
+    "consecutive_no_improve": 0
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": null,
+  "best": null,
+  "is_current_best": false,
+  "search": {
+    "init_method": null,
+    "solver_alg": null,
+    "solver_params": {},
+    "consecutive_no_improve": 0
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 1000.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Recent decisions:
+No prior steps.
+
+- Allowed actions for this turn: choose_init_method, choose_solver, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "choose_init_method",
+    "action_payload": {
+        "init_method": "sweep"
+    },
+    "budget_request": {
+        "time_limit_sec": 60.0,
+        "max_iters": 1000
+    },
+    "rationale": "Initial solution needed; sweep method handles spatial clustering (0.77) and prioritizes high-value tasks by angular ordering from depot.",
+    "expected_effect": "Generate initial feasible solution with good spatial organization for subsequent optimization."
+}
+```
+✅ Initial solution ready: method=sweep, assigned=31, unassigned=19
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 0 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   choose_init_method
+📊 compare_vs_current       None
+🏆 compare_vs_best          -1
+📈 improved_current         True
+🌟 improved_best            True
+🔑 lex_key_changed          True
+🛑 stop                     False
+📝 result                   Built initial solution with init_method=sweep. feasible=True, lex_key=[0.0, 41.0, 19.0, 24786.29367206446, 22395.269669542915]
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 1
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 1,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "modify_solver_params",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": "sweep",
+    "solver_alg": null,
+    "solver_params": {},
+    "consecutive_no_improve": 0
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      41.0,
+      19.0,
+      24786.29367206446,
+      22395.269669542915
+    ]
+  },
+  "best": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      41.0,
+      19.0,
+      24786.29367206446,
+      22395.269669542915
+    ]
+  },
+  "is_current_best": true,
+  "search": {
+    "init_method": "sweep",
+    "solver_alg": null,
+    "solver_params": {},
+    "consecutive_no_improve": 0
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 1000.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Recent decisions:
+[
+  {
+    "step": 0,
+    "action": "choose_init_method",
+    "payload": {
+      "init_method": "sweep"
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      41.0,
+      19.0,
+      24786.29367206446,
+      22395.269669542915
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 60.0,
+      "max_iters": 1000
+    }
+  }
+]
+
+- Allowed actions for this turn: choose_init_method, choose_solver, modify_solver_params, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+  "action_type": "choose_solver",
+  "action_payload": {
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.15,
+      "reaction_factor": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.1
+    }
+  },
+  "budget_request": {
+    "time_limit_sec": 120.0,
+    "max_iters": 2000
+  },
+  "rationale": "Current sweep initialization produced feasible solution but with high priority misses (41) and unassigned tasks (19). ALNS with simulated annealing acceptance can explore trade-offs between priority rescue and task completion while improving energy efficiency.",
+  "expected_effect": "Reduce missed priority tasks and unassigned count while maintaining feasibility and improving energy efficiency."
+}
+```
+✅ ALNS found a new best feasible solution at iter=1, lex_key=(0.0, 32.0, 16.0, 27431.02429978277, 24860.921898794204)
+✅ ALNS found a new best feasible solution at iter=4, lex_key=(0.0, 31.0, 16.0, 26356.547133371205, 23949.062990722417)
+✅ ALNS found a new best feasible solution at iter=14, lex_key=(0.0, 27.0, 16.0, 29570.64157128546, 27009.619330028276)
+✅ ALNS found a new best feasible solution at iter=15, lex_key=(0.0, 24.0, 16.0, 29270.878769728737, 26585.790006705753)
+✅ ALNS found a new best feasible solution at iter=16, lex_key=(0.0, 23.0, 16.0, 27793.256075022367, 25207.42107144716)
+✅ ALNS found a new best feasible solution at iter=17, lex_key=(0.0, 22.0, 16.0, 28442.738050127035, 25582.942105288123)
+✅ ALNS found a new best feasible solution at iter=18, lex_key=(0.0, 20.0, 15.0, 28543.29929951682, 25862.869972838438)
+✅ ALNS found a new best feasible solution at iter=19, lex_key=(0.0, 15.0, 11.0, 30868.404128301998, 27895.814621979516)
+✅ ALNS found a new best feasible solution at iter=20, lex_key=(0.0, 13.0, 10.0, 32573.70768979659, 29664.2143014666)
+✅ ALNS found a new best feasible solution at iter=22, lex_key=(0.0, 11.0, 8.0, 31977.08123120721, 28811.425539029544)
+✅ ALNS found a new best feasible solution at iter=24, lex_key=(0.0, 11.0, 8.0, 31907.58018138839, 28853.298206451203)
+✅ ALNS found a new best feasible solution at iter=25, lex_key=(0.0, 9.0, 7.0, 33023.86271438599, 30009.667501415195)
+✅ ALNS found a new best feasible solution at iter=26, lex_key=(0.0, 9.0, 6.0, 33791.13834558035, 30953.732121611145)
+✅ ALNS found a new best feasible solution at iter=27, lex_key=(0.0, 6.0, 5.0, 34521.41194856691, 31614.487313177277)
+✅ ALNS found a new best feasible solution at iter=30, lex_key=(0.0, 6.0, 5.0, 34470.24950292698, 31563.94182687012)
+✅ ALNS found a new best feasible solution at iter=31, lex_key=(0.0, 5.0, 3.0, 34688.62806109195, 31387.805989084995)
+✅ ALNS found a new best feasible solution at iter=45, lex_key=(0.0, 5.0, 3.0, 34459.094143114235, 31234.083926768646)
+✅ ALNS found a new best feasible solution at iter=73, lex_key=(0.0, 5.0, 3.0, 34455.81274180555, 31152.687183411566)
+✅ ALNS found a new best feasible solution at iter=101, lex_key=(0.0, 3.0, 3.0, 34496.95812198386, 31194.464519562316)
+✅ ALNS found a new best feasible solution at iter=124, lex_key=(0.0, 3.0, 3.0, 34354.33583271973, 30966.55920495917)
+✅ ALNS found a new best feasible solution at iter=130, lex_key=(0.0, 1.0, 2.0, 35872.58275107613, 32411.38853378569)
+✅ ALNS found a new best feasible solution at iter=790, lex_key=(0.0, 0.0, 2.0, 39449.988849545356, 36045.22659404632)
+✅ ALNS found a new best feasible solution at iter=800, lex_key=(0.0, 0.0, 2.0, 39296.056817218756, 35783.21381871712)
+✅ ALNS found a new best feasible solution at iter=827, lex_key=(0.0, 0.0, 2.0, 38601.16549698361, 35057.887081306486)
+✅ ALNS found a new best feasible solution at iter=830, lex_key=(0.0, 0.0, 1.0, 39751.229842036824, 36257.859558100085)
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 1 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   choose_solver
+📊 compare_vs_current       -1
+🏆 compare_vs_best          -1
+📈 improved_current         True
+🌟 improved_best            True
+🔑 lex_key_changed          True
+🛑 stop                     False
+📝 result                   Ran solver=alns with params={"destroy_frac": 0.15, "reaction_factor": 0.15, "acceptance": "sa", "accept_level": 0.1}. feasible=True, lex_key=[0.0, 0.0, 1.0, 39751.229842036824, 36257.859558100085], solver_diag={"algorithm": "alns", "total_iters": 2000, "best_update_count": 25, "first_best_iter": 1, "last_best_iter": 830, "plateau_iters_after_last_improve": 1170, "best_update_iters_preview": [1, 4, 14, 15, 16, 17, 18, 19]}
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 2
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 2,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "modify_solver_params",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000.0,
+      "solver_calls": 1.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 880.0,
+      "max_iters": 8000.0,
+      "solver_calls": 9.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.15,
+      "reaction_factor": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.1
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      1.0,
+      39751.229842036824,
+      36257.859558100085
+    ]
+  },
+  "best": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      1.0,
+      39751.229842036824,
+      36257.859558100085
+    ]
+  },
+  "is_current_best": true,
+  "search": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.15,
+      "reaction_factor": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.1
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 880.0,
+  "remaining_iters": 8000.0,
+  "remaining_solver_calls": 9.0
+}
+
+- Recent decisions:
+[
+  {
+    "step": 0,
+    "action": "choose_init_method",
+    "payload": {
+      "init_method": "sweep"
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      41.0,
+      19.0,
+      24786.29367206446,
+      22395.269669542915
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 60.0,
+      "max_iters": 1000
+    }
+  },
+  {
+    "step": 1,
+    "action": "choose_solver",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.15,
+        "reaction_factor": 0.15,
+        "acceptance": "sa",
+        "accept_level": 0.1
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      1.0,
+      39751.229842036824,
+      36257.859558100085
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 25,
+      "plateau_iters": 1170
+    }
+  }
+]
+
+- Allowed actions for this turn: choose_init_method, choose_solver, modify_solver_params, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+  "action_type": "modify_solver_params",
+  "action_payload": {
+    "solver_params": {
+      "destroy_frac": 0.25,
+      "reaction_factor": 0.25,
+      "acceptance": "sa",
+      "accept_level": 0.05
+    }
+  },
+  "budget_request": {
+    "time_limit_sec": 120.0,
+    "max_iters": 2000
+  },
+  "rationale": "Current solution has 1 unassigned task and high energy/distance values. ALNS with increased destroy/reaction factors may explore more diverse solutions to complete all tasks while reducing resource waste.",
+  "expected_effect": "Increased exploration may find solutions with 0 unassigned tasks and lower energy/distance metrics while maintaining feasibility."
+}
+```
+✅ ALNS found a new best feasible solution at iter=125, lex_key=(0.0, 0.0, 0.0, 38434.018688251504, 35227.44413035601)
+✅ ALNS found a new best feasible solution at iter=176, lex_key=(0.0, 0.0, 0.0, 38337.253125107585, 35148.979960194636)
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 2 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   modify_solver_params
+📊 compare_vs_current       -1
+🏆 compare_vs_best          -1
+📈 improved_current         True
+🌟 improved_best            True
+🔑 lex_key_changed          True
+🛑 stop                     False
+📝 result                   Ran solver=alns with params={"destroy_frac": 0.25, "reaction_factor": 0.25, "acceptance": "sa", "accept_level": 0.05}. feasible=True, lex_key=[0.0, 0.0, 0.0, 38337.253125107585, 35148.979960194636], solver_diag={"algorithm": "alns", "total_iters": 2000, "best_update_count": 2, "first_best_iter": 125, "last_best_iter": 176, "plateau_iters_after_last_improve": 1824, "best_update_iters_preview": [125, 176]}
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 3
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 3,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "modify_solver_params",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 240.0,
+      "max_iters": 4000.0,
+      "solver_calls": 2.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 760.0,
+      "max_iters": 6000.0,
+      "solver_calls": 8.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.25,
+      "reaction_factor": 0.25,
+      "acceptance": "sa",
+      "accept_level": 0.05
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38337.253125107585,
+      35148.979960194636
+    ]
+  },
+  "best": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38337.253125107585,
+      35148.979960194636
+    ]
+  },
+  "is_current_best": true,
+  "search": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.25,
+      "reaction_factor": 0.25,
+      "acceptance": "sa",
+      "accept_level": 0.05
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 760.0,
+  "remaining_iters": 6000.0,
+  "remaining_solver_calls": 8.0
+}
+
+- Recent decisions:
+[
+  {
+    "step": 0,
+    "action": "choose_init_method",
+    "payload": {
+      "init_method": "sweep"
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      41.0,
+      19.0,
+      24786.29367206446,
+      22395.269669542915
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 60.0,
+      "max_iters": 1000
+    }
+  },
+  {
+    "step": 1,
+    "action": "choose_solver",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.15,
+        "reaction_factor": 0.15,
+        "acceptance": "sa",
+        "accept_level": 0.1
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      1.0,
+      39751.229842036824,
+      36257.859558100085
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 25,
+      "plateau_iters": 1170
+    }
+  },
+  {
+    "step": 2,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.25,
+        "reaction_factor": 0.25,
+        "acceptance": "sa",
+        "accept_level": 0.05
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38337.253125107585,
+      35148.979960194636
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 2,
+      "plateau_iters": 1824
+    }
+  }
+]
+
+- Allowed actions for this turn: choose_init_method, choose_solver, modify_solver_params, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "modify_solver_params",
+    "action_payload": {
+        "solver_params": {
+            "destroy_frac": 0.35,
+            "reaction_factor": 0.35,
+            "acceptance": "sa",
+            "accept_level": 0.02
+        }
+    },
+    "budget_request": {
+        "time_limit_sec": 120.0,
+        "max_iters": 2000
+    },
+    "rationale": "Current solution is feasible with 0 missed priority and 0 unassigned tasks, but energy and distance metrics can still be improved. Recent parameter change (destroy_frac 0.15→0.25) improved from 1 unassigned to 0, suggesting more aggressive destruction may help escape local optima for efficiency.",
+    "expected_effect": "Increased destruction and reaction factors with tighter acceptance may explore more diverse solutions to reduce energy and distance while maintaining feasibility and task completion."
+}
+```
+✅ ALNS found a new best feasible solution at iter=1453, lex_key=(0.0, 0.0, 0.0, 38190.100399689516, 34941.152160404585)
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 3 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   modify_solver_params
+📊 compare_vs_current       -1
+🏆 compare_vs_best          -1
+📈 improved_current         True
+🌟 improved_best            True
+🔑 lex_key_changed          True
+🛑 stop                     False
+📝 result                   Ran solver=alns with params={"destroy_frac": 0.35, "reaction_factor": 0.35, "acceptance": "sa", "accept_level": 0.02}. feasible=True, lex_key=[0.0, 0.0, 0.0, 38190.100399689516, 34941.152160404585], solver_diag={"algorithm": "alns", "total_iters": 2000, "best_update_count": 1, "first_best_iter": 1453, "last_best_iter": 1453, "plateau_iters_after_last_improve": 547, "best_update_iters_preview": [1453]}
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 4
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 4,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "modify_solver_params",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 360.0,
+      "max_iters": 6000.0,
+      "solver_calls": 3.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 640.0,
+      "max_iters": 4000.0,
+      "solver_calls": 7.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.35,
+      "reaction_factor": 0.35,
+      "acceptance": "sa",
+      "accept_level": 0.02
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ]
+  },
+  "best": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ]
+  },
+  "is_current_best": true,
+  "search": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.35,
+      "reaction_factor": 0.35,
+      "acceptance": "sa",
+      "accept_level": 0.02
+    },
+    "consecutive_no_improve": 0
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 640.0,
+  "remaining_iters": 4000.0,
+  "remaining_solver_calls": 7.0
+}
+
+- Recent decisions:
+[
+  {
+    "step": 1,
+    "action": "choose_solver",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.15,
+        "reaction_factor": 0.15,
+        "acceptance": "sa",
+        "accept_level": 0.1
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      1.0,
+      39751.229842036824,
+      36257.859558100085
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 25,
+      "plateau_iters": 1170
+    }
+  },
+  {
+    "step": 2,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.25,
+        "reaction_factor": 0.25,
+        "acceptance": "sa",
+        "accept_level": 0.05
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38337.253125107585,
+      35148.979960194636
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 2,
+      "plateau_iters": 1824
+    }
+  },
+  {
+    "step": 3,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.35,
+        "reaction_factor": 0.35,
+        "acceptance": "sa",
+        "accept_level": 0.02
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 1,
+      "plateau_iters": 547
+    }
+  }
+]
+
+- Allowed actions for this turn: choose_init_method, choose_solver, modify_solver_params, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "modify_solver_params",
+    "action_payload": {
+        "solver_params": {
+            "destroy_frac": 0.40,
+            "reaction_factor": 0.40,
+            "acceptance": "sa",
+            "accept_level": 0.01
+        }
+    },
+    "budget_request": {
+        "time_limit_sec": 120.0,
+        "max_iters": 2000
+    },
+    "rationale": "Current solution has achieved feasibility and priority rescue (both 0), but energy and distance metrics still have room for improvement. Recent parameter increases (0.15→0.25→0.35) have shown consistent improvement, suggesting more aggressive search may further optimize efficiency layers.",
+    "expected_effect": "Increased destruction and reaction factors with tighter acceptance threshold should explore more diverse solutions to reduce energy consumption and travel distance while maintaining feasibility and priority completion."
+}
+```
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 4 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   modify_solver_params
+📊 compare_vs_current       0
+🏆 compare_vs_best          0
+📈 improved_current         False
+🌟 improved_best            False
+🔑 lex_key_changed          False
+🛑 stop                     False
+📝 result                   Ran solver=alns with params={"destroy_frac": 0.4, "reaction_factor": 0.4, "acceptance": "sa", "accept_level": 0.01}. feasible=True, lex_key=[0.0, 0.0, 0.0, 38190.100399689516, 34941.152160404585], solver_diag={"algorithm": "alns", "total_iters": 2000, "best_update_count": 0, "first_best_iter": null, "last_best_iter": null, "plateau_iters_after_last_improve": 2000, "best_update_iters_preview": []}
+
+════════════════════════════════════════════════════════════════════════════════════════
+🤖 Agent Step 5
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+👀 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 5,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "modify_solver_params",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 1000.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 480.0,
+      "max_iters": 8000.0,
+      "solver_calls": 4.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 520.0,
+      "max_iters": 2000.0,
+      "solver_calls": 6.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.4,
+      "reaction_factor": 0.4,
+      "acceptance": "sa",
+      "accept_level": 0.01
+    },
+    "consecutive_no_improve": 1
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. priority_rescue | metric: missed_priority | direction: min
+3. task_completion | metric: unassigned_count | direction: min
+4. energy_efficiency | metric: energy_total | direction: min
+5. distance_efficiency | metric: total_distance | direction: min
+
+- Static instance features:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current search state:
+{
+  "current": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ]
+  },
+  "best": {
+    "feasible": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ]
+  },
+  "is_current_best": true,
+  "search": {
+    "init_method": "sweep",
+    "solver_alg": "alns",
+    "solver_params": {
+      "destroy_frac": 0.4,
+      "reaction_factor": 0.4,
+      "acceptance": "sa",
+      "accept_level": 0.01
+    },
+    "consecutive_no_improve": 1
+  }
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 520.0,
+  "remaining_iters": 2000.0,
+  "remaining_solver_calls": 6.0
+}
+
+- Recent decisions:
+[
+  {
+    "step": 2,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.25,
+        "reaction_factor": 0.25,
+        "acceptance": "sa",
+        "accept_level": 0.05
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38337.253125107585,
+      35148.979960194636
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 2,
+      "plateau_iters": 1824
+    }
+  },
+  {
+    "step": 3,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.35,
+        "reaction_factor": 0.35,
+        "acceptance": "sa",
+        "accept_level": 0.02
+      }
+    },
+    "improved": true,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 1,
+      "plateau_iters": 547
+    }
+  },
+  {
+    "step": 4,
+    "action": "modify_solver_params",
+    "payload": {
+      "solver_alg": "alns",
+      "solver_params": {
+        "destroy_frac": 0.4,
+        "reaction_factor": 0.4,
+        "acceptance": "sa",
+        "accept_level": 0.01
+      }
+    },
+    "improved": false,
+    "lex": [
+      0.0,
+      0.0,
+      0.0,
+      38190.100399689516,
+      34941.152160404585
+    ],
+    "feasible": true,
+    "budget": {
+      "time_limit_sec": 120.0,
+      "max_iters": 2000
+    },
+    "diag": {
+      "best_updates": 0,
+      "plateau_iters": 2000
+    }
+  }
+]
+
+- Allowed actions for this turn: choose_init_method, choose_solver, modify_solver_params, stop
+
+Rules:
+1. Objective layers are locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. Avoid repeating a recently unsuccessful move without a clear parameter change.
+5. Request budget only for the next action.
+6. Include only fields needed for the chosen action.
+7. If the current solution is already optimal on the locked objective layers or marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {},
+  "// choose_init_method payload": {"init_method": "insert|sweep"},
+  "// choose_solver payload": {
+    "solver_alg": "alns|ils",
+    "solver_params": {
+      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
+      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+    }
+  },
+  "// modify_solver_params payload": {
+    "solver_alg": "optional alns|ils",
+    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📤 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+  "action_type": "choose_solver",
+  "action_payload": {
+    "solver_alg": "ils",
+    "solver_params": {
+      "perturb_frac": 0.15,
+      "local_search_passes": 4,
+      "perturb_operator": "segment_remove",
+      "repair_operator": "regret2_insert"
+    }
+  },
+  "budget_request": {
+    "time_limit_sec": 120.0,
+    "max_iters": 2000
+  },
+  "rationale": "ALNS has plateaued with no improvement for 2000 iterations despite parameter tuning. Switching to ILS for diversification given spatial clustering (0.77) and current feasible solution.",
+  "expected_effect": "ILS with segment_remove and regret2_insert may escape local optimum and improve energy/distance efficiency while maintaining feasibility."
+}
+```
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧠 Step 5 Result
+────────────────────────────────────────────────────────────────────────────────────────
+🎬 action                   choose_solver
+📊 compare_vs_current       0
+🏆 compare_vs_best          0
+📈 improved_current         False
+🌟 improved_best            False
+🔑 lex_key_changed          False
+🛑 stop                     False
+📝 result                   Ran solver=ils with params={"perturb_frac": 0.15, "local_search_passes": 4, "perturb_operator": "segment_remove", "repair_operator": "regret2_insert"}. feasible=True, lex_key=[0.0, 0.0, 0.0, 38190.100399689516, 34941.152160404585], solver_diag={"algorithm": "ils", "total_iters": 2000, "best_update_count": 0, "first_best_iter": null, "last_best_iter": null, "plateau_iters_after_last_improve": 2000, "best_update_iters_preview": []}
+🛑 Hard stop before step 6: solver budget exhausted.
+
+════════════════════════════════════════════════════════════════════════════════════════
+🏁 Run Complete
+════════════════════════════════════════════════════════════════════════════════════════
+✅ Finished in 159.902s
+
+────────────────────────────────────────────────────────────────────────────────────────
+🛣️ Routes
+────────────────────────────────────────────────────────────────────────────────────────
+  • agent 0: [0, 1, 2, 15, 5, 6, 17, 41, 25]
+  • agent 1: [9, 11, 12, 13, 14, 3, 4, 16, 47, 23]
+  • agent 2: [18, 28, 29, 21, 22, 7]
+  • agent 3: [26, 27, 10, 19, 20, 30, 31, 48]
+  • agent 4: [34, 35, 36, 37, 38, 39, 40, 49]
+  • agent 5: [42, 43, 44, 45, 46, 32, 33, 8, 24]
+📭 unassigned_count         0
+📭 unassigned               []
+✅ Artifacts saved to: sar_alloc\data\runs\20260312-150241-llm

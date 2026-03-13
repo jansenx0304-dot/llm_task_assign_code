@@ -1,0 +1,388 @@
+[LOG] Writing run log to: sar_alloc\data\runs\20260312-103829-dummy.log
+
+========================================================================================
+[SECTION] Runner Start
+========================================================================================
+- instance                 json:sar_alloc/data/instances/demo/seed42_T50_A6.json
+- dummy_llm                True
+- seed                     421237946
+- max_agent_steps          1
+- max_solver_calls         1
+- max_no_improve           3
+- budget                   time_limit_sec=0.1, max_iters=5
+- goal                     我需要抢救高价值的任务
+
+========================================================================================
+[SECTION] Objective Layer
+========================================================================================
+
+----------------------------------------------------------------------------------------
+[DETAIL] Prompt
+----------------------------------------------------------------------------------------
+Given:
+- User goal (natural language): 我需要抢救高价值的任务
+- Available metrics:
+Available metrics:
+- violation_total: Total constraint violation (0 means feasible).
+- unassigned_count: Number of unassigned tasks.
+- missed_priority: Sum of priorities of unassigned tasks.
+- energy_total: Total energy used.
+- total_distance: Total travel distance.
+- makespan: Max route completion time over agents.
+- Objective JSON schema:
+{
+  "layers": [
+    {
+      "name": "feasibility",
+      "metric": "...",
+      "direction": "min|max",
+      "rationale": "one short sentence explaining why this layer/metric/direction"
+    }
+  ],
+  "overall_rationale": "short sentences summarizing how the layers reflect the user goal"
+}
+
+Rules:
+- Keep feasibility as the first layer.
+- All other layers must reflect the user goal in priority order.
+- Each layer metric must be chosen only from the available metrics using exact names.
+- Max layers: 3.
+
+Task:
+Create the lexicographic objective layers.
+
+Output JSON only.
+
+----------------------------------------------------------------------------------------
+[DETAIL] LLM Output
+----------------------------------------------------------------------------------------
+Given:
+- User goal (natural language): 我需要抢救高价值的任务
+- Available metrics:
+Available metrics:
+- violation_total: Total constraint violation (0 means feasible).
+- unassigned_count: Number of unassigned tasks.
+- missed_priority: Sum of priorities of unassigned tasks.
+- energy_total: Total energy used.
+- total_distance: Total travel distance.
+- makespan: Max route completion time over agents.
+- Objective JSON schema:
+{
+  "layers": [
+    {
+      "name": "feasibility",
+      "metric": "...",
+      "direction": "min|max",
+      "rationale": "one short sentence explaining why this layer/metric/direction"
+    }
+  ],
+  "overall_rationale": "short sentences summarizing how the layers reflect the user goal"
+}
+
+Rules:
+- Keep feasibility as the first layer.
+- All other layers must reflect the user goal in priority order.
+- Each layer metric must be chosen only from the available metrics using exact names.
+- Max layers: 3.
+
+Task:
+Create the lexicographic objective layers.
+
+Output JSON only.
+
+========================================================================================
+[SECTION] Agent Step 0
+========================================================================================
+
+----------------------------------------------------------------------------------------
+[DETAIL] Observation
+----------------------------------------------------------------------------------------
+{
+  "step_id": 0,
+  "allowed_actions": [
+    "choose_init_method",
+    "choose_solver",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 0.1,
+      "max_iters": 5.0,
+      "solver_calls": 1.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 0.1,
+      "max_iters": 5.0,
+      "solver_calls": 1.0
+    }
+  },
+  "current_solver_context": {
+    "init_method": null,
+    "solver_alg": null,
+    "solver_params": {},
+    "consecutive_no_improve": 0
+  }
+}
+
+----------------------------------------------------------------------------------------
+[DETAIL] Next Action Prompt
+----------------------------------------------------------------------------------------
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. rescue_priority | metric: missed_priority | direction: min
+3. efficiency | metric: energy_total | direction: min
+
+- Instance summary:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current solution summary:
+No current solution yet.
+
+- Best solution summary:
+No best solution yet.
+
+- Budget state:
+{
+  "total_budget": {
+    "time_limit_sec": 0.1,
+    "max_iters": 5.0,
+    "solver_calls": 1.0
+  },
+  "used_budget": {
+    "time_limit_sec": 0.0,
+    "max_iters": 0.0,
+    "solver_calls": 0.0
+  },
+  "remaining_budget": {
+    "time_limit_sec": 0.1,
+    "max_iters": 5.0,
+    "solver_calls": 1.0
+  }
+}
+
+- Recent history:
+No prior steps.
+
+- Current init/solver context:
+{
+  "current_init_method": null,
+  "current_solver_alg": null,
+  "current_solver_params": {},
+  "consecutive_no_improve": 0
+}
+
+- Allowed actions for this turn: choose_init_method, choose_solver, stop
+
+Rules:
+1. Objective layers are already locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. If a similar recent action failed repeatedly, avoid repeating it without a clear change.
+5. Request budget only for the next action. Do not try to overwrite the total budget.
+6. Keep action_payload minimal and legal.
+7. If expected marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {
+    "// choose_init_method": {
+      "init_method": "insert|sweep|merge"
+    },
+    "// choose_solver": {
+      "solver_alg": "alns|ils",
+      "solver_params": {
+        "// alns ranges": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00"
+        "// ils ranges": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+      }
+    },
+    "// modify_solver_params": {
+      "solver_alg": "optional alns|ils",
+      "solver_params": {
+        "// note": "adjust the current solver strategy; solver_alg may be omitted to keep the current solver"
+      }
+    },
+    "// stop": {}
+  },
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+
+----------------------------------------------------------------------------------------
+[DETAIL] Next Action Output
+----------------------------------------------------------------------------------------
+You are controlling a closed-loop optimization agent with the cycle:
+Observe -> Think -> Act -> Check -> Repeat.
+
+Your job for this turn is to choose exactly one next action.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务
+
+- Objective layers (locked, read-only):
+1. feasibility | metric: violation_total | direction: min
+2. rescue_priority | metric: missed_priority | direction: min
+3. efficiency | metric: energy_total | direction: min
+
+- Instance summary:
+- Number of tasks: 50
+- Number of agents: 6
+
+Skill coverage:
+- Tasks no agent can do: 0.00
+- Bottleneck tasks (≤1 agent capable): 0.00
+
+Time-window tightness:
+- Tasks infeasible even optimistically: 0.00
+
+Energy constraint:
+- Tasks with tight energy budget: 0.00
+
+Spatial distribution:
+- Clustering strength (0=scattered, 1=clustered): 0.77
+- 95th percentile distance to depot: 1208.80
+
+- Current solution summary:
+No current solution yet.
+
+- Best solution summary:
+No best solution yet.
+
+- Budget state:
+{
+  "total_budget": {
+    "time_limit_sec": 0.1,
+    "max_iters": 5.0,
+    "solver_calls": 1.0
+  },
+  "used_budget": {
+    "time_limit_sec": 0.0,
+    "max_iters": 0.0,
+    "solver_calls": 0.0
+  },
+  "remaining_budget": {
+    "time_limit_sec": 0.1,
+    "max_iters": 5.0,
+    "solver_calls": 1.0
+  }
+}
+
+- Recent history:
+No prior steps.
+
+- Current init/solver context:
+{
+  "current_init_method": null,
+  "current_solver_alg": null,
+  "current_solver_params": {},
+  "consecutive_no_improve": 0
+}
+
+- Allowed actions for this turn: choose_init_method, choose_solver, stop
+
+Rules:
+1. Objective layers are already locked. Do not modify them.
+2. Choose exactly one action from allowed actions.
+3. If there is no current solution, do not choose modify_solver_params.
+4. If a similar recent action failed repeatedly, avoid repeating it without a clear change.
+5. Request budget only for the next action. Do not try to overwrite the total budget.
+6. Keep action_payload minimal and legal.
+7. If expected marginal value is low, choose stop.
+8. Output JSON only and follow the schema exactly.
+
+Output schema:
+{
+  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_payload": {
+    "// choose_init_method": {
+      "init_method": "insert|sweep|merge"
+    },
+    "// choose_solver": {
+      "solver_alg": "alns|ils",
+      "solver_params": {
+        "// alns ranges": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00"
+        "// ils ranges": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
+      }
+    },
+    "// modify_solver_params": {
+      "solver_alg": "optional alns|ils",
+      "solver_params": {
+        "// note": "adjust the current solver strategy; solver_alg may be omitted to keep the current solver"
+      }
+    },
+    "// stop": {}
+  },
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  },
+  "rationale": "short reason",
+  "expected_effect": "short sentence"
+}
+[WARN] Illegal or missing action '', fallback to 'choose_solver'.
+[OK] Initial solution ready: method=insert, assigned=42, unassigned=8
+
+----------------------------------------------------------------------------------------
+[DETAIL] Step 0 Result
+----------------------------------------------------------------------------------------
+- action                   choose_solver
+- compare_vs_current       None
+- compare_vs_best          -1
+- improved_current         True
+- improved_best            True
+- lex_key_changed          True
+- stop                     False
+- result                   Ran solver=alns with params={}. feasible=True, lex_key=[0.0, 13.0, 34535.14098688113]
+
+========================================================================================
+[SECTION] Run Complete
+========================================================================================
+[OK] Finished in 0.076s
+
+----------------------------------------------------------------------------------------
+[DETAIL] Routes
+----------------------------------------------------------------------------------------
+  - agent 0: [9, 1, 29, 37, 38, 46, 47, 49]
+  - agent 1: [26, 12, 13, 14, 21, 5, 6, 33, 8]
+  - agent 2: [18, 28, 30, 32, 24, 25]
+  - agent 3: [10, 19, 2, 15, 31, 48]
+  - agent 4: [35, 43, 3, 39, 41]
+  - agent 5: [34, 27, 11, 45, 4, 16, 40, 23]
+- unassigned_count         8
+- unassigned               [0, 7, 17, 20, 22, 36, 42, 44]
+[OK] Artifacts saved to: sar_alloc\data\runs\20260312-103829-dummy

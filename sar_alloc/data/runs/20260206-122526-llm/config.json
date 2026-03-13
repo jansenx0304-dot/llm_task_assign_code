@@ -1,0 +1,56 @@
+{
+  "eval": {
+    "objective_policy": {
+      "layers": [
+        {
+          "name": "feasibility",
+          "metric": "violation_total",
+          "direction": "min",
+          "epsilon": 0.0
+        },
+        {
+          "name": "completeness",
+          "metric": "unassigned_count",
+          "direction": "min",
+          "epsilon": 0.0
+        },
+        {
+          "name": "efficiency",
+          "metric": "makespan",
+          "direction": "min",
+          "epsilon": 0.0
+        }
+      ],
+      "max_layers": 6
+    },
+    "include_depot_legs": true,
+    "time_unit": "minute",
+    "energy_unit": "unit"
+  },
+  "init": {
+    "method": "insert",
+    "randomized": true,
+    "rcl_k": 5,
+    "allow_unassigned": true
+  },
+  "solver": {
+    "algorithm": "alns",
+    "ts": {
+      "candidate_frac": 0.15,
+      "tabu_frac": 0.3,
+      "diversify_every_frac": 0.1,
+      "move_mix": [
+        0.8,
+        0.2
+      ]
+    },
+    "alns": {
+      "destroy_frac": 0.25,
+      "reaction_factor": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.7
+    }
+  },
+  "rng_seed": 1746585250,
+  "extras": {}
+}

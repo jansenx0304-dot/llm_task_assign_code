@@ -1,0 +1,28 @@
+{
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "objective_layers": [
+    {
+      "name": "feasibility",
+      "metric": "violation_total",
+      "direction": "min",
+      "epsilon": 0.0
+    },
+    {
+      "name": "priority_rescue",
+      "metric": "missed_priority",
+      "direction": "min",
+      "epsilon": 0.0
+    },
+    {
+      "name": "coverage",
+      "metric": "unassigned_count",
+      "direction": "min",
+      "epsilon": 0.0
+    }
+  ]
+}

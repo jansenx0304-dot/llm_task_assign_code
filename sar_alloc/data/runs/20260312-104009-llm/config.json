@@ -1,0 +1,53 @@
+{
+  "eval": {
+    "objective_policy": {
+      "layers": [
+        {
+          "name": "feasibility",
+          "metric": "violation_total",
+          "direction": "min",
+          "epsilon": 0.0
+        },
+        {
+          "name": "priority_rescue",
+          "metric": "missed_priority",
+          "direction": "min",
+          "epsilon": 0.0
+        },
+        {
+          "name": "coverage",
+          "metric": "unassigned_count",
+          "direction": "min",
+          "epsilon": 0.0
+        }
+      ],
+      "max_layers": 6
+    },
+    "include_depot_legs": true,
+    "time_unit": "minute",
+    "energy_unit": "unit"
+  },
+  "init": {
+    "method": "insert",
+    "randomized": true,
+    "rcl_k": 5,
+    "allow_unassigned": true
+  },
+  "solver": {
+    "algorithm": "alns",
+    "ils": {
+      "perturb_frac": 0.1,
+      "local_search_passes": 2,
+      "perturb_operator": "worst_remove",
+      "repair_operator": "regret2_insert"
+    },
+    "alns": {
+      "destroy_frac": 0.35,
+      "reaction_factor": 0.35,
+      "acceptance": "sa",
+      "accept_level": 0.02
+    }
+  },
+  "rng_seed": 1581122241,
+  "extras": {}
+}
