@@ -76,8 +76,8 @@ def solve_assignment(
 
     if algorithm == "alns":
         return _solve_alns(instance, cur, cur_ev, best, best_ev, config, budget, rng)
-    if algorithm == "ils":
-        return _solve_ils(instance, cur, cur_ev, best, best_ev, config, budget, rng)
+    if algorithm == "vnd":
+        return _solve_vnd(instance, cur, cur_ev, best, best_ev, config, budget, rng)
 
     raise ValueError(f"未知的优化算法: {algorithm}")
 
@@ -340,7 +340,7 @@ def _solve_alns(
 # 接受准则：Deb +（threshold / SA）
 # =========================================================
 
-def _solve_ils(
+def _solve_vnd(
     instance: Instance,
     cur: AssignmentSolution,
     cur_ev: EvalResult,
@@ -350,78 +350,43 @@ def _solve_ils(
     budget: Budget,
     rng: random.Random,
 ) -> AssignmentSolution:
-    ils_cfg = config.solver.ils
-
-    destroy_ops: Dict[str, DestroyOp] = {
-        "random_remove": _destroy_random_remove,
-        "worst_remove": _destroy_worst_remove,
-        "segment_remove": _destroy_segment_remove,
-    }
-    repair_ops: Dict[str, RepairOp] = {
-        "greedy_insert": _repair_greedy_insert,
-        "regret2_insert": _repair_regret2_insert,
-    }
-
-    destroy_name = str(getattr(ils_cfg, "perturb_operator", "worst_remove"))
-    if destroy_name not in destroy_ops:
-        destroy_name = "worst_remove"
-
-    repair_name = str(getattr(ils_cfg, "repair_operator", "regret2_insert"))
-    if repair_name not in repair_ops:
-        repair_name = "regret2_insert"
+    vnd_cfg = config.solver.vnd
+    initial_solution_feasible = bool(cur_ev.is_feasible)
 
     best_feas: Optional[AssignmentSolution] = best.clone(deep=True) if best_ev.is_feasible else None
     best_feas_ev: Optional[EvalResult] = best_ev if best_ev.is_feasible else None
     best_update_iters: List[int] = []
     best_update_lex_keys: List[List[float]] = []
+    vnd_neighborhood_hits = {
+        "relocate_1": 0,
+        "swap_1_1": 0,
+        "segment_relocate_2": 0,
+        "segment_relocate_3": 0,
+    }
+    vnd_total_improvements = 0
+    vnd_last_improving_neighborhood: Optional[str] = None
 
     it = 0
-    no_improve = 0
     t0 = time.time()
 
-    while _budget_ok(budget, t0, it):
+    if _budget_ok(budget, t0, it):
         it += 1
-
-        working = cur.clone(deep=True)
-        working.normalize(instance)
-        assigned = list(working.all_assigned_tasks())
-
-        if assigned:
-            strength = _clamp_int(
-                int(float(ils_cfg.perturb_frac) * max(1, len(assigned))),
-                1,
-                min(50, max(1, len(assigned))),
-            )
-            removed = destroy_ops[destroy_name](working, instance, config, rng)
-            if len(removed) > strength:
-                removed = removed[:strength]
-            _remove_tasks(working, removed)
-        working.normalize(instance)
-
-        repair_pool = list(working.unassigned)
-        repaired = repair_ops[repair_name](working, repair_pool, instance, config, rng)
-        repaired.normalize(instance)
-        repaired_ev = evaluate(repaired, instance, config, update_solution_schedule=False)
-
-        improved, improved_ev = _ils_local_improvement(
-            solution=repaired,
-            solution_ev=repaired_ev,
+        improved, improved_ev, vnd_stats = _vnd_local_improvement(
+            solution=cur,
+            solution_ev=cur_ev,
             instance=instance,
             config=config,
-            rng=rng,
-            max_moves=int(getattr(ils_cfg, "local_search_passes", 2)),
+            max_moves=int(getattr(vnd_cfg, "local_search_passes", 2)),
         )
+
+        vnd_total_improvements = int(vnd_stats["total_improvements"])
+        vnd_last_improving_neighborhood = vnd_stats["last_improving_neighborhood"]
+        for name, hits in dict(vnd_stats["neighborhood_hits"]).items():
+            vnd_neighborhood_hits[str(name)] = int(hits)
 
         if _deb_compare_eval(improved_ev, cur_ev, config) < 0:
             cur = improved
             cur_ev = improved_ev
-            no_improve = 0
-        else:
-            no_improve += 1
-            if best_feas is not None and no_improve >= 3:
-                cur = best_feas.clone(deep=True)
-                cur_ev = best_feas_ev  # type: ignore[assignment]
-                no_improve = 0
 
         if _deb_compare_eval(improved_ev, best_ev, config) < 0:
             best = improved.clone(deep=True)
@@ -433,90 +398,419 @@ def _solve_ils(
                 best_feas_ev = improved_ev
                 best_update_iters.append(it)
                 best_update_lex_keys.append(list(best_feas_ev.lex_key or ()))
-                success(f"ILS found a new best feasible solution at iter={it}, lex_key={best_feas_ev.lex_key}")
+                success(f"VND found a new best feasible solution at iter={it}, lex_key={best_feas_ev.lex_key}")
 
     if best_feas is not None:
         evaluate(best_feas, instance, config, update_solution_schedule=True)
-        return _attach_solver_diagnostics(
-            best_feas,
-            _build_solver_diagnostics(
-                algorithm="ils",
-                total_iters=it,
-                best_update_iters=best_update_iters,
-                best_update_lex_keys=best_update_lex_keys,
-                returned_solution_source="best_feasible",
-                initial_solution_feasible=best_ev.is_feasible,
-                returned_solution_feasible=True,
-            ),
-        )
-
-    evaluate(best, instance, config, update_solution_schedule=True)
-    return _attach_solver_diagnostics(
-        best,
-        _build_solver_diagnostics(
-            algorithm="ils",
+        diagnostics = _build_solver_diagnostics(
+            algorithm="vnd",
             total_iters=it,
             best_update_iters=best_update_iters,
             best_update_lex_keys=best_update_lex_keys,
-            returned_solution_source="best_overall",
-            initial_solution_feasible=best_ev.is_feasible,
-            returned_solution_feasible=bool(getattr(best.eval, "is_feasible", False)),
-        ),
+            returned_solution_source="best_feasible",
+            initial_solution_feasible=initial_solution_feasible,
+            returned_solution_feasible=True,
+        )
+        diagnostics.update(
+            {
+                "intensifier": "vnd",
+                "vnd_total_improvements": int(vnd_total_improvements),
+                "vnd_neighborhood_hits": {k: int(v) for k, v in vnd_neighborhood_hits.items()},
+                "vnd_last_improving_neighborhood": vnd_last_improving_neighborhood,
+            }
+        )
+        return _attach_solver_diagnostics(
+            best_feas,
+            diagnostics,
+        )
+
+    evaluate(best, instance, config, update_solution_schedule=True)
+    diagnostics = _build_solver_diagnostics(
+        algorithm="vnd",
+        total_iters=it,
+        best_update_iters=best_update_iters,
+        best_update_lex_keys=best_update_lex_keys,
+        returned_solution_source="best_overall",
+        initial_solution_feasible=initial_solution_feasible,
+        returned_solution_feasible=bool(getattr(best.eval, "is_feasible", False)),
+    )
+    diagnostics.update(
+        {
+            "intensifier": "vnd",
+            "vnd_total_improvements": int(vnd_total_improvements),
+            "vnd_neighborhood_hits": {k: int(v) for k, v in vnd_neighborhood_hits.items()},
+            "vnd_last_improving_neighborhood": vnd_last_improving_neighborhood,
+        }
+    )
+    return _attach_solver_diagnostics(
+        best,
+        diagnostics,
     )
 
-
-def _ils_local_improvement(
+def _vnd_local_improvement(
     solution: AssignmentSolution,
     solution_ev: EvalResult,
     instance: Instance,
     config: Config,
-    rng: random.Random,
     max_moves: int,
-) -> Tuple[AssignmentSolution, EvalResult]:
+) -> Tuple[AssignmentSolution, EvalResult, Dict[str, Any]]:
     work = solution.clone(deep=True)
     work_ev = solution_ev
-    remaining_moves = max(1, int(max_moves))
+    max_improvements = max(12, int(max_moves) * 12)
+    neighborhood_hits = {
+        "relocate_1": 0,
+        "swap_1_1": 0,
+        "segment_relocate_2": 0,
+        "segment_relocate_3": 0,
+    }
+    last_improving_neighborhood: Optional[str] = None
+    total_improvements = 0
 
-    for _ in range(remaining_moves):
-        improved = False
-        task_ids = list(work.all_assigned_tasks())
-        rng.shuffle(task_ids)
+    while total_improvements < max_improvements:
+        move_applied = False
 
-        for tid in task_ids:
-            loc = _find_task_location(work, int(tid))
-            if loc is None:
-                continue
+        relocate = _vnd_try_relocate_1(work, work_ev, instance, config)
+        if relocate is not None:
+            work, work_ev = relocate
+            neighborhood_hits["relocate_1"] += 1
+            last_improving_neighborhood = "relocate_1"
+            total_improvements += 1
+            move_applied = True
+            continue
 
-            from_aid, _ = loc
-            partial = work.clone(deep=True)
-            partial.remove_task(from_aid, int(tid), to_unassigned=False)
-            partial.normalize(instance)
+        swap = _vnd_try_swap_1_1(work, work_ev, instance, config)
+        if swap is not None:
+            work, work_ev = swap
+            neighborhood_hits["swap_1_1"] += 1
+            last_improving_neighborhood = "swap_1_1"
+            total_improvements += 1
+            move_applied = True
+            continue
 
-            best_neighbor: Optional[AssignmentSolution] = None
-            best_neighbor_ev: Optional[EvalResult] = None
+        seg2 = _vnd_try_segment_relocate(work, work_ev, instance, config, segment_len=2)
+        if seg2 is not None:
+            work, work_ev = seg2
+            neighborhood_hits["segment_relocate_2"] += 1
+            last_improving_neighborhood = "segment_relocate_2"
+            total_improvements += 1
+            move_applied = True
+            continue
 
-            for aid, pos in _iter_all_insertions(partial, int(tid), instance):
-                trial = partial.clone(deep=True)
-                trial.add_task(int(aid), int(tid), position=int(pos))
-                trial.normalize(instance)
-                trial_ev = evaluate(trial, instance, config, update_solution_schedule=False)
+        seg3 = _vnd_try_segment_relocate(work, work_ev, instance, config, segment_len=3)
+        if seg3 is not None:
+            work, work_ev = seg3
+            neighborhood_hits["segment_relocate_3"] += 1
+            last_improving_neighborhood = "segment_relocate_3"
+            total_improvements += 1
+            move_applied = True
+            continue
 
-                if _deb_compare_eval(trial_ev, work_ev, config) >= 0:
-                    continue
-                if best_neighbor_ev is None or _deb_compare_eval(trial_ev, best_neighbor_ev, config) < 0:
-                    best_neighbor = trial
-                    best_neighbor_ev = trial_ev
-
-            if best_neighbor is not None and best_neighbor_ev is not None:
-                work = best_neighbor
-                work_ev = best_neighbor_ev
-                improved = True
-                break
-
-        if not improved:
+        if not move_applied:
             break
 
-    return work, work_ev
+    stats = {
+        "total_improvements": int(total_improvements),
+        "neighborhood_hits": neighborhood_hits,
+        "last_improving_neighborhood": last_improving_neighborhood,
+    }
+    return work, work_ev, stats
+
+
+def _vnd_try_relocate_1(
+    solution: AssignmentSolution,
+    solution_ev: EvalResult,
+    instance: Instance,
+    config: Config,
+) -> Optional[Tuple[AssignmentSolution, EvalResult]]:
+    for from_aid, from_pos, tid in _ordered_task_locations(solution, instance):
+        partial = _clone_for_local_edit(solution)
+        partial.remove_task(int(from_aid), int(tid), to_unassigned=False)
+        partial.normalize(instance)
+
+        insertions = _iter_all_insertions(partial, int(tid), instance)
+        insertions.sort(
+            key=lambda item: _relocate_insertion_sort_key(
+                item[0],
+                item[1],
+                from_aid=int(from_aid),
+                from_pos=int(from_pos),
+                partial=partial,
+            )
+        )
+
+        for aid, pos in insertions:
+            if int(aid) == int(from_aid) and int(pos) == int(from_pos):
+                continue
+
+            trial = _clone_for_local_edit(partial)
+            trial.add_task(int(aid), int(tid), position=int(pos))
+            trial_ev = _evaluate_local_trial(trial, instance, config)
+            if _deb_compare_eval(trial_ev, solution_ev, config) < 0:
+                return trial, trial_ev
+
+    return None
+
+
+def _vnd_try_swap_1_1(
+    solution: AssignmentSolution,
+    solution_ev: EvalResult,
+    instance: Instance,
+    config: Config,
+) -> Optional[Tuple[AssignmentSolution, EvalResult]]:
+    assigned_count = sum(len(route) for route in solution.routes.values())
+    max_trials = _clamp_int(max(24, assigned_count * 2), 24, 96)
+    trial_count = 0
+    best_neighbor: Optional[AssignmentSolution] = None
+    best_neighbor_ev: Optional[EvalResult] = None
+    seen_pairs = set()
+
+    for aid1, pos1, tid1 in _ordered_task_locations(solution, instance):
+        for aid2, pos2 in _enumerate_swap_candidates(solution, int(aid1), int(pos1)):
+            pair_key = _swap_pair_key(int(aid1), int(pos1), int(aid2), int(pos2))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
+            tid2 = int(solution.routes[int(aid2)][int(pos2)])
+            if int(tid1) == int(tid2):
+                continue
+
+            if int(aid1) != int(aid2):
+                if not _agent_can_do_task(instance, int(aid1), int(tid2)):
+                    continue
+                if not _agent_can_do_task(instance, int(aid2), int(tid1)):
+                    continue
+                if not _agent_can_reach_task_within_tw(instance, int(aid1), int(tid2)):
+                    continue
+                if not _agent_can_reach_task_within_tw(instance, int(aid2), int(tid1)):
+                    continue
+
+            trial = _clone_for_local_edit(solution)
+            if int(aid1) == int(aid2):
+                route = trial.routes[int(aid1)]
+                route[int(pos1)], route[int(pos2)] = route[int(pos2)], route[int(pos1)]
+            else:
+                route1 = trial.routes[int(aid1)]
+                route2 = trial.routes[int(aid2)]
+                route1[int(pos1)], route2[int(pos2)] = route2[int(pos2)], route1[int(pos1)]
+
+            trial_ev = _evaluate_local_trial(trial, instance, config)
+            trial_count += 1
+            if _deb_compare_eval(trial_ev, solution_ev, config) >= 0:
+                if trial_count >= max_trials:
+                    return (best_neighbor, best_neighbor_ev) if best_neighbor is not None and best_neighbor_ev is not None else None
+                continue
+
+            if best_neighbor_ev is None or _deb_compare_eval(trial_ev, best_neighbor_ev, config) < 0:
+                best_neighbor = trial
+                best_neighbor_ev = trial_ev
+
+            if trial_count >= max_trials:
+                return (best_neighbor, best_neighbor_ev) if best_neighbor is not None and best_neighbor_ev is not None else None
+
+    if best_neighbor is None or best_neighbor_ev is None:
+        return None
+    return best_neighbor, best_neighbor_ev
+
+
+def _vnd_try_segment_relocate(
+    solution: AssignmentSolution,
+    solution_ev: EvalResult,
+    instance: Instance,
+    config: Config,
+    segment_len: int,
+) -> Optional[Tuple[AssignmentSolution, EvalResult]]:
+    if int(segment_len) <= 0:
+        return None
+
+    max_trials = 32 if int(segment_len) == 2 else 24
+    max_positions_per_segment = 6 if int(segment_len) == 2 else 5
+    trial_count = 0
+    best_neighbor: Optional[AssignmentSolution] = None
+    best_neighbor_ev: Optional[EvalResult] = None
+
+    routes = sorted(solution.routes.items(), key=lambda item: (-len(item[1]), int(item[0])))
+    for aid, route in routes:
+        if len(route) <= int(segment_len):
+            continue
+
+        starts = list(range(len(route) - int(segment_len) + 1))
+        starts.sort(
+            key=lambda start: (
+                sum(float(getattr(instance.task_by_id(int(route[start + offset])), "priority", 0.0)) for offset in range(int(segment_len))),
+                start,
+            )
+        )
+
+        for start in starts:
+            segment = _extract_route_segment(route, int(start), int(segment_len))
+            if not segment:
+                continue
+
+            reduced_route = list(route[:start]) + list(route[start + int(segment_len):])
+            positions = [
+                int(pos)
+                for pos in _enumerate_segment_positions(instance, int(aid), reduced_route, segment)
+                if int(pos) != int(start)
+            ]
+            positions.sort(key=lambda pos: (-abs(int(pos) - int(start)), int(pos)))
+
+            for pos in positions[:max_positions_per_segment]:
+                new_route = _insert_route_segment(reduced_route, segment, int(pos))
+                if new_route == list(route):
+                    continue
+
+                trial = _clone_for_local_edit(solution)
+                trial.routes[int(aid)] = new_route
+                trial_ev = _evaluate_local_trial(trial, instance, config)
+                trial_count += 1
+
+                if _deb_compare_eval(trial_ev, solution_ev, config) < 0:
+                    if best_neighbor_ev is None or _deb_compare_eval(trial_ev, best_neighbor_ev, config) < 0:
+                        best_neighbor = trial
+                        best_neighbor_ev = trial_ev
+
+                if trial_count >= max_trials:
+                    if best_neighbor is None or best_neighbor_ev is None:
+                        return None
+                    return best_neighbor, best_neighbor_ev
+
+    if best_neighbor is None or best_neighbor_ev is None:
+        return None
+    return best_neighbor, best_neighbor_ev
+
+
+def _evaluate_local_trial(
+    trial: AssignmentSolution,
+    instance: Instance,
+    config: Config,
+) -> EvalResult:
+    trial.normalize(instance)
+    return evaluate(trial, instance, config, update_solution_schedule=False)
+
+
+def _ordered_task_locations(
+    solution: AssignmentSolution,
+    instance: Instance,
+) -> List[Tuple[int, int, int]]:
+    ordered: List[Tuple[int, int, int]] = []
+    routes = sorted(solution.routes.items(), key=lambda item: (-len(item[1]), int(item[0])))
+    for aid, route in routes:
+        positions = list(range(len(route)))
+        positions.sort(
+            key=lambda pos: (
+                float(getattr(instance.task_by_id(int(route[pos])), "priority", 0.0)),
+                float(instance.task_by_id(int(route[pos])).tw_end) - float(instance.task_by_id(int(route[pos])).tw_start),
+                pos,
+            )
+        )
+        for pos in positions:
+            ordered.append((int(aid), int(pos), int(route[pos])))
+    return ordered
+
+
+def _relocate_insertion_sort_key(
+    aid: int,
+    pos: int,
+    *,
+    from_aid: int,
+    from_pos: int,
+    partial: AssignmentSolution,
+) -> Tuple[int, int, int, int, int]:
+    route_len = len(partial.routes.get(int(aid), []))
+    if int(aid) == int(from_aid):
+        return (0, abs(int(pos) - int(from_pos)), route_len, int(aid), int(pos))
+    return (1, route_len, abs(route_len - int(from_pos)), int(aid), int(pos))
+
+
+def _extract_route_segment(route: List[int], start: int, segment_len: int) -> List[int]:
+    if int(start) < 0 or int(segment_len) <= 0 or int(start) + int(segment_len) > len(route):
+        return []
+    return list(route[int(start): int(start) + int(segment_len)])
+
+
+def _insert_route_segment(route: List[int], segment: List[int], pos: int) -> List[int]:
+    insert_pos = _clamp_int(int(pos), 0, len(route))
+    return list(route[:insert_pos]) + list(segment) + list(route[insert_pos:])
+
+
+def _enumerate_swap_candidates(
+    solution: AssignmentSolution,
+    aid: int,
+    pos: int,
+    *,
+    same_route_limit: int = 6,
+    other_agent_limit: int = 3,
+    per_other_route_limit: int = 4,
+) -> List[Tuple[int, int]]:
+    out: List[Tuple[int, int]] = []
+    route = solution.routes.get(int(aid), [])
+
+    picked_same = 0
+    for delta in range(1, len(route)):
+        left = int(pos) - delta
+        right = int(pos) + delta
+        if left >= 0:
+            out.append((int(aid), int(left)))
+            picked_same += 1
+            if picked_same >= int(same_route_limit):
+                break
+        if right < len(route):
+            out.append((int(aid), int(right)))
+            picked_same += 1
+            if picked_same >= int(same_route_limit):
+                break
+
+    ratio = float(pos) / max(1, len(route) - 1) if route else 0.0
+    other_agents = [int(other_aid) for other_aid, other_route in solution.routes.items() if int(other_aid) != int(aid) and other_route]
+    other_agents.sort(key=lambda other_aid: (-len(solution.routes.get(int(other_aid), [])), int(other_aid)))
+
+    used_agents = 0
+    for other_aid in other_agents:
+        if used_agents >= int(other_agent_limit):
+            break
+
+        other_route = solution.routes.get(int(other_aid), [])
+        if not other_route:
+            continue
+
+        target = int(round(ratio * max(0, len(other_route) - 1)))
+        positions = list(range(len(other_route)))
+        positions.sort(key=lambda other_pos: (abs(int(other_pos) - target), int(other_pos)))
+
+        used_positions = 0
+        for other_pos in positions:
+            out.append((int(other_aid), int(other_pos)))
+            used_positions += 1
+            if used_positions >= int(per_other_route_limit):
+                break
+
+        used_agents += 1
+
+    return out
+
+
+def _enumerate_segment_positions(
+    instance: Instance,
+    aid: int,
+    route: List[int],
+    segment: List[int],
+) -> List[int]:
+    if not segment:
+        return []
+    if not route:
+        return [0]
+
+    earliest, latest, ok = _route_timewindow_bounds(instance, int(aid), list(route))
+    if ok:
+        return _prune_positions_by_timewindow(instance, int(aid), list(route), int(segment[0]), earliest, latest)
+    return list(range(len(route) + 1))
+
+
+def _swap_pair_key(aid1: int, pos1: int, aid2: int, pos2: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    lhs = (int(aid1), int(pos1))
+    rhs = (int(aid2), int(pos2))
+    return (lhs, rhs) if lhs <= rhs else (rhs, lhs)
 
 
 def _find_task_location(sol: AssignmentSolution, tid: int) -> Optional[Tuple[int, int]]:

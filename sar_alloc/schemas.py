@@ -17,20 +17,12 @@ OBJECTIVE_LAYER_SCHEMA = """{
 
 
 NEXT_ACTION_SCHEMA = """{
-  "action_type": "choose_init_method|choose_solver|modify_solver_params|stop",
+  "action_type": "build_initial_solution|improve_objective|intensify_search|diversify_search|stop",
   "action_payload": {},
-  "// choose_init_method payload": {"init_method": "insert|sweep"},
-  "// choose_solver payload": {
-    "solver_alg": "alns|ils",
-    "solver_params": {
-      "alns": "destroy_frac 0.02~0.40, reaction_factor 0.05~0.40, acceptance greedy|threshold|sa, accept_level 0.00~1.00",
-      "ils": "perturb_frac 0.02~0.30, local_search_passes 1~8, perturb_operator random_remove|worst_remove|segment_remove, repair_operator greedy_insert|regret2_insert"
-    }
-  },
-  "// modify_solver_params payload": {
-    "solver_alg": "optional alns|ils",
-    "solver_params": {"note": "adjust current solver; omit solver_alg to keep current"}
-  },
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// improve_objective payload": {"mode_strength": "light|medium|strong"},
+  "// intensify_search payload": {"mode_strength": "light|medium|strong"},
+  "// diversify_search payload": {"mode_strength": "light|medium|strong"},
   "// stop payload": {},
   "budget_request": {
     "time_limit_sec": "optional positive number",
@@ -47,9 +39,16 @@ HYPERPARAMETER_TUNING_SCHEMA = NEXT_ACTION_SCHEMA
 
 
 SCHEMA_CONSTRAINTS = {
-    "toolchain": {
+    "next_action": {
+        "action_type": [
+            "build_initial_solution",
+            "improve_objective",
+            "intensify_search",
+            "diversify_search",
+            "stop",
+        ],
         "init_method": ["insert", "sweep"],
-        "solver_alg": ["alns", "ils"],
+        "mode_strength": ["light", "medium", "strong"],
     },
     "alns_params": {
         "destroy_frac": (0.02, 0.40),
@@ -57,10 +56,7 @@ SCHEMA_CONSTRAINTS = {
         "acceptance": ["greedy", "threshold", "sa"],
         "accept_level": (0.0, 1.0),
     },
-    "ils_params": {
-        "perturb_frac": (0.02, 0.30),
+    "vnd_params": {
         "local_search_passes": (1, 8),
-        "perturb_operator": ["random_remove", "worst_remove", "segment_remove"],
-        "repair_operator": ["greedy_insert", "regret2_insert"],
     },
 }

@@ -56,11 +56,8 @@ class ALNSConfig:
 
 
 @dataclass(slots=True)
-class ILSConfig:
-    perturb_frac: float = 0.10
+class VNDConfig:
     local_search_passes: int = 2
-    perturb_operator: Literal["random_remove", "worst_remove", "segment_remove"] = "worst_remove"
-    repair_operator: Literal["greedy_insert", "regret2_insert"] = "regret2_insert"
 
 
 @dataclass(slots=True)
@@ -73,8 +70,8 @@ class InitConstructConfig:
 
 @dataclass(slots=True)
 class SolverConfig:
-    algorithm: Literal["ils", "alns"] = "alns"
-    ils: ILSConfig = field(default_factory=ILSConfig)
+    algorithm: Literal["vnd", "alns"] = "alns"
+    vnd: VNDConfig = field(default_factory=VNDConfig)
     alns: ALNSConfig = field(default_factory=ALNSConfig)
 
 

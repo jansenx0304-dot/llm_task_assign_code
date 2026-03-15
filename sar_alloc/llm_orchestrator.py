@@ -37,6 +37,12 @@ DEFAULT_MAX_NO_IMPROVE = 3
 DEFAULT_MAX_AGENT_STEPS = 6
 DEFAULT_SOLVER_MAX_ITERS = 60
 DEFAULT_SOLVER_TIME_SEC = 1.0
+DEFAULT_MODE_STRENGTH = "medium"
+MEANINGFUL_MIN_TIME_SEC = 0.25
+MEANINGFUL_MIN_ITERS = 10
+INTENSIFY_STALL_THRESHOLD = 2
+STRONG_MIN_TIME_SEC = DEFAULT_SOLVER_TIME_SEC
+STRONG_MIN_ITERS = DEFAULT_SOLVER_MAX_ITERS
 
 
 class LLMClientProtocol:
@@ -77,14 +83,19 @@ class BudgetState:
     def can_run_solver(self) -> bool:
         return not self.exhausted()
 
-    def clamp_request(self, budget_request: Dict[str, Any]) -> Tuple[Budget, Dict[str, Any]]:
+    def clamp_request(
+        self,
+        budget_request: Dict[str, Any],
+        default_request: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Budget, Dict[str, Any]]:
         request = _sanitize_budget_request(budget_request)
+        defaults = _sanitize_budget_request(default_request or {})
         allocated: Dict[str, Any] = {}
 
         for key in ("time_limit_sec", "max_iters"):
             requested = request.get(key)
             remaining = self.remaining.get(key)
-            default_value = self._default_for_key(key, remaining)
+            default_value = defaults.get(key, self._default_for_key(key, remaining))
 
             if requested is None:
                 value = default_value
@@ -219,6 +230,14 @@ class AgentState:
         current = self._summary_snapshot(self.current_solution_summary_dict)
         best = self._summary_snapshot(self.best_solution_summary_dict)
         is_current_best = bool(current and best and current == best)
+        last_action = None
+        if self.history:
+            last_record = self.history[-1]
+            last_action = {
+                "action_type": last_record.action_type,
+                "mode_strength": _extract_mode_strength(last_record.action_payload),
+                "improved_best": last_record.improved_best,
+            }
         return json.dumps(
             {
                 "current": current,
@@ -226,9 +245,8 @@ class AgentState:
                 "is_current_best": is_current_best,
                 "search": {
                     "init_method": self.current_init_method,
-                    "solver_alg": self.current_solver_alg,
-                    "solver_params": self.current_solver_params,
                     "consecutive_no_improve": self.consecutive_no_improve,
+                    "last_action": last_action,
                 },
             },
             ensure_ascii=True,
@@ -421,7 +439,7 @@ def _stage_decide_next_action(
     text_block("Next Action Output", raw, icon="📤")
 
     parsed = _parse_json_obj(raw, default={})
-    return _normalize_action(parsed, allowed_actions, state)
+    return _normalize_action(parsed, allowed_actions, state, budget_state)
 
 
 def _execute_action(
@@ -460,7 +478,7 @@ def _execute_action(
     if action_type == "stop":
         stop = True
         result_summary = "LLM chose stop."
-    elif action_type == "choose_init_method":
+    elif action_type == "build_initial_solution":
         init_method = _sanitize_init_method(payload.get("init_method"))
         try:
             new_solution = _safe_build_initial_solution(
@@ -470,15 +488,23 @@ def _execute_action(
                 rng_seed=rng_seed + step_id,
             )
             state.current_init_method = init_method
+            state.current_solver_alg = None
+            state.current_solver_params = {}
             result_summary = f"Built initial solution with init_method={init_method}."
         except Exception as exc:
             warning(f"Init action failed ({exc}); switching to stop.")
             stop = True
             result_summary = f"Init action failed and agent stopped: {exc}"
-    elif action_type in ("choose_solver", "modify_solver_params"):
-        solver_alg = _sanitize_solver_alg(payload.get("solver_alg", state.current_solver_alg or "alns"))
-        solver_params = _sanitize_solver_params(payload.get("solver_params", {}))
-        solver_alg = _ensure_supported_solver_alg(solver_alg)
+    elif action_type in ("improve_objective", "intensify_search", "diversify_search"):
+        execution_plan = map_action_to_execution_plan(
+            action_type=action_type,
+            action_payload=payload,
+            state=state,
+        )
+        solver_alg = _ensure_supported_solver_alg(execution_plan["solver_alg"])
+        solver_params = _sanitize_solver_params(execution_plan.get("solver_params", {}))
+        default_budget_request = _sanitize_budget_request(execution_plan.get("default_budget_request", {}))
+        mode_strength = _sanitize_mode_strength(payload.get("mode_strength"))
 
         init_solution = previous_current
         if init_solution is None and previous_best is not None:
@@ -496,7 +522,10 @@ def _execute_action(
         cfg.solver.algorithm = solver_alg
         apply_result = apply_solver_params(cfg, solver_alg, solver_params)
 
-        slice_budget, budget_allocated = budget_state.clamp_request(budget_request)
+        slice_budget, budget_allocated = budget_state.clamp_request(
+            budget_request,
+            default_request=default_budget_request,
+        )
         budget_state.consume_solver_slice(slice_budget)
 
         try:
@@ -535,8 +564,10 @@ def _execute_action(
         state.current_solver_params = dict(apply_result.get("applied", solver_params))
         if not stop:
             result_summary = (
-                f"Ran solver={solver_alg} with params="
-                f"{json.dumps(state.current_solver_params, ensure_ascii=True)}."
+                f"Executed high-level action={action_type} with mode_strength={mode_strength} "
+                f"via solver={solver_alg} with params="
+                f"{json.dumps(state.current_solver_params, ensure_ascii=True)} and budget="
+                f"{json.dumps(budget_allocated, ensure_ascii=True)}."
             )
     else:
         stop = True
@@ -620,20 +651,25 @@ def _condense_solver_diagnostics(diagnostics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
-    actions = ["choose_init_method", "choose_solver", "stop"]
     if not budget_state.can_run_solver():
-        return ["choose_init_method", "stop"] if state.current_solution is None else ["stop"]
-    if state.current_solution is not None:
-        actions.insert(2, "modify_solver_params")
-    return actions
+        return ["build_initial_solution", "stop"] if state.current_solution is None else ["stop"]
+    if state.current_solution is None:
+        return ["build_initial_solution", "stop"]
+    return ["improve_objective", "intensify_search", "diversify_search", "stop"]
 
 
 def _normalize_action(
     parsed: Dict[str, Any],
     allowed_actions: List[str],
     state: AgentState,
+    budget_state: BudgetState,
 ) -> Dict[str, Any]:
-    fallback_action = "choose_solver" if "choose_solver" in allowed_actions else "stop"
+    if state.current_solution is None and "build_initial_solution" in allowed_actions:
+        fallback_action = "build_initial_solution"
+    elif "improve_objective" in allowed_actions:
+        fallback_action = "improve_objective"
+    else:
+        fallback_action = "stop"
 
     if not isinstance(parsed, dict):
         parsed = {}
@@ -648,19 +684,13 @@ def _normalize_action(
     if not isinstance(payload, dict):
         payload = {}
 
-    if action_type == "choose_init_method":
+    if action_type == "build_initial_solution":
         normalized_payload = {
             "init_method": _sanitize_init_method(payload.get("init_method")),
         }
-    elif action_type == "choose_solver":
+    elif action_type in ("improve_objective", "intensify_search", "diversify_search"):
         normalized_payload = {
-            "solver_alg": _sanitize_solver_alg(payload.get("solver_alg", state.current_solver_alg or "alns")),
-            "solver_params": _sanitize_solver_params(payload.get("solver_params", {})),
-        }
-    elif action_type == "modify_solver_params":
-        normalized_payload = {
-            "solver_alg": _sanitize_solver_alg(payload.get("solver_alg", state.current_solver_alg or "alns")),
-            "solver_params": _sanitize_solver_params(payload.get("solver_params", {})),
+            "mode_strength": _sanitize_mode_strength(payload.get("mode_strength")),
         }
     else:
         normalized_payload = {}
@@ -669,13 +699,210 @@ def _normalize_action(
     expected_effect = str(parsed.get("expected_effect", ""))
     budget_request = _sanitize_budget_request(parsed.get("budget_request", {}))
 
-    return {
+    normalized = {
         "action_type": action_type,
         "action_payload": normalized_payload,
         "budget_request": budget_request,
         "rationale": rationale,
         "expected_effect": expected_effect,
     }
+    return enforce_action_guardrails(normalized, allowed_actions, state, budget_state)
+
+
+def map_action_to_execution_plan(
+    action_type: str,
+    action_payload: Dict[str, Any],
+    state: AgentState,
+) -> Dict[str, Any]:
+    mode_strength = _sanitize_mode_strength(action_payload.get("mode_strength"))
+    _ = state  # current presets are static, but mapping remains orchestrator-local
+
+    plans = {
+        "improve_objective": {
+            "light": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.08,
+                    "reaction_factor": 0.18,
+                    "acceptance": "sa",
+                    "accept_level": 0.18,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 0.50,
+                    "max_iters": 35,
+                },
+            },
+            "medium": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.12,
+                    "reaction_factor": 0.20,
+                    "acceptance": "sa",
+                    "accept_level": 0.30,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": DEFAULT_SOLVER_TIME_SEC,
+                    "max_iters": DEFAULT_SOLVER_MAX_ITERS,
+                },
+            },
+            "strong": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.18,
+                    "reaction_factor": 0.24,
+                    "acceptance": "sa",
+                    "accept_level": 0.45,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 1.50,
+                    "max_iters": 90,
+                },
+            },
+        },
+        "intensify_search": {
+            "light": {
+                "solver_alg": "vnd",
+                "solver_params": {
+                    "local_search_passes": 2,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 0.50,
+                    "max_iters": 40,
+                },
+            },
+            "medium": {
+                "solver_alg": "vnd",
+                "solver_params": {
+                    "local_search_passes": 4,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": DEFAULT_SOLVER_TIME_SEC,
+                    "max_iters": 80,
+                },
+            },
+            "strong": {
+                "solver_alg": "vnd",
+                "solver_params": {
+                    "local_search_passes": 6,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 1.25,
+                    "max_iters": 120,
+                },
+            },
+        },
+        "diversify_search": {
+            "light": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.18,
+                    "reaction_factor": 0.20,
+                    "acceptance": "sa",
+                    "accept_level": 0.45,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 0.50,
+                    "max_iters": 30,
+                },
+            },
+            "medium": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.24,
+                    "reaction_factor": 0.20,
+                    "acceptance": "sa",
+                    "accept_level": 0.60,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 0.75,
+                    "max_iters": 40,
+                },
+            },
+            "strong": {
+                "solver_alg": "alns",
+                "solver_params": {
+                    "destroy_frac": 0.32,
+                    "reaction_factor": 0.24,
+                    "acceptance": "sa",
+                    "accept_level": 0.80,
+                },
+                "default_budget_request": {
+                    "time_limit_sec": 1.00,
+                    "max_iters": 55,
+                },
+            },
+        },
+    }
+
+    if action_type in plans:
+        return dict(plans[action_type][mode_strength])
+    raise ValueError(f"Unsupported high-level action for execution plan: {action_type}")
+
+
+def enforce_action_guardrails(
+    action: Dict[str, Any],
+    allowed_actions: List[str],
+    state: AgentState,
+    budget_state: BudgetState,
+) -> Dict[str, Any]:
+    guarded = dict(action)
+    action_type = str(guarded.get("action_type", "")).strip()
+
+    if state.current_solution is None and "build_initial_solution" in allowed_actions and action_type != "build_initial_solution":
+        warning("No incumbent is available; forcing action_type='build_initial_solution'.")
+        guarded["action_type"] = "build_initial_solution"
+        guarded["action_payload"] = {
+            "init_method": _sanitize_init_method(
+                guarded.get("action_payload", {}).get("init_method") if isinstance(guarded.get("action_payload"), dict) else None
+            )
+        }
+        return guarded
+
+    if action_type in ("improve_objective", "intensify_search", "diversify_search"):
+        payload = guarded.get("action_payload", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        payload["mode_strength"] = _sanitize_mode_strength(payload.get("mode_strength"))
+        guarded["action_payload"] = payload
+
+        if payload["mode_strength"] == "strong" and _budget_too_small_for_strong_action(budget_state):
+            warning("Remaining budget is too small for strong mode; downgrading mode_strength to 'medium'.")
+            payload["mode_strength"] = "medium"
+
+    intensify_repeats = sum(
+        1
+        for record in state.history[-2:]
+        if record.action_type == "intensify_search" and not record.improved_best
+    )
+    if (
+        action_type == "intensify_search"
+        and state.consecutive_no_improve >= INTENSIFY_STALL_THRESHOLD
+        and intensify_repeats >= 1
+        and "diversify_search" in allowed_actions
+    ):
+        warning("Repeated unsuccessful intensification detected; downgrading to 'diversify_search'.")
+        guarded["action_type"] = "diversify_search"
+        fallback_strength = "strong"
+        if _budget_too_small_for_strong_action(budget_state):
+            fallback_strength = "medium"
+        guarded["action_payload"] = {"mode_strength": fallback_strength}
+        action_type = "diversify_search"
+
+    if action_type == "stop" and not _should_allow_stop(state, budget_state):
+        fallback_action = "build_initial_solution" if state.current_solution is None else "improve_objective"
+        if fallback_action in allowed_actions:
+            warning(f"Stop rejected by guardrails; forcing action_type='{fallback_action}'.")
+            guarded["action_type"] = fallback_action
+            if fallback_action == "build_initial_solution":
+                guarded["action_payload"] = {
+                    "init_method": _sanitize_init_method(
+                        guarded.get("action_payload", {}).get("init_method") if isinstance(guarded.get("action_payload"), dict) else None
+                    )
+                }
+            else:
+                guarded["action_payload"] = {"mode_strength": DEFAULT_MODE_STRENGTH}
+
+    return guarded
 
 
 def _safe_build_initial_solution(
@@ -715,9 +942,16 @@ def _sanitize_init_method(value: Any) -> str:
     return method
 
 
+def _sanitize_mode_strength(value: Any) -> str:
+    mode_strength = str(value or DEFAULT_MODE_STRENGTH).strip().lower()
+    if mode_strength not in ("light", "medium", "strong"):
+        return DEFAULT_MODE_STRENGTH
+    return mode_strength
+
+
 def _sanitize_solver_alg(value: Any) -> str:
     solver_alg = str(value or "alns").strip().lower()
-    if solver_alg not in ("ils", "alns"):
+    if solver_alg not in ("vnd", "alns"):
         return "alns"
     return solver_alg
 
@@ -726,6 +960,46 @@ def _sanitize_solver_params(value: Any) -> Dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     return dict(value)
+
+
+def _extract_mode_strength(payload: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    if "mode_strength" not in payload:
+        return None
+    return _sanitize_mode_strength(payload.get("mode_strength"))
+
+
+def _budget_too_small_for_meaningful_solver(budget_state: BudgetState) -> bool:
+    remaining_time = budget_state.remaining.get("time_limit_sec")
+    remaining_iters = budget_state.remaining.get("max_iters")
+
+    if remaining_time is not None and float(remaining_time) < MEANINGFUL_MIN_TIME_SEC:
+        return True
+    if remaining_iters is not None and float(remaining_iters) < MEANINGFUL_MIN_ITERS:
+        return True
+    return False
+
+
+def _budget_too_small_for_strong_action(budget_state: BudgetState) -> bool:
+    remaining_time = budget_state.remaining.get("time_limit_sec")
+    remaining_iters = budget_state.remaining.get("max_iters")
+
+    if remaining_time is not None and float(remaining_time) < STRONG_MIN_TIME_SEC:
+        return True
+    if remaining_iters is not None and float(remaining_iters) < STRONG_MIN_ITERS:
+        return True
+    return False
+
+
+def _should_allow_stop(state: AgentState, budget_state: BudgetState) -> bool:
+    if not budget_state.can_run_solver():
+        return True
+    if _budget_too_small_for_meaningful_solver(budget_state):
+        return True
+    if state.consecutive_no_improve >= DEFAULT_MAX_NO_IMPROVE:
+        return True
+    return False
 
 
 def _sanitize_budget_request(value: Any) -> Dict[str, Any]:

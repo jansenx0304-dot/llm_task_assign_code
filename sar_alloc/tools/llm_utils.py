@@ -436,10 +436,10 @@ def llm_apply_objective(
 
 def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    根据 LLM 产出的 solver 参数，更新 config.solver.ils 或 config.solver.alns。
+    根据 LLM 产出的 solver 参数，更新 config.solver.vnd 或 config.solver.alns。
 
     输入：
-    - solver_alg: "ils" 或 "alns"
+    - solver_alg: "vnd" 或 "alns"
     - params: dict，包含可调参数的增量
 
     返回：
@@ -485,12 +485,8 @@ def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, A
                 al.accept_level = val
         return {"ok": True, "solver_alg": "alns", "applied": applied, "dropped": dropped}
 
-    if solver_alg == "ils":
-        ils = config.solver.ils
-        if "perturb_frac" in params:
-            val = _clamp(params["perturb_frac"], 0.02, 0.30, "perturb_frac")
-            if val is not None:
-                ils.perturb_frac = val
+    if solver_alg == "vnd":
+        vnd = config.solver.vnd
         if "local_search_passes" in params:
             try:
                 lsp = int(params["local_search_passes"])
@@ -498,23 +494,9 @@ def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, A
                 dropped.append({"param": "local_search_passes", "reason": "not an int", "value": repr(params["local_search_passes"])})
             else:
                 lsp = max(1, min(8, lsp))
-                ils.local_search_passes = lsp
+                vnd.local_search_passes = lsp
                 applied["local_search_passes"] = lsp
-        if "perturb_operator" in params:
-            op = str(params["perturb_operator"]) if params["perturb_operator"] is not None else ""
-            if op in ("random_remove", "worst_remove", "segment_remove"):
-                ils.perturb_operator = op  # type: ignore[assignment]
-                applied["perturb_operator"] = op
-            else:
-                dropped.append({"param": "perturb_operator", "reason": "must be random_remove|worst_remove|segment_remove", "value": op})
-        if "repair_operator" in params:
-            op = str(params["repair_operator"]) if params["repair_operator"] is not None else ""
-            if op in ("greedy_insert", "regret2_insert"):
-                ils.repair_operator = op  # type: ignore[assignment]
-                applied["repair_operator"] = op
-            else:
-                dropped.append({"param": "repair_operator", "reason": "must be greedy_insert|regret2_insert", "value": op})
-        return {"ok": True, "solver_alg": "ils", "applied": applied, "dropped": dropped}
+        return {"ok": True, "solver_alg": "vnd", "applied": applied, "dropped": dropped}
 
     # 未知算法
     dropped.append({"param": "solver_alg", "reason": "unknown", "value": repr(solver_alg)})
