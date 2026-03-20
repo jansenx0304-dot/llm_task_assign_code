@@ -17,12 +17,16 @@ OBJECTIVE_LAYER_SCHEMA = """{
 
 
 NEXT_ACTION_SCHEMA = """{
-  "action_type": "build_initial_solution|improve_objective|intensify_search|diversify_search|stop",
+  "action_type": "build_initial_solution|run_alns|run_vnd|stop",
   "action_payload": {},
   "// build_initial_solution payload": {"init_method": "insert|sweep"},
-  "// improve_objective payload": {"mode_strength": "light|medium|strong"},
-  "// intensify_search payload": {"mode_strength": "light|medium|strong"},
-  "// diversify_search payload": {"mode_strength": "light|medium|strong"},
+  "// run_alns payload": {
+    "search_mode": "exploit|explore",
+    "strength": "light|medium|strong"
+  },
+  "// run_vnd payload": {
+    "strength": "light|medium|strong"
+  },
   "// stop payload": {},
   "budget_request": {
     "time_limit_sec": "optional positive number",
@@ -42,13 +46,13 @@ SCHEMA_CONSTRAINTS = {
     "next_action": {
         "action_type": [
             "build_initial_solution",
-            "improve_objective",
-            "intensify_search",
-            "diversify_search",
+            "run_alns",
+            "run_vnd",
             "stop",
         ],
         "init_method": ["insert", "sweep"],
-        "mode_strength": ["light", "medium", "strong"],
+        "search_mode": ["exploit", "explore"],
+        "strength": ["light", "medium", "strong"],
     },
     "alns_params": {
         "destroy_frac": (0.02, 0.40),

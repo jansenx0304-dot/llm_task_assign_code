@@ -37,12 +37,131 @@ DEFAULT_MAX_NO_IMPROVE = 3
 DEFAULT_MAX_AGENT_STEPS = 6
 DEFAULT_SOLVER_MAX_ITERS = 60
 DEFAULT_SOLVER_TIME_SEC = 1.0
-DEFAULT_MODE_STRENGTH = "medium"
+DEFAULT_STRENGTH = "medium"
+DEFAULT_SEARCH_MODE = "exploit"
 MEANINGFUL_MIN_TIME_SEC = 0.25
 MEANINGFUL_MIN_ITERS = 10
-INTENSIFY_STALL_THRESHOLD = 2
+VND_STALL_THRESHOLD = 2
 STRONG_MIN_TIME_SEC = DEFAULT_SOLVER_TIME_SEC
 STRONG_MIN_ITERS = DEFAULT_SOLVER_MAX_ITERS
+
+ALNS_PRESETS = {
+    "exploit": {
+        "light": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.08,
+                "reaction_factor": 0.18,
+                "acceptance": "sa",
+                "accept_level": 0.18,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 0.50,
+                "max_iters": 35,
+            },
+        },
+        "medium": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.12,
+                "reaction_factor": 0.20,
+                "acceptance": "sa",
+                "accept_level": 0.30,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 1.00,
+                "max_iters": 60,
+            },
+        },
+        "strong": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.18,
+                "reaction_factor": 0.24,
+                "acceptance": "sa",
+                "accept_level": 0.45,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 1.50,
+                "max_iters": 90,
+            },
+        },
+    },
+    "explore": {
+        "light": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.18,
+                "reaction_factor": 0.20,
+                "acceptance": "sa",
+                "accept_level": 0.45,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 0.50,
+                "max_iters": 30,
+            },
+        },
+        "medium": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.24,
+                "reaction_factor": 0.20,
+                "acceptance": "sa",
+                "accept_level": 0.60,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 0.75,
+                "max_iters": 40,
+            },
+        },
+        "strong": {
+            "solver_alg": "alns",
+            "solver_params": {
+                "destroy_frac": 0.32,
+                "reaction_factor": 0.24,
+                "acceptance": "sa",
+                "accept_level": 0.80,
+            },
+            "default_budget_request": {
+                "time_limit_sec": 1.00,
+                "max_iters": 55,
+            },
+        },
+    },
+}
+
+VND_PRESETS = {
+    "light": {
+        "solver_alg": "vnd",
+        "solver_params": {
+            "local_search_passes": 2,
+        },
+        "default_budget_request": {
+            "time_limit_sec": 0.50,
+            "max_iters": 40,
+        },
+    },
+    "medium": {
+        "solver_alg": "vnd",
+        "solver_params": {
+            "local_search_passes": 4,
+        },
+        "default_budget_request": {
+            "time_limit_sec": 1.00,
+            "max_iters": 80,
+        },
+    },
+    "strong": {
+        "solver_alg": "vnd",
+        "solver_params": {
+            "local_search_passes": 6,
+        },
+        "default_budget_request": {
+            "time_limit_sec": 1.25,
+            "max_iters": 120,
+        },
+    },
+}
 
 
 class LLMClientProtocol:
@@ -235,7 +354,10 @@ class AgentState:
             last_record = self.history[-1]
             last_action = {
                 "action_type": last_record.action_type,
-                "mode_strength": _extract_mode_strength(last_record.action_payload),
+                "action_payload": _normalize_action_payload_for_type(
+                    last_record.action_type,
+                    last_record.action_payload,
+                ),
                 "improved_best": last_record.improved_best,
             }
         return json.dumps(
@@ -495,16 +617,16 @@ def _execute_action(
             warning(f"Init action failed ({exc}); switching to stop.")
             stop = True
             result_summary = f"Init action failed and agent stopped: {exc}"
-    elif action_type in ("improve_objective", "intensify_search", "diversify_search"):
+    elif action_type in ("run_alns", "run_vnd"):
         execution_plan = map_action_to_execution_plan(
             action_type=action_type,
             action_payload=payload,
-            state=state,
         )
         solver_alg = _ensure_supported_solver_alg(execution_plan["solver_alg"])
         solver_params = _sanitize_solver_params(execution_plan.get("solver_params", {}))
         default_budget_request = _sanitize_budget_request(execution_plan.get("default_budget_request", {}))
-        mode_strength = _sanitize_mode_strength(payload.get("mode_strength"))
+        strength = _extract_strength(payload) or DEFAULT_STRENGTH
+        search_mode = _sanitize_search_mode(payload.get("search_mode")) if action_type == "run_alns" else None
 
         init_solution = previous_current
         if init_solution is None and previous_best is not None:
@@ -538,37 +660,23 @@ def _execute_action(
                 rng_seed=rng_seed + step_id,
             )
         except Exception as exc:
-            if solver_alg != "alns":
-                warning(f"Solver '{solver_alg}' failed ({exc}); retrying with 'alns'.")
-                solver_alg = "alns"
-                cfg.solver.algorithm = solver_alg
-                try:
-                    new_solution = solve_assignment(
-                        algorithm=solver_alg,
-                        instance=instance,
-                        init_solution=init_solution,
-                        config=cfg,
-                        budget=slice_budget,
-                        rng_seed=rng_seed + step_id,
-                    )
-                except Exception as retry_exc:
-                    warning(f"Fallback solver 'alns' also failed ({retry_exc}); switching to stop.")
-                    stop = True
-                    result_summary = f"Solver action failed and agent stopped: {retry_exc}"
-            else:
-                warning(f"Solver action failed ({exc}); switching to stop.")
-                stop = True
-                result_summary = f"Solver action failed and agent stopped: {exc}"
+            warning(f"Solver action failed ({exc}); switching to stop.")
+            stop = True
+            result_summary = f"Solver action failed and agent stopped: {exc}"
 
         state.current_solver_alg = solver_alg
         state.current_solver_params = dict(apply_result.get("applied", solver_params))
         if not stop:
-            result_summary = (
-                f"Executed high-level action={action_type} with mode_strength={mode_strength} "
-                f"via solver={solver_alg} with params="
-                f"{json.dumps(state.current_solver_params, ensure_ascii=True)} and budget="
-                f"{json.dumps(budget_allocated, ensure_ascii=True)}."
-            )
+            summary_payload = {
+                "action_type": action_type,
+                "strength": strength,
+                "solver": solver_alg,
+                "params": state.current_solver_params,
+                "budget": budget_allocated,
+            }
+            if search_mode is not None:
+                summary_payload["search_mode"] = search_mode
+            result_summary = f"Executed {json.dumps(summary_payload, ensure_ascii=True)}."
     else:
         stop = True
         result_summary = f"Illegal action '{action_type}' after normalization. Stopped."
@@ -655,7 +763,7 @@ def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
         return ["build_initial_solution", "stop"] if state.current_solution is None else ["stop"]
     if state.current_solution is None:
         return ["build_initial_solution", "stop"]
-    return ["improve_objective", "intensify_search", "diversify_search", "stop"]
+    return ["run_alns", "run_vnd", "stop"]
 
 
 def _normalize_action(
@@ -666,8 +774,8 @@ def _normalize_action(
 ) -> Dict[str, Any]:
     if state.current_solution is None and "build_initial_solution" in allowed_actions:
         fallback_action = "build_initial_solution"
-    elif "improve_objective" in allowed_actions:
-        fallback_action = "improve_objective"
+    elif "run_alns" in allowed_actions:
+        fallback_action = "run_alns"
     else:
         fallback_action = "stop"
 
@@ -688,9 +796,14 @@ def _normalize_action(
         normalized_payload = {
             "init_method": _sanitize_init_method(payload.get("init_method")),
         }
-    elif action_type in ("improve_objective", "intensify_search", "diversify_search"):
+    elif action_type == "run_alns":
         normalized_payload = {
-            "mode_strength": _sanitize_mode_strength(payload.get("mode_strength")),
+            "search_mode": _sanitize_search_mode(payload.get("search_mode")),
+            "strength": _sanitize_strength(payload.get("strength")),
+        }
+    elif action_type == "run_vnd":
+        normalized_payload = {
+            "strength": _sanitize_strength(payload.get("strength")),
         }
     else:
         normalized_payload = {}
@@ -712,130 +825,14 @@ def _normalize_action(
 def map_action_to_execution_plan(
     action_type: str,
     action_payload: Dict[str, Any],
-    state: AgentState,
 ) -> Dict[str, Any]:
-    mode_strength = _sanitize_mode_strength(action_payload.get("mode_strength"))
-    _ = state  # current presets are static, but mapping remains orchestrator-local
-
-    plans = {
-        "improve_objective": {
-            "light": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.08,
-                    "reaction_factor": 0.18,
-                    "acceptance": "sa",
-                    "accept_level": 0.18,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 0.50,
-                    "max_iters": 35,
-                },
-            },
-            "medium": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.12,
-                    "reaction_factor": 0.20,
-                    "acceptance": "sa",
-                    "accept_level": 0.30,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": DEFAULT_SOLVER_TIME_SEC,
-                    "max_iters": DEFAULT_SOLVER_MAX_ITERS,
-                },
-            },
-            "strong": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.18,
-                    "reaction_factor": 0.24,
-                    "acceptance": "sa",
-                    "accept_level": 0.45,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 1.50,
-                    "max_iters": 90,
-                },
-            },
-        },
-        "intensify_search": {
-            "light": {
-                "solver_alg": "vnd",
-                "solver_params": {
-                    "local_search_passes": 2,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 0.50,
-                    "max_iters": 40,
-                },
-            },
-            "medium": {
-                "solver_alg": "vnd",
-                "solver_params": {
-                    "local_search_passes": 4,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": DEFAULT_SOLVER_TIME_SEC,
-                    "max_iters": 80,
-                },
-            },
-            "strong": {
-                "solver_alg": "vnd",
-                "solver_params": {
-                    "local_search_passes": 6,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 1.25,
-                    "max_iters": 120,
-                },
-            },
-        },
-        "diversify_search": {
-            "light": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.18,
-                    "reaction_factor": 0.20,
-                    "acceptance": "sa",
-                    "accept_level": 0.45,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 0.50,
-                    "max_iters": 30,
-                },
-            },
-            "medium": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.24,
-                    "reaction_factor": 0.20,
-                    "acceptance": "sa",
-                    "accept_level": 0.60,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 0.75,
-                    "max_iters": 40,
-                },
-            },
-            "strong": {
-                "solver_alg": "alns",
-                "solver_params": {
-                    "destroy_frac": 0.32,
-                    "reaction_factor": 0.24,
-                    "acceptance": "sa",
-                    "accept_level": 0.80,
-                },
-                "default_budget_request": {
-                    "time_limit_sec": 1.00,
-                    "max_iters": 55,
-                },
-            },
-        },
-    }
-
-    if action_type in plans:
-        return dict(plans[action_type][mode_strength])
+    if action_type == "run_alns":
+        search_mode = _sanitize_search_mode(action_payload.get("search_mode"))
+        strength = _sanitize_strength(action_payload.get("strength"))
+        return dict(ALNS_PRESETS[search_mode][strength])
+    if action_type == "run_vnd":
+        strength = _sanitize_strength(action_payload.get("strength"))
+        return dict(VND_PRESETS[strength])
     raise ValueError(f"Unsupported high-level action for execution plan: {action_type}")
 
 
@@ -858,38 +855,40 @@ def enforce_action_guardrails(
         }
         return guarded
 
-    if action_type in ("improve_objective", "intensify_search", "diversify_search"):
-        payload = guarded.get("action_payload", {})
-        if not isinstance(payload, dict):
-            payload = {}
-        payload["mode_strength"] = _sanitize_mode_strength(payload.get("mode_strength"))
-        guarded["action_payload"] = payload
+    if action_type in ("run_alns", "run_vnd"):
+        guarded["action_payload"] = _normalize_action_payload_for_type(
+            action_type,
+            guarded.get("action_payload", {}),
+        )
+        payload = dict(guarded["action_payload"])
+        if payload.get("strength") == "strong" and _budget_too_small_for_strong_action(budget_state):
+            warning("Remaining budget is too small for strong actions; downgrading strength to 'medium'.")
+            payload["strength"] = "medium"
+            guarded["action_payload"] = payload
 
-        if payload["mode_strength"] == "strong" and _budget_too_small_for_strong_action(budget_state):
-            warning("Remaining budget is too small for strong mode; downgrading mode_strength to 'medium'.")
-            payload["mode_strength"] = "medium"
-
-    intensify_repeats = sum(
-        1
-        for record in state.history[-2:]
-        if record.action_type == "intensify_search" and not record.improved_best
-    )
+    recent_vnd_failures = 0
+    for record in reversed(state.history[-2:]):
+        if record.action_type != "run_vnd" or record.improved_best:
+            break
+        recent_vnd_failures += 1
     if (
-        action_type == "intensify_search"
-        and state.consecutive_no_improve >= INTENSIFY_STALL_THRESHOLD
-        and intensify_repeats >= 1
-        and "diversify_search" in allowed_actions
+        action_type == "run_vnd"
+        and state.consecutive_no_improve >= VND_STALL_THRESHOLD
+        and recent_vnd_failures >= 1
+        and "run_alns" in allowed_actions
     ):
-        warning("Repeated unsuccessful intensification detected; downgrading to 'diversify_search'.")
-        guarded["action_type"] = "diversify_search"
-        fallback_strength = "strong"
+        warning("Repeated unsuccessful VND steps detected; switching to exploratory ALNS.")
+        guarded["action_type"] = "run_alns"
+        guarded["action_payload"] = {
+            "search_mode": "explore",
+            "strength": "strong",
+        }
         if _budget_too_small_for_strong_action(budget_state):
-            fallback_strength = "medium"
-        guarded["action_payload"] = {"mode_strength": fallback_strength}
-        action_type = "diversify_search"
+            guarded["action_payload"]["strength"] = "medium"
+        action_type = "run_alns"
 
     if action_type == "stop" and not _should_allow_stop(state, budget_state):
-        fallback_action = "build_initial_solution" if state.current_solution is None else "improve_objective"
+        fallback_action = "build_initial_solution" if state.current_solution is None else "run_alns"
         if fallback_action in allowed_actions:
             warning(f"Stop rejected by guardrails; forcing action_type='{fallback_action}'.")
             guarded["action_type"] = fallback_action
@@ -900,7 +899,10 @@ def enforce_action_guardrails(
                     )
                 }
             else:
-                guarded["action_payload"] = {"mode_strength": DEFAULT_MODE_STRENGTH}
+                guarded["action_payload"] = {
+                    "search_mode": "exploit",
+                    "strength": DEFAULT_STRENGTH,
+                }
 
     return guarded
 
@@ -942,11 +944,18 @@ def _sanitize_init_method(value: Any) -> str:
     return method
 
 
-def _sanitize_mode_strength(value: Any) -> str:
-    mode_strength = str(value or DEFAULT_MODE_STRENGTH).strip().lower()
-    if mode_strength not in ("light", "medium", "strong"):
-        return DEFAULT_MODE_STRENGTH
-    return mode_strength
+def _sanitize_search_mode(value: Any) -> str:
+    search_mode = str(value or DEFAULT_SEARCH_MODE).strip().lower()
+    if search_mode not in ("exploit", "explore"):
+        return DEFAULT_SEARCH_MODE
+    return search_mode
+
+
+def _sanitize_strength(value: Any) -> str:
+    strength = str(value or DEFAULT_STRENGTH).strip().lower()
+    if strength not in ("light", "medium", "strong"):
+        return DEFAULT_STRENGTH
+    return strength
 
 
 def _sanitize_solver_alg(value: Any) -> str:
@@ -962,12 +971,31 @@ def _sanitize_solver_params(value: Any) -> Dict[str, Any]:
     return dict(value)
 
 
-def _extract_mode_strength(payload: Dict[str, Any]) -> Optional[str]:
+def _extract_strength(payload: Dict[str, Any]) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
-    if "mode_strength" not in payload:
+    if "strength" not in payload:
         return None
-    return _sanitize_mode_strength(payload.get("mode_strength"))
+    return _sanitize_strength(payload.get("strength"))
+
+
+def _normalize_action_payload_for_type(action_type: str, payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        payload = {}
+    if action_type == "build_initial_solution":
+        return {
+            "init_method": _sanitize_init_method(payload.get("init_method")),
+        }
+    if action_type == "run_alns":
+        return {
+            "search_mode": _sanitize_search_mode(payload.get("search_mode")),
+            "strength": _sanitize_strength(payload.get("strength")),
+        }
+    if action_type == "run_vnd":
+        return {
+            "strength": _sanitize_strength(payload.get("strength")),
+        }
+    return {}
 
 
 def _budget_too_small_for_meaningful_solver(budget_state: BudgetState) -> bool:

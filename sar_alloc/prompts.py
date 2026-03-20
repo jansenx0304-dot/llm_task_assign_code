@@ -82,30 +82,31 @@ Inputs:
 Rules:
 1. Objective layers are locked. Do not modify them.
 2. The current solution is the incumbent carried over from the previous outer iteration. Choose the next high-level move for improving that incumbent.
-3. You are a high-level search mode selector, not a solver or parameter tuner.
-4. Do not output solver names, operator families, or low-level numerical solver parameters.
-5. The system will map your chosen high-level action to a concrete solver algorithm, solver parameters, and a default budget slice.
+3. You are a closed-loop optimization agent choosing one high-level action for the orchestrator.
+4. The orchestrator maps each high-level action to a fixed execution template with solver family, solver parameters, and a default budget slice.
+5. Do not output any extra low-level solver parameters. Only output fields defined in the schema.
 6. Choose exactly one action from allowed actions.
 7. Use build_initial_solution only when there is no incumbent and an initial feasible solution still needs to be constructed.
-8. improve_objective is the default action for normal incumbent-centered improvement.
-9. intensify_search means a more local, conservative search around the current incumbent.
-10. diversify_search means a broader, more exploratory search around the current incumbent.
-11. For improve_objective, intensify_search, and diversify_search, you may set action_payload.mode_strength to light, medium, or strong.
-12. mode_strength semantics:
-   - light = more conservative, shorter, more local
+8. run_alns is the high-level action for large-neighborhood search.
+9. For run_alns, action_payload.search_mode=exploit means a more conservative move focused on improving near the current incumbent.
+10. For run_alns, action_payload.search_mode=explore means a more aggressive move aimed at escaping the current region and widening the search.
+11. run_vnd is the high-level action for local neighborhood descent and local refinement.
+12. stop should be chosen only when remaining budget is too small for a meaningful next step, or recent history suggests continuing has very low marginal value.
+13. action_payload.strength semantics:
+   - light = more conservative, shorter, and cheaper
    - medium = default balanced choice
-   - strong = more aggressive, deeper, larger-range search
-13. If remaining budget is limited, prefer light or medium over strong.
-14. Treat the remaining budget as a hard limit for this turn.
-15. Never request more than the remaining budget in any budget field. In particular, budget_request.time_limit_sec must be <= remaining_time_sec, budget_request.max_iters must be <= remaining_iters, and you must not assume any hidden extra budget.
-16. budget_request only adjusts the next step's budget slice. It does not control low-level solver parameters.
-17. Request budget only for the next action, and ask only for the minimum budget likely needed to test the move.
-18. Choose stop only if remaining budget is too small for a meaningful next step, or recent history suggests the marginal value of continuing is very low.
+   - strong = deeper, stronger, and more expensive
+14. If remaining budget is limited, prefer light or medium over strong.
+15. Treat the remaining budget as a hard limit for this turn.
+16. Never request more than the remaining budget in any budget field. In particular, budget_request.time_limit_sec must be <= remaining_time_sec, budget_request.max_iters must be <= remaining_iters, and you must not assume any hidden extra budget.
+17. budget_request only adjusts the next step's budget slice. It does not control low-level solver parameters.
+18. Request budget only for the next action, and ask only for the minimum budget likely needed to test the move.
 19. Include only fields needed for the chosen action.
 20. build_initial_solution uses action_payload.init_method = insert|sweep.
-21. improve_objective, intensify_search, and diversify_search use action_payload.mode_strength = light|medium|strong.
-22. stop should use an empty payload.
-23. Output JSON only and follow the schema exactly.
+21. run_alns uses action_payload.search_mode = exploit|explore and action_payload.strength = light|medium|strong.
+22. run_vnd uses action_payload.strength = light|medium|strong.
+23. stop should use an empty payload.
+24. Output JSON only and follow the schema exactly.
 
 Output schema:
 {json_schema}
