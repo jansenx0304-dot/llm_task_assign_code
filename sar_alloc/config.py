@@ -1,4 +1,3 @@
-# sar_alloc/config.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -55,11 +54,6 @@ class ALNSConfig:
 
 
 @dataclass(slots=True)
-class VNDConfig:
-    local_search_passes: int = 2
-
-
-@dataclass(slots=True)
 class InitConstructConfig:
     method: Literal["insert", "sweep"] = "insert"
     randomized: bool = True
@@ -69,8 +63,6 @@ class InitConstructConfig:
 
 @dataclass(slots=True)
 class SolverConfig:
-    algorithm: Literal["vnd", "alns"] = "alns"
-    vnd: VNDConfig = field(default_factory=VNDConfig)
     alns: ALNSConfig = field(default_factory=ALNSConfig)
 
 

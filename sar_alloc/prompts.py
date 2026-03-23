@@ -1,4 +1,3 @@
-# sar_alloc/prompts.py
 """
 Prompt templates for the LLM orchestrator.
 """
@@ -96,12 +95,12 @@ Rules:
 5. Request budget only for the next action and never exceed remaining_budget.
 6. Output only fields defined in the schema.
 7. Prefer stop only when remaining budget is too small for a meaningful step or continuing has clearly low marginal value.
-8. If no incumbent exists, prefer build_initial_solution over search refinement actions.
+8. If no incumbent exists, prefer build_initial_solution over search actions.
 
 Heuristics:
-- Continuous incumbent progress favors local or refinement moves.
-- Stagnation, repeated no-improve, or strong plateau signals favor stronger or exploratory moves.
-- Use VND for lighter local refinement; use ALNS exploit for stronger incumbent-centered search; use ALNS explore to escape a stuck region.
+- Continuous incumbent progress favors exploit-mode ALNS.
+- Stagnation, repeated flat steps, or strong plateau signals favor stronger or exploratory ALNS.
+- Use ALNS exploit for incumbent-centered search; use ALNS explore to escape a stuck region.
 
 Output:
 - Return JSON only.

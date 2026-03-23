@@ -427,17 +427,7 @@ def llm_apply_objective(
 # 将 LLM 给出的 solver 参数应用到 Config（与 apply_objective 同层次的工具函数）
 # =========================================================
 
-def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    根据 LLM 产出的 solver 参数，更新 config.solver.vnd 或 config.solver.alns。
-
-    输入：
-    - solver_alg: "vnd" 或 "alns"
-    - params: dict，包含可调参数的增量
-
-    返回：
-    - {ok, solver_alg, applied: dict, dropped: list}
-    """
+def llm_apply_solver_params(config: Config, params: Dict[str, Any]) -> Dict[str, Any]:
     applied: Dict[str, Any] = {}
     dropped: List[Dict[str, Any]] = []
 
@@ -446,7 +436,6 @@ def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, A
             x = float(v)
         except Exception:
             dropped.append({"param": name, "reason": "not a float", "value": repr(v)})
-            # 不写入，返回边界不生效，仅用于日志
             return None  # type: ignore[return-value]
         if x < lo:
             x = lo
@@ -455,50 +444,27 @@ def llm_apply_solver_params(config: Config, solver_alg: str, params: Dict[str, A
         applied[name] = x
         return x
 
-    if solver_alg == "alns":
-        al = config.solver.alns
-        if "destroy_frac" in params:
-            val = _clamp(params["destroy_frac"], 0.02, 0.40, "destroy_frac")
-            if val is not None:
-                al.destroy_frac = val
-        if "reaction_factor" in params:
-            val = _clamp(params["reaction_factor"], 0.05, 0.40, "reaction_factor")
-            if val is not None:
-                al.reaction_factor = val
-        if "acceptance" in params:
-            acc = str(params["acceptance"]) if params["acceptance"] is not None else ""
-            if acc in ("greedy", "threshold", "sa"):
-                al.acceptance = acc  # type: ignore[assignment]
-                applied["acceptance"] = acc
-            else:
-                dropped.append({"param": "acceptance", "reason": "must be greedy|threshold|sa", "value": acc})
-        if "accept_level" in params:
-            val = _clamp(params["accept_level"], 0.0, 1.0, "accept_level")
-            if val is not None:
-                al.accept_level = val
-        return {"ok": True, "solver_alg": "alns", "applied": applied, "dropped": dropped}
-
-    if solver_alg == "vnd":
-        vnd = config.solver.vnd
-        if "local_search_passes" in params:
-            try:
-                lsp = int(params["local_search_passes"])
-            except Exception:
-                dropped.append({"param": "local_search_passes", "reason": "not an int", "value": repr(params["local_search_passes"])})
-            else:
-                lsp = max(1, min(8, lsp))
-                vnd.local_search_passes = lsp
-                applied["local_search_passes"] = lsp
-        return {"ok": True, "solver_alg": "vnd", "applied": applied, "dropped": dropped}
-
-    # 未知算法
-    dropped.append({"param": "solver_alg", "reason": "unknown", "value": repr(solver_alg)})
-    return {"ok": False, "solver_alg": str(solver_alg), "applied": applied, "dropped": dropped}
-
-
-# =========================================================
-# 文本格式化（将 JSON/dict/list 转为分段纯文本供 prompt 使用）
-# =========================================================
+    al = config.solver.alns
+    if "destroy_frac" in params:
+        val = _clamp(params["destroy_frac"], 0.02, 0.40, "destroy_frac")
+        if val is not None:
+            al.destroy_frac = val
+    if "reaction_factor" in params:
+        val = _clamp(params["reaction_factor"], 0.05, 0.40, "reaction_factor")
+        if val is not None:
+            al.reaction_factor = val
+    if "acceptance" in params:
+        acc = str(params["acceptance"]) if params["acceptance"] is not None else ""
+        if acc in ("greedy", "threshold", "sa"):
+            al.acceptance = acc  # type: ignore[assignment]
+            applied["acceptance"] = acc
+        else:
+            dropped.append({"param": "acceptance", "reason": "must be greedy|threshold|sa", "value": acc})
+    if "accept_level" in params:
+        val = _clamp(params["accept_level"], 0.0, 1.0, "accept_level")
+        if val is not None:
+            al.accept_level = val
+    return {"ok": True, "applied": applied, "dropped": dropped}
 
 def format_available_metrics(spec: Dict[str, Any]) -> str:
     items = []

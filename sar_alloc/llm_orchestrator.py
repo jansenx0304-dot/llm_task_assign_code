@@ -30,7 +30,7 @@ from .tools.llm_utils import (
     format_available_metrics,
 )
 
-DEFAULT_MAX_NO_IMPROVE = 3
+DEFAULT_MAX_STAGNATION_STEPS = 3
 DEFAULT_MAX_AGENT_STEPS = 6
 DEFAULT_SOLVER_MAX_ITERS = 60
 DEFAULT_SOLVER_TIME_SEC = 1.0
@@ -38,7 +38,6 @@ DEFAULT_STRENGTH = "medium"
 DEFAULT_SEARCH_MODE = "exploit"
 MEANINGFUL_MIN_TIME_SEC = 0.25
 MEANINGFUL_MIN_ITERS = 10
-VND_STALL_THRESHOLD = 2
 STRONG_MIN_TIME_SEC = DEFAULT_SOLVER_TIME_SEC
 STRONG_MIN_ITERS = DEFAULT_SOLVER_MAX_ITERS
 CANONICAL_METRIC_KEYS = (
@@ -53,7 +52,6 @@ CANONICAL_METRIC_KEYS = (
 ALNS_PRESETS = {
     "exploit": {
         "light": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.15,
                 "reaction_factor": 0.18,
@@ -66,7 +64,6 @@ ALNS_PRESETS = {
             },
         },
         "medium": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.3,
                 "reaction_factor": 0.20,
@@ -79,7 +76,6 @@ ALNS_PRESETS = {
             },
         },
         "strong": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.5,
                 "reaction_factor": 0.3,
@@ -94,7 +90,6 @@ ALNS_PRESETS = {
     },
     "explore": {
         "light": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.18,
                 "reaction_factor": 0.20,
@@ -107,7 +102,6 @@ ALNS_PRESETS = {
             },
         },
         "medium": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.4,
                 "reaction_factor": 0.20,
@@ -120,7 +114,6 @@ ALNS_PRESETS = {
             },
         },
         "strong": {
-            "solver_alg": "alns",
             "solver_params": {
                 "destroy_frac": 0.6,
                 "reaction_factor": 0.24,
@@ -131,39 +124,6 @@ ALNS_PRESETS = {
                 "time_limit_sec": 1.00,
                 "max_iters": 55,
             },
-        },
-    },
-}
-
-VND_PRESETS = {
-    "light": {
-        "solver_alg": "vnd",
-        "solver_params": {
-            "local_search_passes": 2,
-        },
-        "default_budget_request": {
-            "time_limit_sec": 0.50,
-            "max_iters": 40,
-        },
-    },
-    "medium": {
-        "solver_alg": "vnd",
-        "solver_params": {
-            "local_search_passes": 4,
-        },
-        "default_budget_request": {
-            "time_limit_sec": 1.00,
-            "max_iters": 80,
-        },
-    },
-    "strong": {
-        "solver_alg": "vnd",
-        "solver_params": {
-            "local_search_passes": 6,
-        },
-        "default_budget_request": {
-            "time_limit_sec": 1.25,
-            "max_iters": 120,
         },
     },
 }
@@ -296,7 +256,7 @@ class StepRecord:
     budget_request: Dict[str, Any]
     budget_allocated: Dict[str, Any]
     compare_vs_incumbent: Optional[int]
-    improved_incumbent: bool
+    advanced_incumbent: bool
     lex_key_changed: bool
     stop: bool
     result_summary: str
@@ -313,10 +273,9 @@ class AgentState:
     incumbent_solution_summary_dict: Optional[Dict[str, Any]] = None
     previous_incumbent_summary_dict: Optional[Dict[str, Any]] = None
     current_init_method: Optional[str] = None
-    current_solver_alg: Optional[str] = None
-    current_solver_params: Dict[str, Any] = field(default_factory=dict)
+    current_alns_params: Dict[str, Any] = field(default_factory=dict)
     history: List[StepRecord] = field(default_factory=list)
-    consecutive_no_improve: int = 0
+    consecutive_flat_steps: int = 0
 
     def current_search_state(self) -> Dict[str, Any]:
         last_action = None
@@ -328,14 +287,13 @@ class AgentState:
                     last_record.action_type,
                     last_record.action_payload,
                 ),
-                "improved_incumbent": last_record.improved_incumbent,
+                "advanced_incumbent": last_record.advanced_incumbent,
             }
         return {
             "step_count": len(self.history),
             "incumbent_exists": self.incumbent_solution_summary_dict is not None,
             "current_init_method": self.current_init_method,
-            "current_solver_alg": self.current_solver_alg,
-            "current_solver_params": self.current_solver_params,
+            "current_alns_params": self.current_alns_params,
             "last_action": last_action,
         }
 
@@ -362,7 +320,7 @@ def run_orchestrator(
     rng_seed: int = 0,
     max_agent_steps: Optional[int] = None,
     max_solver_calls: Optional[int] = None,
-    max_no_improve: int = DEFAULT_MAX_NO_IMPROVE,
+    max_stagnation_steps: int = DEFAULT_MAX_STAGNATION_STEPS,
 ) -> AssignmentSolution:
     max_steps = _resolve_max_agent_steps(max_agent_steps=max_agent_steps)
     solver_calls = _resolve_positive_int(max_solver_calls)
@@ -377,7 +335,7 @@ def run_orchestrator(
         rng_seed=rng_seed,
         max_agent_steps=max_steps,
         max_solver_calls=solver_calls,
-        max_no_improve=max(1, int(max_no_improve)),
+        max_stagnation_steps=max(1, int(max_stagnation_steps)),
     )
 
 
@@ -390,7 +348,7 @@ def run_agent_orchestrator(
     rng_seed: int = 0,
     max_agent_steps: int = DEFAULT_MAX_AGENT_STEPS,
     max_solver_calls: Optional[int] = None,
-    max_no_improve: int = DEFAULT_MAX_NO_IMPROVE,
+    max_stagnation_steps: int = DEFAULT_MAX_STAGNATION_STEPS,
 ) -> AssignmentSolution:
     cfg = config or Config()
     total_budget = budget or Budget()
@@ -419,11 +377,10 @@ def run_agent_orchestrator(
             "step_id": step_id,
             "allowed_actions": allowed_actions,
             "budget_state": budget_state.to_prompt_dict(),
-            "solver_context": {
+            "alns_context": {
                 "init_method": state.current_init_method,
-                "solver_alg": state.current_solver_alg,
-                "solver_params": state.current_solver_params,
-                "consecutive_no_improve": state.consecutive_no_improve,
+                "alns_params": state.current_alns_params,
+                "consecutive_flat_steps": state.consecutive_flat_steps,
             },
         }
         section(f"Agent Step {step_id}", icon="🤖")
@@ -452,20 +409,20 @@ def run_agent_orchestrator(
         subsection(f"Step {step_id} Result", icon="🧠")
         kv("action", step_record.action_type, icon="🎬")
         kv("compare_vs_incumbent", step_record.compare_vs_incumbent, icon="📊")
-        kv("improved_incumbent", step_record.improved_incumbent, icon="🌟")
+        kv("advanced_incumbent", step_record.advanced_incumbent, icon="🌟")
         kv("lex_key_changed", step_record.lex_key_changed, icon="🔑")
         kv("stop", step_record.stop, icon="🛑")
         kv("result", step_record.result_summary, icon="📝")
 
-        if step_record.improved_incumbent:
-            state.consecutive_no_improve = 0
+        if step_record.advanced_incumbent:
+            state.consecutive_flat_steps = 0
         elif step_record.action_type != "stop":
-            state.consecutive_no_improve += 1
+            state.consecutive_flat_steps += 1
 
         if step_record.stop:
             break
-        if state.consecutive_no_improve >= max_no_improve:
-            stop(f"Soft stop after step {step_id}: no improvement for {state.consecutive_no_improve} steps.")
+        if state.consecutive_flat_steps >= max_stagnation_steps:
+            stop(f"Soft stop after step {step_id}: no forward movement for {state.consecutive_flat_steps} steps.")
             break
 
         step_id += 1
@@ -548,7 +505,7 @@ def _execute_action(
     budget_request = dict(action.get("budget_request", {}))
 
     compare_vs_incumbent: Optional[int] = None
-    improved_incumbent = False
+    advanced_incumbent = False
     lex_key_changed = False
     stop = False
     result_summary = "No action executed."
@@ -571,24 +528,22 @@ def _execute_action(
                 rng_seed=rng_seed + step_id,
             )
             state.current_init_method = init_method
-            state.current_solver_alg = None
-            state.current_solver_params = {}
+            state.current_alns_params = {}
             result_summary = f"Built incumbent solution with init_method={init_method}."
         except Exception as exc:
             warning(f"Init action failed ({exc}); switching to stop.")
             stop = True
             result_summary = f"Init action failed and agent stopped: {exc}"
-    elif action_type in ("run_alns", "run_vnd"):
+    elif action_type == "run_alns":
         execution_plan = map_action_to_execution_plan(
             action_type=action_type,
             action_payload=payload,
         )
-        solver_alg = _ensure_supported_solver_alg(execution_plan["solver_alg"])
         solver_params = _sanitize_solver_params(execution_plan.get("solver_params", {}))
         default_budget_request = _sanitize_budget_request(execution_plan.get("default_budget_request", {}))
         strength = _extract_strength(payload) or DEFAULT_STRENGTH
-        search_mode = _sanitize_search_mode(payload.get("search_mode")) if action_type == "run_alns" else None
-        solver_context_prefix = ""
+        search_mode = _sanitize_search_mode(payload.get("search_mode"))
+        execution_context_prefix = ""
 
         init_solution = previous_incumbent
         if init_solution is None:
@@ -600,13 +555,12 @@ def _execute_action(
                 rng_seed=rng_seed + step_id,
             )
             state.current_init_method = fallback_init_method
-            solver_context_prefix = (
+            execution_context_prefix = (
                 f"Built fallback incumbent with init_method={fallback_init_method} "
                 f"before executing solver action. "
             )
 
-        cfg.solver.algorithm = solver_alg
-        apply_result = apply_solver_params(cfg, solver_alg, solver_params)
+        apply_result = apply_solver_params(cfg, solver_params)
 
         slice_budget, budget_allocated = budget_state.clamp_request(
             budget_request,
@@ -616,7 +570,6 @@ def _execute_action(
 
         try:
             new_solution = solve_assignment(
-                algorithm=solver_alg,
                 instance=instance,
                 init_solution=init_solution,
                 config=cfg,
@@ -624,25 +577,23 @@ def _execute_action(
                 rng_seed=rng_seed + step_id,
             )
         except Exception as exc:
-            warning(f"Solver action failed ({exc}); switching to stop.")
+            warning(f"ALNS action failed ({exc}); switching to stop.")
             stop = True
-            result_summary = f"Solver action failed and agent stopped: {exc}"
+            result_summary = f"ALNS action failed and agent stopped: {exc}"
 
-        state.current_solver_alg = solver_alg
-        state.current_solver_params = dict(apply_result.get("applied", solver_params))
+        state.current_alns_params = dict(apply_result.get("applied", solver_params))
         if not stop:
             summary_payload = {
                 "action_type": action_type,
                 "strength": strength,
-                "solver": solver_alg,
-                "params": state.current_solver_params,
+                "search_framework": "alns",
+                "params": state.current_alns_params,
                 "budget": budget_allocated,
+                "search_mode": search_mode,
             }
-            if search_mode is not None:
-                summary_payload["search_mode"] = search_mode
             init_source = "incumbent" if previous_incumbent is not None else "fresh_initial_solution"
             result_summary = (
-                f"{solver_context_prefix}Executed {json.dumps(summary_payload, ensure_ascii=True)} "
+                f"{execution_context_prefix}Executed {json.dumps(summary_payload, ensure_ascii=True)} "
                 f"using {init_source} as init solution."
             )
     else:
@@ -657,16 +608,16 @@ def _execute_action(
 
         if previous_incumbent_eval is None:
             compare_vs_incumbent = -1
-            improved_incumbent = True
+            advanced_incumbent = True
         else:
             compare_vs_incumbent = compare(new_solution.eval, previous_incumbent_eval, cfg)
-            improved_incumbent = compare_vs_incumbent < 0
+            advanced_incumbent = compare_vs_incumbent < 0
             lex_key_changed = tuple(new_solution.eval.lex_key or ()) != tuple(previous_incumbent_eval.lex_key or ())
 
         if previous_incumbent_eval is None and getattr(new_solution.eval, "lex_key", None) is not None:
             lex_key_changed = True
 
-        if improved_incumbent:
+        if advanced_incumbent:
             state.previous_incumbent_summary_dict = state.incumbent_solution_summary_dict
             state.incumbent_solution = new_solution
             state.incumbent_solution_summary_dict = new_summary_dict
@@ -675,7 +626,7 @@ def _execute_action(
             f"{result_summary} feasible={bool(new_summary_dict.get('is_feasible', False))}, "
             f"lex_key={new_summary_dict.get('lex_key', [])}"
         )
-        if not improved_incumbent and previous_incumbent_eval is not None:
+        if not advanced_incumbent and previous_incumbent_eval is not None:
             result_summary = f"{result_summary}, incumbent_kept=true"
         if solver_diagnostics:
             result_summary = (
@@ -690,7 +641,7 @@ def _execute_action(
         budget_request=budget_request,
         budget_allocated=budget_allocated,
         compare_vs_incumbent=compare_vs_incumbent,
-        improved_incumbent=improved_incumbent,
+        advanced_incumbent=advanced_incumbent,
         lex_key_changed=lex_key_changed,
         stop=stop,
         result_summary=result_summary,
@@ -709,7 +660,7 @@ def _condense_solver_diagnostics(diagnostics: Dict[str, Any]) -> Dict[str, Any]:
         "update_count": diagnostics.get("best_update_count"),
         "first_update_iter": diagnostics.get("first_best_iter"),
         "last_update_iter": diagnostics.get("last_best_iter"),
-        "plateau_iters_after_last_improve": diagnostics.get("plateau_iters_after_last_improve"),
+        "plateau_iters_after_last_update": diagnostics.get("plateau_iters_after_last_update"),
         "update_iters_preview": update_iters[:8],
     }
 
@@ -719,7 +670,7 @@ def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
         return ["build_initial_solution", "stop"] if state.incumbent_solution is None else ["stop"]
     if state.incumbent_solution is None:
         return ["build_initial_solution", "stop"]
-    return ["run_alns", "run_vnd", "stop"]
+    return ["run_alns", "stop"]
 
 
 def _normalize_action(
@@ -757,10 +708,6 @@ def _normalize_action(
             "search_mode": _sanitize_search_mode(payload.get("search_mode")),
             "strength": _sanitize_strength(payload.get("strength")),
         }
-    elif action_type == "run_vnd":
-        normalized_payload = {
-            "strength": _sanitize_strength(payload.get("strength")),
-        }
     else:
         normalized_payload = {}
 
@@ -782,9 +729,6 @@ def map_action_to_execution_plan(
         search_mode = _sanitize_search_mode(action_payload.get("search_mode"))
         strength = _sanitize_strength(action_payload.get("strength"))
         return dict(ALNS_PRESETS[search_mode][strength])
-    if action_type == "run_vnd":
-        strength = _sanitize_strength(action_payload.get("strength"))
-        return dict(VND_PRESETS[strength])
     raise ValueError(f"Unsupported high-level action for execution plan: {action_type}")
 
 
@@ -807,7 +751,7 @@ def enforce_action_guardrails(
         }
         return guarded
 
-    if action_type in ("run_alns", "run_vnd"):
+    if action_type == "run_alns":
         guarded["action_payload"] = _normalize_action_payload_for_type(
             action_type,
             guarded.get("action_payload", {}),
@@ -817,27 +761,6 @@ def enforce_action_guardrails(
             warning("Remaining budget is too small for strong actions; downgrading strength to 'medium'.")
             payload["strength"] = "medium"
             guarded["action_payload"] = payload
-
-    recent_vnd_failures = 0
-    for record in reversed(state.history[-2:]):
-        if record.action_type != "run_vnd" or record.improved_incumbent:
-            break
-        recent_vnd_failures += 1
-    if (
-        action_type == "run_vnd"
-        and state.consecutive_no_improve >= VND_STALL_THRESHOLD
-        and recent_vnd_failures >= 1
-        and "run_alns" in allowed_actions
-    ):
-        warning("Repeated unsuccessful VND steps detected; switching to exploratory ALNS.")
-        guarded["action_type"] = "run_alns"
-        guarded["action_payload"] = {
-            "search_mode": "explore",
-            "strength": "strong",
-        }
-        if _budget_too_small_for_strong_action(budget_state):
-            guarded["action_payload"]["strength"] = "medium"
-        action_type = "run_alns"
 
     if action_type == "stop" and not _should_allow_stop(state, budget_state):
         fallback_action = "build_initial_solution" if state.incumbent_solution is None else "run_alns"
@@ -885,10 +808,6 @@ def _safe_build_initial_solution(
         raise
 
 
-def _ensure_supported_solver_alg(solver_alg: str) -> str:
-    return _sanitize_solver_alg(solver_alg)
-
-
 def _sanitize_init_method(value: Any) -> str:
     method = str(value or "insert").strip().lower()
     if method not in ("insert", "sweep"):
@@ -908,13 +827,6 @@ def _sanitize_strength(value: Any) -> str:
     if strength not in ("light", "medium", "strong"):
         return DEFAULT_STRENGTH
     return strength
-
-
-def _sanitize_solver_alg(value: Any) -> str:
-    solver_alg = str(value or "alns").strip().lower()
-    if solver_alg not in ("vnd", "alns"):
-        return "alns"
-    return solver_alg
 
 
 def _sanitize_solver_params(value: Any) -> Dict[str, Any]:
@@ -941,10 +853,6 @@ def _normalize_action_payload_for_type(action_type: str, payload: Any) -> Dict[s
     if action_type == "run_alns":
         return {
             "search_mode": _sanitize_search_mode(payload.get("search_mode")),
-            "strength": _sanitize_strength(payload.get("strength")),
-        }
-    if action_type == "run_vnd":
-        return {
             "strength": _sanitize_strength(payload.get("strength")),
         }
     return {}
@@ -1010,16 +918,16 @@ def _build_delta_from_prev_incumbent(
     if not current_summary or not previous_summary:
         return {
             "has_previous_incumbent": False,
-            "improved": False,
+            "advanced": False,
             "layer_deltas": [],
-            "highest_improved_layer": None,
+            "first_advanced_layer": None,
         }
 
     current_metrics = dict(current_summary.get("metrics", {}) or {})
     previous_metrics = dict(previous_summary.get("metrics", {}) or {})
     layer_deltas: List[float] = []
-    highest_improved_layer: Optional[int] = None
-    improved = False
+    first_advanced_layer: Optional[int] = None
+    advanced = False
 
     for layer in objective_layers:
         current_value = _oriented_layer_value(layer, current_metrics)
@@ -1027,9 +935,9 @@ def _build_delta_from_prev_incumbent(
         delta = current_value - previous_value
         rounded_delta = float(round(delta, 6))
         layer_deltas.append(rounded_delta)
-        if highest_improved_layer is None and rounded_delta < 0:
-            highest_improved_layer = int(layer.get("index") or len(layer_deltas))
-            improved = True
+        if first_advanced_layer is None and rounded_delta < 0:
+            first_advanced_layer = int(layer.get("index") or len(layer_deltas))
+            advanced = True
             break
         if rounded_delta > 0:
             break
@@ -1042,9 +950,9 @@ def _build_delta_from_prev_incumbent(
 
     return {
         "has_previous_incumbent": True,
-        "improved": improved,
+        "advanced": advanced,
         "layer_deltas": layer_deltas,
-        "highest_improved_layer": highest_improved_layer,
+        "first_advanced_layer": first_advanced_layer,
     }
 
 
@@ -1053,7 +961,7 @@ def _build_search_progress_summary(state: AgentState) -> Dict[str, Any]:
     last_solver_record = _find_last_solver_record(state.history)
     last_diag = _condense_solver_diagnostics(last_solver_record.solver_diagnostics) if last_solver_record else {}
     total_iters = last_diag.get("total_iters")
-    plateau_iters = last_diag.get("plateau_iters_after_last_improve")
+    plateau_iters = last_diag.get("plateau_iters_after_last_update")
 
     plateau_ratio = 0.0
     if isinstance(total_iters, (int, float)) and float(total_iters) > 0 and isinstance(plateau_iters, (int, float)):
@@ -1066,8 +974,8 @@ def _build_search_progress_summary(state: AgentState) -> Dict[str, Any]:
             "action_type": last_record.action_type,
             "action_payload": _normalize_action_payload_for_type(last_record.action_type, last_record.action_payload),
         },
-        "last_step_improved_incumbent": None if last_record is None else bool(last_record.improved_incumbent),
-        "consecutive_no_improve": int(state.consecutive_no_improve),
+        "last_step_advanced_incumbent": None if last_record is None else bool(last_record.advanced_incumbent),
+        "consecutive_flat_steps": int(state.consecutive_flat_steps),
         "recent_same_action_repeat": _count_recent_same_action_repeat(state.history),
         "best_update_count": int(last_diag.get("update_count") or 0),
         "plateau_iters": int(plateau_iters or 0),
@@ -1136,7 +1044,7 @@ def _should_allow_stop(state: AgentState, budget_state: BudgetState) -> bool:
         return True
     if _budget_too_small_for_meaningful_solver(budget_state):
         return True
-    if state.consecutive_no_improve >= DEFAULT_MAX_NO_IMPROVE:
+    if state.consecutive_flat_steps >= DEFAULT_MAX_STAGNATION_STEPS:
         return True
     return False
 

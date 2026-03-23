@@ -69,7 +69,7 @@ DEV_SETTINGS: Dict[str, Any] = {
     # Orchestrator 调参轮数
     "max_agent_steps": 10,
     "max_solver_calls": 10,
-    "max_no_improve": 3,
+    "max_stagnation_steps": 3,
 
     # 预算：两者任意设置其一或多个，solver 会满足“任一达到就停”
     "budget": {
@@ -306,7 +306,7 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
     user_goal_text = str(s.get("user_goal_text", "")).strip() or "minimize violation_total"
     max_agent_steps = s.get("max_agent_steps")
     max_solver_calls = s.get("max_solver_calls")
-    max_no_improve = int(s.get("max_no_improve", 3))
+    max_stagnation_steps = int(s.get("max_stagnation_steps", 3))
 
     section("Runner Start", icon="🚀")
     kv("instance", inst_src, icon="📦")
@@ -314,7 +314,7 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
     kv("seed", cfg.rng_seed, icon="🎲")
     kv("max_agent_steps", max_agent_steps, icon="🔁")
     kv("max_solver_calls", max_solver_calls, icon="🧮")
-    kv("max_no_improve", max_no_improve, icon="📉")
+    kv("max_stagnation_steps", max_stagnation_steps, icon="📉")
     kv(
         "budget",
         f"time_limit_sec={budget.time_limit_sec}, max_iters={budget.max_iters}",
@@ -332,7 +332,7 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
         rng_seed=cfg.rng_seed,
         max_agent_steps=max_agent_steps,
         max_solver_calls=max_solver_calls,
-        max_no_improve=max_no_improve,
+        max_stagnation_steps=max_stagnation_steps,
     )
     dt = time.time() - t0
 
