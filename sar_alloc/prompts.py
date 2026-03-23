@@ -5,6 +5,7 @@ Prompt templates for the LLM orchestrator.
 
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 
@@ -21,134 +22,95 @@ def get_objective_layer_prompt(
     json_schema: str,
 ) -> str:
     return f"""
-Given:
-- User goal (natural language): {user_goal_text}
+You are defining the locked lexicographic objective for a closed-loop optimization controller.
+
+Inputs:
+- User goal: {user_goal_text}
 - Available metrics:
 {available_metrics}
-- Objective JSON schema:
+- Output schema:
 {json_schema}
 
 Rules:
-- Keep feasibility as the first layer.
-- All other layers must reflect the user goal in priority order.
-- Each layer metric must be chosen only from the available metrics using exact names.
-- Max layers: 5.
+- Feasibility must be the first layer and use `violation_total`.
+- Use only provided metric names exactly as written.
+- Use at most 5 layers.
+- Prefer a minimal, non-redundant objective.
+- Earlier layers must strictly dominate later layers.
 
-Task:
-Create the lexicographic objective layers.
-
-Output JSON only.
+Return JSON only.
 """.strip()
 
 
 def get_next_action_prompt(
     user_goal_text: str,
-    instance_summary: str,
-    state_snapshot: str,
-    budget_state: str,
-    recent_history: str,
-    objective_layers: str,
+    objective_layers: object,
+    instance_summary: object,
+    current_search_state: object,
+    current_incumbent_metrics: object,
+    delta_from_prev_incumbent: object,
+    search_progress: object,
+    remaining_budget: object,
     allowed_actions: Iterable[str],
     json_schema: str,
 ) -> str:
-    allowed = ", ".join(str(x) for x in allowed_actions)
+    allowed = list(str(x) for x in allowed_actions)
     return f"""
-You are controlling a closed-loop optimization agent with the cycle:
-Observe -> Think -> Act -> Check -> Repeat.
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
 
-Your job for this turn is to choose exactly one high-level search action.
+Objective layers are locked. Earlier layers dominate later layers strictly.
 
 Inputs:
 - User goal:
 {user_goal_text}
 
-- Objective layers (locked, read-only):
-{objective_layers}
+- Locked objective layers:
+{_render_block(objective_layers)}
 
-- Static instance features:
-{instance_summary}
+- Instance summary:
+{_render_block(instance_summary)}
 
 - Current search state:
-{state_snapshot}
+{_render_block(current_search_state)}
+
+- Current incumbent metrics:
+{_render_block(current_incumbent_metrics)}
+
+- Delta from previous incumbent:
+{_render_block(delta_from_prev_incumbent)}
+
+- Search progress summary:
+{_render_block(search_progress)}
 
 - Remaining budget:
-{budget_state}
+{_render_block(remaining_budget)}
 
-- Recent decisions:
-{recent_history}
-
-- Allowed actions for this turn: {allowed}
+- Allowed actions:
+{_render_block(allowed)}
 
 Rules:
-1. Objective layers are locked. Do not modify them.
-2. The current solution is the incumbent carried over from the previous outer iteration. Choose the next high-level move for improving that incumbent.
-3. You are a closed-loop optimization agent choosing one high-level action for the orchestrator.
-4. The orchestrator maps each high-level action to a fixed execution template with solver family, solver parameters, and a default budget slice.
-5. Do not output any extra low-level solver parameters. Only output fields defined in the schema.
-6. Choose exactly one action from allowed actions.
-7. Use build_initial_solution only when there is no incumbent and an initial feasible solution still needs to be constructed.
-8. run_alns is the high-level action for large-neighborhood search.
-9. For run_alns, action_payload.search_mode=exploit means a more conservative move focused on improving near the current incumbent.
-10. For run_alns, action_payload.search_mode=explore means a more aggressive move aimed at escaping the current region and widening the search.
-11. run_vnd is the high-level action for local neighborhood descent and local refinement.
-12. stop should be chosen only when remaining budget is too small for a meaningful next step, or recent history suggests continuing has very low marginal value.
-13. action_payload.strength semantics:
-   - light = more conservative, shorter, and cheaper
-   - medium = default balanced choice
-   - strong = deeper, stronger, and more expensive
-14. If remaining budget is limited, prefer light or medium over strong.
-15. Treat the remaining budget as a hard limit for this turn.
-16. Never request more than the remaining budget in any budget field. In particular, budget_request.time_limit_sec must be <= remaining_time_sec, budget_request.max_iters must be <= remaining_iters, and you must not assume any hidden extra budget.
-17. budget_request only adjusts the next step's budget slice. It does not control low-level solver parameters.
-18. Request budget only for the next action, and ask only for the minimum budget likely needed to test the move.
-19. Include only fields needed for the chosen action.
-20. build_initial_solution uses action_payload.init_method = insert|sweep.
-21. run_alns uses action_payload.search_mode = exploit|explore and action_payload.strength = light|medium|strong.
-22. run_vnd uses action_payload.strength = light|medium|strong.
-23. stop should use an empty payload.
-24. Output JSON only and follow the schema exactly.
+1. Choose exactly one action from allowed_actions.
+2. Objective layers are locked; optimize under them, never rewrite them.
+3. Do not trade away a higher-priority unresolved layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed remaining_budget.
+6. Output only fields defined in the schema.
+7. Prefer stop only when remaining budget is too small for a meaningful step or continuing has clearly low marginal value.
+8. If no incumbent exists, prefer build_initial_solution over search refinement actions.
 
-Output schema:
+Heuristics:
+- Continuous incumbent progress favors local or refinement moves.
+- Stagnation, repeated no-improve, or strong plateau signals favor stronger or exploratory moves.
+- Use VND for lighter local refinement; use ALNS exploit for stronger incumbent-centered search; use ALNS explore to escape a stuck region.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
 {json_schema}
 """.strip()
 
 
-def get_toolchain_selection_prompt(
-    user_goal_text: str,
-    instance_summary: str,
-    objective_layers: str,
-    json_schema: str,
-) -> str:
-    return f"""
-Legacy prompt. Prefer the next-action prompt in the new closed-loop agent.
-
-User goal: {user_goal_text}
-Instance summary: {instance_summary}
-Objective layers: {objective_layers}
-Output schema: {json_schema}
-
-Choose a single best toolchain decision. Output JSON only.
-""".strip()
-
-
-def get_hyperparameter_tuning_prompt(
-    solver_alg: str,
-    instance_summary: str,
-    solution_summary: str,
-    json_schema: str,
-) -> str:
-    return f"""
-Legacy prompt. Prefer the next-action prompt in the new closed-loop agent.
-
-Inputs:
-- solver_alg: {solver_alg}
-- instance summary:
-{instance_summary}
-- solution summary:
-{solution_summary}
-
-Output schema:
-{json_schema}
-
-Return JSON only.
-""".strip()
+def _render_block(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, ensure_ascii=True, indent=2)

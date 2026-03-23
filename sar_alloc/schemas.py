@@ -8,11 +8,9 @@ OBJECTIVE_LAYER_SCHEMA = """{
     {
       "name": "feasibility",
       "metric": "...",
-      "direction": "min|max",
-      "rationale": "one short sentence explaining why this layer/metric/direction"
+      "direction": "min|max"
     }
-  ],
-  "overall_rationale": "short sentences summarizing how the layers reflect the user goal"
+  ]
 }"""
 
 
@@ -31,15 +29,8 @@ NEXT_ACTION_SCHEMA = """{
   "budget_request": {
     "time_limit_sec": "optional positive number",
     "max_iters": "optional positive integer"
-  },
-  "rationale": "short reason",
-  "expected_effect": "short sentence"
+  }
 }"""
-
-
-# Backward-compatible aliases for older imports.
-TOOLCHAIN_SELECTION_SCHEMA = NEXT_ACTION_SCHEMA
-HYPERPARAMETER_TUNING_SCHEMA = NEXT_ACTION_SCHEMA
 
 
 SCHEMA_CONSTRAINTS = {

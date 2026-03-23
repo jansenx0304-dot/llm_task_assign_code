@@ -52,18 +52,20 @@ def llm_solution_summary(
 
     policy = config.eval.objective_policy
     layers = [ly for ly in policy.layers if ly.metric and isinstance(ly.metric, str)]
-    if len(layers) > policy.max_layers:
-        layers = layers[: policy.max_layers]
+    max_layers = max(1, min(int(getattr(policy, "max_layers", 5)), 5))
+    if len(layers) > max_layers:
+        layers = layers[:max_layers]
 
-    # 需要暴露给 LLM 的指标集合：必含 violation_total + policy 中出现的 metrics
-    needed = {"violation_total"}
-    for ly in layers:
-        needed.add(ly.metric)
-
-    # 从 ev.metrics 裁剪（若某个 metric 不存在，则按 0.0 兜底）
     metrics_out: Dict[str, float] = {}
-    for m in needed:
-        metrics_out[m] = float(ev.metrics.get(m, 0.0))
+    for metric_name in (
+        "violation_total",
+        "missed_priority",
+        "unassigned_count",
+        "energy_total",
+        "total_distance",
+        "makespan",
+    ):
+        metrics_out[metric_name] = float(ev.metrics.get(metric_name, 0.0))
 
     # 同步把层信息也回传（英文提示用在 TOOL_SPECS 里，这里保持结构化数据即可）
     objective_layers = [
@@ -71,7 +73,6 @@ def llm_solution_summary(
             "name": ly.name,
             "metric": ly.metric,
             "direction": ly.direction,
-            "epsilon": float(ly.epsilon),
         }
         for ly in layers
     ]
@@ -79,6 +80,7 @@ def llm_solution_summary(
     return {
         "is_feasible": bool(ev.is_feasible),
         "lex_key": list(ev.lex_key) if ev.lex_key is not None else [],
+        "metrics": metrics_out,
         "objective_layers": objective_layers,
     }
 
@@ -361,6 +363,7 @@ def llm_apply_objective(
 
     # max_layers 由系统控制：忽略 objective_spec 里可能带的 max_layers
     max_layers = int(getattr(config.eval.objective_policy, "max_layers", 6))
+    max_layers = min(max_layers, 5)
     max_layers = max(1, max_layers)
 
     normalized: List[ObjectiveLayer] = []
@@ -370,12 +373,10 @@ def llm_apply_objective(
         if isinstance(item, str):
             metric = item
             direction = "min"
-            epsilon = 0.0
             name = item
         elif isinstance(item, dict):
             metric = item.get("metric", "")
             direction = item.get("direction", "min")
-            epsilon = item.get("epsilon", 0.0)
             name = item.get("name", metric or f"layer_{i}")
         else:
             dropped.append({"index": i, "reason": "layer must be str or dict", "raw": repr(item)})
@@ -389,18 +390,10 @@ def llm_apply_objective(
             dropped.append({"index": i, "reason": "direction must be 'min' or 'max'", "direction": direction})
             continue
 
-        try:
-            epsilon = float(epsilon)
-        except Exception:
-            dropped.append({"index": i, "reason": "epsilon must be float", "epsilon": epsilon})
-            continue
-        if epsilon < 0:
-            epsilon = 0.0
-
         if not isinstance(name, str) or not name.strip():
             name = metric
 
-        normalized.append(ObjectiveLayer(name=name, metric=metric, direction=direction, epsilon=epsilon))
+        normalized.append(ObjectiveLayer(name=name, metric=metric, direction=direction))
 
         # 系统侧截断
         if len(normalized) >= max_layers:
@@ -422,7 +415,7 @@ def llm_apply_objective(
         "version": 1,
         "max_layers_limit": max_layers,
         "applied_layers": [
-            {"name": ly.name, "metric": ly.metric, "direction": ly.direction, "epsilon": ly.epsilon}
+            {"name": ly.name, "metric": ly.metric, "direction": ly.direction}
             for ly in normalized
         ],
         "dropped_layers": dropped,
@@ -522,36 +515,6 @@ def format_available_metrics(spec: Dict[str, Any]) -> str:
     return "\n".join(text).strip()
 
 
-def format_objective_layers_text(layers: List[Any]) -> str:
-    lines = []
-    for i, ly in enumerate(layers, start=1):
-        try:
-            name = getattr(ly, "name", None)
-            metric = getattr(ly, "metric", None)
-            direction = getattr(ly, "direction", None)
-            epsilon = getattr(ly, "epsilon", None)
-        except Exception:
-            name = None
-            metric = None
-            direction = None
-            epsilon = None
-        if isinstance(ly, dict):
-            name = ly.get("name", name)
-            metric = ly.get("metric", metric)
-            direction = ly.get("direction", direction)
-            epsilon = ly.get("epsilon", epsilon)
-        name = str(name) if name is not None else ""
-        metric = str(metric) if metric is not None else ""
-        direction = str(direction) if direction is not None else ""
-        try:
-            eps_val = float(epsilon) if epsilon is not None else 0.0
-            eps_str = f"{eps_val:.2f}"
-        except Exception:
-            eps_str = "0.00"
-        lines.append(f"{i}. {name} | metric: {metric} | direction: {direction}")
-    return "\n".join(lines).strip()
-
-
 def format_instance_summary(summary: Dict[str, Any]) -> str:
     """
     Format instance summary (version 3) for LLM prompt.
@@ -589,6 +552,7 @@ def format_solution_summary(summary: Dict[str, Any]) -> str:
     lines.append(f"- Feasible (all constraints satisfied): {bool(summary.get('is_feasible', False))}")
     lex = summary.get("lex_key", []) or []
     layers = summary.get("objective_layers", []) or []
+    metrics = summary.get("metrics", {}) or {}
     if layers:
         lines.append("Objective layers with values:")
         for i, ly in enumerate(layers):
@@ -607,6 +571,17 @@ def format_solution_summary(summary: Dict[str, Any]) -> str:
         except Exception:
             lex_str = ", ".join(str(x) for x in lex)
         lines.append(f"- Lexicographic key (objective layers): [{lex_str}]")
+    if metrics:
+        lines.append("Metrics:")
+        for key in (
+            "violation_total",
+            "missed_priority",
+            "unassigned_count",
+            "energy_total",
+            "total_distance",
+            "makespan",
+        ):
+            lines.append(f"- {key}: {metrics.get(key, 0.0):.2f}")
 
     return "\n".join(lines).strip()
 

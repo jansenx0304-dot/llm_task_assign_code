@@ -228,7 +228,7 @@ def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
        0: 两个方案打平
        1: 方案b 优于 方案a
 
-    对比策略：仅使用字典序（按预设层级依次对比，含 epsilon 容差）。
+    对比策略：仅使用字典序（按预设层级依次对比）。
     第一层已经是 violation_total（总违规），自动实现"可行性优先"。
     """
     # 获取配置的对比策略
@@ -247,11 +247,10 @@ def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
             # 若优化方向是max（越大越好），反转差值
             diff = -diff
 
-        # 结合容错阈值（epsilon）判断：差值超出阈值才判定胜负
-        if diff < -layer.epsilon - _EPS:
+        if diff < -_EPS:
             # a的指标更优
             return -1
-        if diff > layer.epsilon + _EPS:
+        if diff > _EPS:
             # b的指标更优
             return 1
 

@@ -13,7 +13,6 @@ class ObjectiveLayer:
     name: str
     metric: str
     direction: Direction = "min"
-    epsilon: float = 0.0
 
 
 @dataclass(slots=True)
@@ -25,9 +24,9 @@ class ObjectivePolicy:
 def default_objective_policy() -> ObjectivePolicy:
     return ObjectivePolicy(
         layers=[
-            ObjectiveLayer(name="feasibility", metric="violation_total", direction="min", epsilon=0.0),
-            ObjectiveLayer(name="rescue_priority", metric="missed_priority", direction="min", epsilon=0.0),
-            ObjectiveLayer(name="efficiency", metric="energy_total", direction="min", epsilon=0.0),
+            ObjectiveLayer(name="feasibility", metric="violation_total", direction="min"),
+            ObjectiveLayer(name="rescue_priority", metric="missed_priority", direction="min"),
+            ObjectiveLayer(name="efficiency", metric="energy_total", direction="min"),
         ],
         max_layers=6,
     )
