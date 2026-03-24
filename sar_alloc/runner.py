@@ -43,12 +43,11 @@ from sar_alloc.llm_client import build_llm_client  # noqa: E402
 from sar_alloc.llm_orchestrator import run_orchestrator  # noqa: E402
 from sar_alloc.tools import instance_summary, solution_summary  # noqa: E402
 
-
 # =========================================================
 # ✅ IDE 直接改这里：开发/运行参数
 # =========================================================
 DEV_SETTINGS: Dict[str, Any] = {
-    # 目标描述（人话）
+    # 目标描述（自然语言）
     "user_goal_text": "我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。",
 
     # 例如：data/instances/demo.json
