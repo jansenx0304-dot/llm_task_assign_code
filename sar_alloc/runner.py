@@ -36,7 +36,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 # ---------------------------------------------------------
 # 业务 imports（使用绝对 import，配合上面的 sys.path 注入更稳）
 # ---------------------------------------------------------
-from sar_alloc.config import Config, Budget  # noqa: E402
+from sar_alloc.config import Config, Budget  # noqa: E40222
 from sar_alloc.console import bullets, kv, section, success  # noqa: E402
 from sar_alloc.models import Instance, Depot, Agent, Task  # noqa: E402
 from sar_alloc.llm_client import build_llm_client  # noqa: E402

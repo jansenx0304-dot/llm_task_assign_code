@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional
 
+from .operators.types import (
+    DESTROY_CANDIDATE_GENERATORS,
+    MetricWeights,
+    REPAIR_TASK_SELECTORS,
+)
+
 
 Direction = Literal["min", "max"]
 
@@ -46,11 +52,26 @@ class Budget:
 
 
 @dataclass(slots=True)
-class ALNSConfig:
-    destroy_frac: float = 0.12
-    reaction_factor: float = 0.2
+class WeightedALNSConfig:
+    destroy_generator_priors: Dict[str, float] = field(
+        default_factory=lambda: {
+            name: 1.0 for name in DESTROY_CANDIDATE_GENERATORS
+        }
+    )
+    repair_task_selector_priors: Dict[str, float] = field(
+        default_factory=lambda: {
+            name: 1.0 for name in REPAIR_TASK_SELECTORS
+        }
+    )
+    repair_position_selector: Literal["filtered_best_position"] = "filtered_best_position"
+    metric_weights: MetricWeights = field(default_factory=MetricWeights)
+    strength_ratio: float = 0.18
     acceptance: Literal["greedy", "threshold", "sa"] = "sa"
-    accept_level: float = 0.3
+    accept_level: float = 0.25
+    reaction_factor: float = 0.20
+    prior_mix_lambda: float = 0.25
+    default_time_limit_sec: float = 1.0
+    default_max_iters: int = 60
 
 
 @dataclass(slots=True)
@@ -63,7 +84,7 @@ class InitConstructConfig:
 
 @dataclass(slots=True)
 class SolverConfig:
-    alns: ALNSConfig = field(default_factory=ALNSConfig)
+    weighted_alns: WeightedALNSConfig = field(default_factory=WeightedALNSConfig)
 
 
 @dataclass(slots=True)
