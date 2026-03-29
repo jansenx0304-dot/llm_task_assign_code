@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..config import Budget, Config
-from ..console import success
+from ..console import info, success
 from ..evaluator import compare, evaluate as _evaluate_raw
 from ..models import Instance
 from ..operators import InsertPosition, WeightedALNSPolicy
@@ -126,6 +126,7 @@ def _solve_weighted_alns(
 
     best_update_iters: List[int] = []
     best_update_lex_keys: List[List[float]] = []
+    last_acceptance_decision: Optional[Dict[str, Any]] = None
 
     restore_every = _clamp_int(int(30 + 70 * (1.0 - accept_level)), 20, 120)
     infeasible_streak = 0
@@ -160,7 +161,7 @@ def _solve_weighted_alns(
         trial.normalize(instance)
         ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
 
-        accepted = _alns_accept(
+        acceptance = _alns_accept(
             cur_ev=cur_ev,
             trial_ev=ev_trial,
             config=config,
@@ -169,6 +170,14 @@ def _solve_weighted_alns(
             temperature=temperature,
             accept_level=accept_level,
         )
+        accepted = acceptance.accepted
+        last_acceptance_decision = acceptance.as_dict()
+        if iteration % 10 == 0:
+            info(
+                f"Weighted ALNS generated a trial solution at iter={iteration}, "
+                f"destroy={d_name}, repair={r_name}, accepted={bool(accepted)}, "
+                f"feasible={bool(ev_trial.is_feasible)}, lex_key={ev_trial.lex_key}"
+            )
 
         reward = 0.0
         if accepted:
@@ -183,21 +192,31 @@ def _solve_weighted_alns(
             cur_ev = evaluate(cur, instance, config, update_solution_schedule=False)
             infeasible_streak = 0 if cur_ev.is_feasible else 1
 
+        best_updated = False
+        best_feasible_updated = False
+
         if compare(ev_trial, best_ev, config) < 0:
             best = trial.clone(deep=True)
             best_ev = ev_trial
+            best_updated = True
             reward = max(reward, 5.0)
 
         if ev_trial.is_feasible and (best_feasible_ev is None or compare(ev_trial, best_feasible_ev, config) < 0):
             best_feasible = trial.clone(deep=True)
             best_feasible_ev = ev_trial
+            best_feasible_updated = True
             best_update_iters.append(iteration)
             best_update_lex_keys.append(list(best_feasible_ev.lex_key or ()))
-            success(
-                f"Weighted ALNS found a new best feasible solution at iter={iteration}, "
-                f"lex_key={best_feasible_ev.lex_key}"
-            )
             reward = max(reward, 5.0)
+
+        if best_updated:
+            message = (
+                f"Weighted ALNS found a new best solution at iter={iteration}, "
+                f"feasible={bool(best_ev.is_feasible)}, lex_key={best_ev.lex_key}"
+            )
+            if best_feasible_updated:
+                message += " (also new best feasible)"
+            success(message)
 
         d_score[d_name] += reward
         r_score[r_name] += reward
@@ -227,6 +246,7 @@ def _solve_weighted_alns(
             returned_solution_source=returned_source,
             initial_solution_feasible=initial_solution_feasible,
             returned_solution_feasible=bool(getattr(returned.eval, "is_feasible", False)),
+            last_acceptance_decision=last_acceptance_decision,
             operator_weights={
                 "destroy_candidate_generators": {
                     "adaptive": d_w,
@@ -380,7 +400,7 @@ def _repair_with_weighted_priority(
 
     The weighted metrics still decide which unassigned task to try first. The
     final insertion position is selected only after exact trial construction and
-    global evaluator comparison across all filtered positions.
+    global evaluator comparison across feasible filtered positions.
     """
     sol = partial.clone(deep=True)
     ordered_tasks = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
@@ -403,7 +423,7 @@ def _repair_with_regret2(
 
     The weighted metrics can still help prioritize which task to inspect first,
     but best1/best2 and the final chosen insertion are derived from exact trial
-    evaluation rather than from insertion feature scores.
+    evaluation of feasible candidates rather than from insertion feature scores.
     """
     sol = partial.clone(deep=True)
 
@@ -487,7 +507,7 @@ def _select_best_feasible_position_by_eval(
     instance: Instance,
     config: Config,
 ) -> Optional[InsertPosition]:
-    """Exact-feasible insertion choice restored from the older ALNS behavior.
+    """Choose the best feasible filtered insertion position by exact trial evaluation.
 
     Positions are still filtered cheaply first, but the final placement is chosen
     only by evaluating each trial solution and comparing feasible results.
@@ -649,6 +669,7 @@ def _build_solver_diagnostics(
     initial_solution_feasible: bool,
     returned_solution_feasible: bool,
     operator_weights: Dict[str, Any],
+    last_acceptance_decision: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     last_best_iter = best_update_iters[-1] if best_update_iters else None
     return {
@@ -664,8 +685,33 @@ def _build_solver_diagnostics(
         "initial_solution_feasible": bool(initial_solution_feasible),
         "returned_solution_source": returned_solution_source,
         "returned_solution_feasible": bool(returned_solution_feasible),
+        "last_acceptance_decision": dict(last_acceptance_decision or {}),
         "operator_weights": _numericize_weight_tree(operator_weights),
     }
+
+
+@dataclass(slots=True)
+class _AcceptanceDecision:
+    compare_result: int
+    accepted: bool
+    accept_mode: str
+    delta_soft: Optional[float] = None
+    temperature: Optional[float] = None
+    threshold: Optional[float] = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "compare_result": int(self.compare_result),
+            "accepted": bool(self.accepted),
+            "accept_mode": str(self.accept_mode),
+        }
+        if self.delta_soft is not None:
+            data["delta_soft"] = float(self.delta_soft)
+        if self.temperature is not None:
+            data["temperature"] = float(self.temperature)
+        if self.threshold is not None:
+            data["threshold"] = float(self.threshold)
+        return data
 
 
 def _alns_accept(
@@ -676,72 +722,87 @@ def _alns_accept(
     rng: random.Random,
     temperature: float,
     accept_level: float,
-) -> bool:
-    tol = 1e-9
-    if _deb_compare_eval(trial_ev, cur_ev, config, tol=tol) < 0:
-        return True
+) -> _AcceptanceDecision:
+    # compare(...) is the only ordering decision. Soft delta is auxiliary and is
+    # only consulted for worse moves (cmp > 0).
+    cmp = compare(trial_ev, cur_ev, config)
+    if cmp < 0:
+        return _AcceptanceDecision(compare_result=cmp, accepted=True, accept_mode=mode)
+    if cmp == 0:
+        return _AcceptanceDecision(compare_result=cmp, accepted=True, accept_mode=mode)
 
     if mode == "greedy":
-        return False
+        return _AcceptanceDecision(compare_result=cmp, accepted=False, accept_mode=mode)
 
-    if cur_ev.is_feasible and (not trial_ev.is_feasible):
-        return False
-    if (not cur_ev.is_feasible) and trial_ev.is_feasible:
-        return True
+    delta_soft = _acceptance_soft_delta(cur_ev, trial_ev, config)
+    if mode == "threshold":
+        threshold = _threshold_acceptance_limit(cur_ev, trial_ev, accept_level)
+        return _AcceptanceDecision(
+            compare_result=cmp,
+            accepted=(delta_soft <= threshold),
+            accept_mode=mode,
+            delta_soft=delta_soft,
+            threshold=threshold,
+        )
 
-    if cur_ev.is_feasible and trial_ev.is_feasible:
-        soft_cur = _soft_metric_value(cur_ev, config, fallback_metric="energy_total")
-        soft_trial = _soft_metric_value(trial_ev, config, fallback_metric="energy_total")
-        denom = max(1.0, abs(soft_cur))
-        delta_ratio = (soft_trial - soft_cur) / denom
-        if mode == "threshold":
-            return delta_ratio <= (0.01 + 0.12 * float(accept_level))
-        if mode == "sa":
-            if delta_ratio <= 0:
-                return True
-            return rng.random() < math.exp(-delta_ratio / max(1e-12, temperature))
-        return False
+    if mode == "sa":
+        delta_soft = max(delta_soft, 1e-12)
+        accepted = rng.random() < math.exp(-delta_soft / max(1e-12, temperature))
+        return _AcceptanceDecision(
+            compare_result=cmp,
+            accepted=accepted,
+            accept_mode=mode,
+            delta_soft=delta_soft,
+            temperature=float(temperature),
+        )
 
+    return _AcceptanceDecision(compare_result=cmp, accepted=False, accept_mode=mode)
+
+
+def _acceptance_soft_delta(cur_ev: EvalResult, trial_ev: EvalResult, config: Config) -> float:
+    """Auxiliary scalar for worse-move soft acceptance only."""
+    layers = list(getattr(config.eval.objective_policy, "layers", []) or [])
+    if not layers:
+        cur_value = _oriented_metric_value(cur_ev, "energy_total", "min")
+        trial_value = _oriented_metric_value(trial_ev, "energy_total", "min")
+        scale = max(1.0, abs(cur_value), abs(trial_value))
+        return max(0.0, (trial_value - cur_value) / scale)
+
+    eps = 1e-9
+    for layer in layers:
+        metric = str(layer.metric)
+        direction = str(layer.direction)
+        cur_value = _oriented_metric_value(cur_ev, metric, direction)
+        trial_value = _oriented_metric_value(trial_ev, metric, direction)
+        if abs(trial_value - cur_value) > eps:
+            scale = max(1.0, abs(cur_value), abs(trial_value))
+            return max(0.0, (trial_value - cur_value) / scale)
+
+    return 0.0
+
+
+def _oriented_metric_value(ev: EvalResult, metric: str, direction: str) -> float:
+    value = float(ev.get_metric(metric))
+    return -value if str(direction).lower() == "max" else value
+
+
+def _threshold_acceptance_limit(cur_ev: EvalResult, trial_ev: EvalResult, accept_level: float) -> float:
     cur_violation = float(cur_ev.get_metric("violation_total"))
     trial_violation = float(trial_ev.get_metric("violation_total"))
-    denom = max(1.0, abs(cur_violation))
-    delta_ratio = (trial_violation - cur_violation) / denom
-    if mode == "threshold":
-        return delta_ratio <= (0.005 + 0.06 * float(accept_level))
-    if mode == "sa":
-        if delta_ratio <= 0:
-            return True
-        return rng.random() < math.exp(-delta_ratio / max(1e-12, temperature))
-    return False
-
-
-def _deb_compare_eval(a: EvalResult, b: Optional[EvalResult], config: Config, tol: float = 1e-9) -> int:
-    if b is None:
-        return -1
-    if a.is_feasible and (not b.is_feasible):
-        return -1
-    if (not a.is_feasible) and b.is_feasible:
-        return 1
-    if a.is_feasible and b.is_feasible:
-        c = compare(a, b, config)
-        return -1 if c < 0 else (1 if c > 0 else 0)
-    va = float(a.get_metric("violation_total"))
-    vb = float(b.get_metric("violation_total"))
-    if abs(va - vb) > tol:
-        return -1 if va < vb else 1
-    c = compare(a, b, config)
-    return -1 if c < 0 else (1 if c > 0 else 0)
+    if cur_violation <= 0.0 and trial_violation <= 0.0:
+        return 0.01 + 0.12 * float(accept_level)
+    return 0.005 + 0.06 * float(accept_level)
 
 
 def _soft_metric_value(ev: EvalResult, config: Config, fallback_metric: str = "energy_total") -> float:
+    """Oriented scalar helper used by regret cost for already-feasible trials."""
     layers = list(getattr(config.eval.objective_policy, "layers", []) or [])
     metric = fallback_metric
     direction = "min"
     if len(layers) >= 2:
         metric = str(layers[1].metric)
         direction = str(layers[1].direction)
-    value = float(ev.get_metric(metric))
-    return -value if direction == "max" else value
+    return _oriented_metric_value(ev, metric, direction)
 
 
 def _roulette_select(weights: Dict[str, float], rng: random.Random) -> str:

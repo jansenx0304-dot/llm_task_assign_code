@@ -441,6 +441,7 @@ def _condense_solver_diagnostics(diagnostics: Dict[str, Any]) -> Dict[str, Any]:
         "last_update_iter": diagnostics.get("last_best_iter"),
         "plateau_iters_after_last_update": diagnostics.get("plateau_iters_after_last_update"),
         "update_iters_preview": update_iters[:8],
+        "last_acceptance_decision": dict(diagnostics.get("last_acceptance_decision", {}) or {}),
     }
 
 
