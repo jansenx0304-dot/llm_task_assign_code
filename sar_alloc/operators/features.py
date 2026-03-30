@@ -2,8 +2,9 @@ from __future__ import annotations
 
 """Unified feature computation for weighted ALNS destroy/repair decisions.
 
-All local value judgments flow through this module. Candidate generators and
-repair selectors are intentionally kept free of private scoring formulas.
+All local value judgments flow through this module. Task-level reinsertion
+features drive only task ordering, while insert-candidate features drive only
+filtered position ranking before progressive strict evaluation.
 """
 
 from dataclasses import dataclass
@@ -73,7 +74,7 @@ def compute_reinsert_task_features(
     *,
     candidate_tids: Optional[Sequence[int]] = None,
 ) -> ReinsertTaskFeatures:
-    """Compute normalized task-level reinsertion priority features."""
+    """Compute normalized task-level reinsertion priority features only."""
     return compute_reinsert_task_features_batch(
         sol=sol,
         tids=candidate_tids or [tid],
@@ -92,7 +93,7 @@ def compute_insert_candidate_features(
     *,
     candidate_positions: Optional[Sequence[InsertPosition]] = None,
 ) -> InsertCandidateFeatures:
-    """Compute normalized features for one insertion move `(aid, tid, pos)`."""
+    """Compute normalized features for ranking one insertion move `(aid, tid, pos)`."""
     key = InsertPosition(agent_id=int(aid), position=int(pos))
     return compute_insert_candidate_features_batch(
         sol=sol,
@@ -301,7 +302,8 @@ def insertion_lower_bound_filter(
         earliest, latest, feasible = route_bounds_cache[aid]
 
         # If the current route is already infeasible, the bound test is no longer
-        # trustworthy as a pruning certificate. Keep the candidate for exact scoring.
+        # trustworthy as a pruning certificate. Keep the candidate for later
+        # insert-score ranking and strict refinement.
         if not feasible:
             survivors.append(position)
             continue
@@ -375,7 +377,7 @@ def enumerate_filtered_insert_positions(
     instance: Instance,
     config: Config,
 ) -> List[InsertPosition]:
-    """Enumerate insertion positions using the fixed filtered-best-position flow."""
+    """Enumerate loosely filtered insertion positions before insert-score ranking."""
     positions = basic_insertion_feasibility_filter(sol, tid, instance, config)
     positions = insertion_lower_bound_filter(sol, tid, instance, config, candidate_positions=positions)
     positions = dominated_position_filter(sol, tid, instance, config, candidate_positions=positions)

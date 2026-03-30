@@ -1,0 +1,2976 @@
+[LOG] Writing run log to: sar_alloc\data\runs\20260330-172355-llm.log
+
+════════════════════════════════════════════════════════════════════════════════════════
+🚀 Runner Start
+════════════════════════════════════════════════════════════════════════════════════════
+📦 instance                 json:sar_alloc/data/instances/demo/seed42_T50_A6.json
+🤖 dummy_llm                False
+🎲 seed                     776753708
+🔁 max_agent_steps          10
+🧮 max_solver_calls         10
+📉 max_stagnation_steps     3
+⏱️ budget                   time_limit_sec=200.0, max_iters=10000
+🎯 goal                     我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are defining the locked lexicographic objective for a closed-loop optimization controller.
+
+Inputs:
+- User goal: 我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+- Available metrics:
+Available metrics:
+- violation_total: Total constraint violation (0 means feasible).
+- unassigned_count: Number of unassigned tasks.
+- missed_priority: Sum of priorities of unassigned tasks.
+- energy_total: Total energy used.
+- total_distance: Total travel distance.
+- makespan: Max route completion time over agents.
+- Output schema:
+{
+  "layers": [
+    {
+      "name": "feasibility",
+      "metric": "...",
+      "direction": "min|max"
+    }
+  ]
+}
+
+Rules:
+- Feasibility must be the first layer and use `violation_total`.
+- Use only provided metric names exactly as written.
+- Use at most 5 layers.
+- Prefer a minimal, non-redundant objective.
+- Earlier layers must strictly dominate later layers.
+
+Return JSON only.
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 LLM Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "layers": [
+        {
+            "name": "feasibility",
+            "metric": "violation_total",
+            "direction": "min"
+        },
+        {
+            "name": "priority_rescue",
+            "metric": "missed_priority",
+            "direction": "min"
+        },
+        {
+            "name": "task_completion",
+            "metric": "unassigned_count",
+            "direction": "min"
+        },
+        {
+            "name": "resource_efficiency",
+            "metric": "energy_total",
+            "direction": "min"
+        }
+    ]
+}
+```
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 0
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 0,
+  "allowed_actions": [
+    "build_initial_solution",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "search_state": {
+    "step_count": 0,
+    "incumbent_exists": false,
+    "current_init_method": null,
+    "current_weighted_policy": {},
+    "last_action": null
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 0,
+  "incumbent_exists": false,
+  "current_init_method": null,
+  "current_weighted_policy": {},
+  "last_action": null
+}
+
+- Current incumbent metrics:
+{
+  "exists": false,
+  "is_feasible": null,
+  "lex_key": [],
+  "metrics": {
+    "violation_total": null,
+    "missed_priority": null,
+    "unassigned_count": null,
+    "energy_total": null,
+    "total_distance": null,
+    "makespan": null
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": false,
+  "advanced": false,
+  "layer_deltas": [],
+  "first_advanced_layer": null
+}
+
+- Search progress summary:
+{
+  "last_action": null,
+  "last_step_advanced_incumbent": null,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 0,
+  "best_update_count": 0,
+  "plateau_iters": 0,
+  "plateau_ratio": 0.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 200.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Allowed actions:
+[
+  "build_initial_solution",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "build_initial_solution",
+    "action_payload": {
+        "init_method": "insert"
+    },
+    "budget_request": {
+        "time_limit_sec": 10.0,
+        "max_iters": 1000
+    }
+}
+```
+✅ Initial solution ready: method=insert, assigned=41, unassigned=9
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 0 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   build_initial_solution
+• compare_vs_incumbent     -1
+• advanced_incumbent       True
+• lex_key_changed          True
+• stop                     False
+• result                   Built incumbent solution with init_method=insert. feasible=True, lex_key=[0.0, 20.0, 9.0, 34291.5926466426]
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 1
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 1,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "search_state": {
+    "step_count": 1,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {},
+    "last_action": {
+      "action_type": "build_initial_solution",
+      "action_payload": {
+        "init_method": "insert"
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 1,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {},
+  "last_action": {
+    "action_type": "build_initial_solution",
+    "action_payload": {
+      "init_method": "insert"
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    20.0,
+    9.0,
+    34291.5926466426
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 20.0,
+    "unassigned_count": 9.0,
+    "energy_total": 34291.5926,
+    "total_distance": 31269.7355,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": false,
+  "advanced": false,
+  "layer_deltas": [],
+  "first_advanced_layer": null
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "build_initial_solution",
+    "action_payload": {
+      "init_method": "insert"
+    }
+  },
+  "last_step_advanced_incumbent": true,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 1,
+  "best_update_count": 0,
+  "plateau_iters": 0,
+  "plateau_ratio": 0.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 200.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 1.5,
+            "random_subset": 1.0,
+            "route_segment": 2.0,
+            "route_tail": 1.2,
+            "single_route": 1.8
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 3.5,
+            "regret2_order": 1.5
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.15,
+        "metric_weights": {
+            "priority": 4,
+            "tw_tightness": 2,
+            "violation_risk": 6,
+            "energy_pressure": 1,
+            "detour_cost": 2,
+            "service_burden": 1,
+            "feasibility_scarcity": 3,
+            "route_instability": 1
+        },
+        "acceptance": "sa",
+        "accept_level": 0.8,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+    },
+    "budget_request": {
+        "time_limit_sec": 30.0,
+        "max_iters": 2000
+    }
+}
+```
+✅ Weighted ALNS found a new best solution at iter=1, feasible=True, lex_key=(0.0, 11.0, 7.0, 35898.929442162735) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=2, feasible=True, lex_key=(0.0, 11.0, 7.0, 34776.79196726014) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=3, feasible=True, lex_key=(0.0, 9.0, 7.0, 35227.33132563251) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 10.0, 6.0, 36465.731501730435)
+✅ Weighted ALNS found a new best solution at iter=13, feasible=True, lex_key=(0.0, 9.0, 6.0, 35779.354177753994) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=15, feasible=True, lex_key=(0.0, 9.0, 6.0, 35509.909944445084) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=20, destroy=global_assigned, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 9.0, 6.0, 35509.909944445084)
+ℹ️ Weighted ALNS generated a trial solution at iter=30, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 9.0, 6.0, 35509.909944445084)
+ℹ️ Weighted ALNS generated a trial solution at iter=40, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 9.0, 6.0, 38175.60766452704)
+✅ Weighted ALNS found a new best solution at iter=41, feasible=True, lex_key=(0.0, 6.0, 4.0, 38106.20371690096) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=43, feasible=True, lex_key=(0.0, 4.0, 4.0, 37899.2061766208) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=50, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+✅ Weighted ALNS found a new best solution at iter=50, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=60, destroy=route_segment, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 4.0, 36558.078335745966)
+ℹ️ Weighted ALNS generated a trial solution at iter=70, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=80, destroy=random_subset, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=90, destroy=route_tail, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=100, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=110, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=120, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=130, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=140, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=150, destroy=global_assigned, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=160, destroy=single_route, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 4.0, 36558.078335745966)
+ℹ️ Weighted ALNS generated a trial solution at iter=170, destroy=route_segment, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 4.0, 36558.078335745966)
+ℹ️ Weighted ALNS generated a trial solution at iter=180, destroy=random_subset, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=190, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=200, destroy=global_assigned, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=210, destroy=global_assigned, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=220, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=230, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=240, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=250, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=260, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=270, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=280, destroy=route_tail, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=290, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=300, destroy=global_assigned, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=310, destroy=random_subset, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=320, destroy=route_tail, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 4.0, 36558.078335745966)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 1 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     -1
+• advanced_incumbent       True
+• lex_key_changed          True
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 1.5, "random_subset": 1.0, "route_segment": 2.0, "route_tail": 1.2, "single_route": 1.8}, "repair_task_selector_priors": {"weighted_priority_order": 3.5, "regret2_order": 1.5}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 4.0, "tw_tightness": 2.0, "violation_risk": 6.0, "energy_pressure": 1.0, "detour_cost": 2.0, "service_burden": 1.0, "feasibility_scarcity": 3.0, "route_instability": 1.0}, "strength_ratio": 0.15, "acceptance": "sa", "accept_level": 0.8, "reaction_factor": 0.15, "prior_mix_lambda": 0.25} and budget {"time_limit_sec": 30.0, "max_iters": 2000}. feasible=True, lex_key=[0.0, 3.0, 4.0, 34250.57764654901], solver_diag={"algorithm": "weighted_alns", "total_iters": 325, "update_count": 8, "first_update_iter": 1, "last_update_iter": 50, "plateau_iters_after_last_update": 275, "update_iters_preview": [1, 2, 3, 13, 15, 41, 43, 50], "last_acceptance_decision": {"compare_result": 1, "accepted": false, "accept_mode": "sa", "delta_soft": 0.25, "temperature": 0.0017400121922357345}}
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 2
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 2,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 30.0,
+      "max_iters": 2000.0,
+      "solver_calls": 1.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 170.0,
+      "max_iters": 8000.0,
+      "solver_calls": 9.0
+    }
+  },
+  "search_state": {
+    "step_count": 2,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.5,
+        "random_subset": 1.0,
+        "route_segment": 2.0,
+        "route_tail": 1.2,
+        "single_route": 1.8
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 3.5,
+        "regret2_order": 1.5
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 4.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.8,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    },
+    "last_action": {
+      "action_type": "run_weighted_alns",
+      "action_payload": {
+        "destroy_generator_priors": {
+          "global_assigned": 1.5,
+          "random_subset": 1.0,
+          "route_segment": 2.0,
+          "route_tail": 1.2,
+          "single_route": 1.8
+        },
+        "repair_task_selector_priors": {
+          "weighted_priority_order": 3.5,
+          "regret2_order": 1.5
+        },
+        "repair_position_selector": "filtered_best_position",
+        "metric_weights": {
+          "priority": 4.0,
+          "tw_tightness": 2.0,
+          "violation_risk": 6.0,
+          "energy_pressure": 1.0,
+          "detour_cost": 2.0,
+          "service_burden": 1.0,
+          "feasibility_scarcity": 3.0,
+          "route_instability": 1.0
+        },
+        "strength_ratio": 0.15,
+        "acceptance": "sa",
+        "accept_level": 0.8,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 2,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {
+    "destroy_generator_priors": {
+      "global_assigned": 1.5,
+      "random_subset": 1.0,
+      "route_segment": 2.0,
+      "route_tail": 1.2,
+      "single_route": 1.8
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": 3.5,
+      "regret2_order": 1.5
+    },
+    "repair_position_selector": "filtered_best_position",
+    "metric_weights": {
+      "priority": 4.0,
+      "tw_tightness": 2.0,
+      "violation_risk": 6.0,
+      "energy_pressure": 1.0,
+      "detour_cost": 2.0,
+      "service_burden": 1.0,
+      "feasibility_scarcity": 3.0,
+      "route_instability": 1.0
+    },
+    "strength_ratio": 0.15,
+    "acceptance": "sa",
+    "accept_level": 0.8,
+    "reaction_factor": 0.15,
+    "prior_mix_lambda": 0.25
+  },
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.5,
+        "random_subset": 1.0,
+        "route_segment": 2.0,
+        "route_tail": 1.2,
+        "single_route": 1.8
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 3.5,
+        "regret2_order": 1.5
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 4.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.8,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    3.0,
+    4.0,
+    34250.57764654901
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 3.0,
+    "unassigned_count": 4.0,
+    "energy_total": 34250.5776,
+    "total_distance": 30925.7364,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": true,
+  "advanced": true,
+  "layer_deltas": [
+    0.0,
+    -17.0
+  ],
+  "first_advanced_layer": 2
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.5,
+        "random_subset": 1.0,
+        "route_segment": 2.0,
+        "route_tail": 1.2,
+        "single_route": 1.8
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 3.5,
+        "regret2_order": 1.5
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 4.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.8,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  },
+  "last_step_advanced_incumbent": true,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 1,
+  "best_update_count": 8,
+  "plateau_iters": 275,
+  "plateau_ratio": 0.8462
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 170.0,
+  "remaining_iters": 8000.0,
+  "remaining_solver_calls": 9.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 1.8,
+            "random_subset": 1.0,
+            "route_segment": 2.2,
+            "route_tail": 1.5,
+            "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 4.0,
+            "regret2_order": 1.2
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.18,
+        "metric_weights": {
+            "priority": 5.0,
+            "tw_tightness": 2.5,
+            "violation_risk": 6.0,
+            "energy_pressure": 1.5,
+            "detour_cost": 2.0,
+            "service_burden": 1.0,
+            "feasibility_scarcity": 3.5,
+            "route_instability": 1.0
+        },
+        "acceptance": "sa",
+        "accept_level": 0.75,
+        "reaction_factor": 0.18,
+        "prior_mix_lambda": 0.28
+    },
+    "budget_request": {
+        "max_iters": 2000
+    }
+}
+```
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 2 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     0
+• advanced_incumbent       False
+• lex_key_changed          False
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 1.8, "random_subset": 1.0, "route_segment": 2.2, "route_tail": 1.5, "single_route": 2.0}, "repair_task_selector_priors": {"weighted_priority_order": 4.0, "regret2_order": 1.2}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 5.0, "tw_tightness": 2.5, "violation_risk": 6.0, "energy_pressure": 1.5, "detour_cost": 2.0, "service_burden": 1.0, "feasibility_scarcity": 3.5, "route_instability": 1.0}, "strength_ratio": 0.18, "acceptance": "sa", "accept_level": 0.75, "reaction_factor": 0.18, "prior_mix_lambda": 0.28} and budget {"time_limit_sec": 1.0, "max_iters": 2000}. feasible=True, lex_key=[0.0, 3.0, 4.0, 34250.57764654901], incumbent_kept=true, solver_diag={"algorithm": "weighted_alns", "total_iters": 14, "update_count": 0, "first_update_iter": null, "last_update_iter": null, "plateau_iters_after_last_update": 14, "update_iters_preview": [], "last_acceptance_decision": {"compare_result": 0, "accepted": true, "accept_mode": "sa"}}
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 3
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 3,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 31.0,
+      "max_iters": 4000.0,
+      "solver_calls": 2.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 169.0,
+      "max_iters": 6000.0,
+      "solver_calls": 8.0
+    }
+  },
+  "search_state": {
+    "step_count": 3,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.8,
+        "random_subset": 1.0,
+        "route_segment": 2.2,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.0,
+        "regret2_order": 1.2
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.5,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.75,
+      "reaction_factor": 0.18,
+      "prior_mix_lambda": 0.28
+    },
+    "last_action": {
+      "action_type": "run_weighted_alns",
+      "action_payload": {
+        "destroy_generator_priors": {
+          "global_assigned": 1.8,
+          "random_subset": 1.0,
+          "route_segment": 2.2,
+          "route_tail": 1.5,
+          "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+          "weighted_priority_order": 4.0,
+          "regret2_order": 1.2
+        },
+        "repair_position_selector": "filtered_best_position",
+        "metric_weights": {
+          "priority": 5.0,
+          "tw_tightness": 2.5,
+          "violation_risk": 6.0,
+          "energy_pressure": 1.5,
+          "detour_cost": 2.0,
+          "service_burden": 1.0,
+          "feasibility_scarcity": 3.5,
+          "route_instability": 1.0
+        },
+        "strength_ratio": 0.18,
+        "acceptance": "sa",
+        "accept_level": 0.75,
+        "reaction_factor": 0.18,
+        "prior_mix_lambda": 0.28
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 3,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {
+    "destroy_generator_priors": {
+      "global_assigned": 1.8,
+      "random_subset": 1.0,
+      "route_segment": 2.2,
+      "route_tail": 1.5,
+      "single_route": 2.0
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": 4.0,
+      "regret2_order": 1.2
+    },
+    "repair_position_selector": "filtered_best_position",
+    "metric_weights": {
+      "priority": 5.0,
+      "tw_tightness": 2.5,
+      "violation_risk": 6.0,
+      "energy_pressure": 1.5,
+      "detour_cost": 2.0,
+      "service_burden": 1.0,
+      "feasibility_scarcity": 3.5,
+      "route_instability": 1.0
+    },
+    "strength_ratio": 0.18,
+    "acceptance": "sa",
+    "accept_level": 0.75,
+    "reaction_factor": 0.18,
+    "prior_mix_lambda": 0.28
+  },
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.8,
+        "random_subset": 1.0,
+        "route_segment": 2.2,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.0,
+        "regret2_order": 1.2
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.5,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.75,
+      "reaction_factor": 0.18,
+      "prior_mix_lambda": 0.28
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    3.0,
+    4.0,
+    34250.57764654901
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 3.0,
+    "unassigned_count": 4.0,
+    "energy_total": 34250.5776,
+    "total_distance": 30925.7364,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": true,
+  "advanced": true,
+  "layer_deltas": [
+    0.0,
+    -17.0
+  ],
+  "first_advanced_layer": 2
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.8,
+        "random_subset": 1.0,
+        "route_segment": 2.2,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.0,
+        "regret2_order": 1.2
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.5,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.75,
+      "reaction_factor": 0.18,
+      "prior_mix_lambda": 0.28
+    }
+  },
+  "last_step_advanced_incumbent": false,
+  "consecutive_flat_steps": 1,
+  "recent_same_action_repeat": 2,
+  "best_update_count": 0,
+  "plateau_iters": 14,
+  "plateau_ratio": 1.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 169.0,
+  "remaining_iters": 6000.0,
+  "remaining_solver_calls": 8.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 2.0,
+            "random_subset": 1.2,
+            "route_segment": 2.5,
+            "route_tail": 1.8,
+            "single_route": 2.2
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 4.5,
+            "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.22,
+        "metric_weights": {
+            "priority": 5.0,
+            "tw_tightness": 2.5,
+            "violation_risk": 6.0,
+            "energy_pressure": 1.8,
+            "detour_cost": 2.2,
+            "service_burden": 1.0,
+            "feasibility_scarcity": 3.5,
+            "route_instability": 1.0
+        },
+        "acceptance": "sa",
+        "accept_level": 0.70,
+        "reaction_factor": 0.20,
+        "prior_mix_lambda": 0.30
+    },
+    "budget_request": {
+        "time_limit_sec": 30.0,
+        "max_iters": 2000
+    }
+}
+```
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34250.57764654901)
+ℹ️ Weighted ALNS generated a trial solution at iter=20, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34653.7615983686)
+ℹ️ Weighted ALNS generated a trial solution at iter=30, destroy=random_subset, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 5.0, 5.0, 33141.32496319275)
+ℹ️ Weighted ALNS generated a trial solution at iter=40, destroy=route_tail, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 10.0, 6.0, 34186.77930108408)
+ℹ️ Weighted ALNS generated a trial solution at iter=50, destroy=route_tail, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 4.0, 4.0, 34875.94527147844)
+ℹ️ Weighted ALNS generated a trial solution at iter=60, destroy=global_assigned, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 4.0, 4.0, 33474.40858456996)
+ℹ️ Weighted ALNS generated a trial solution at iter=70, destroy=route_tail, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 4.0, 4.0, 33474.40858456996)
+ℹ️ Weighted ALNS generated a trial solution at iter=80, destroy=route_segment, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 8.0, 5.0, 33079.28786794362)
+ℹ️ Weighted ALNS generated a trial solution at iter=90, destroy=random_subset, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 4.0, 4.0, 33474.40858456996)
+✅ Weighted ALNS found a new best solution at iter=94, feasible=True, lex_key=(0.0, 3.0, 3.0, 36436.48072192981) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=96, feasible=True, lex_key=(0.0, 3.0, 3.0, 36421.071814441915) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=98, feasible=True, lex_key=(0.0, 3.0, 3.0, 35505.81126772052) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=100, destroy=route_tail, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 3.0, 4.0, 34938.188251873915)
+ℹ️ Weighted ALNS generated a trial solution at iter=110, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 3.0, 35505.81126772052)
+ℹ️ Weighted ALNS generated a trial solution at iter=120, destroy=random_subset, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 3.0, 4.0, 34867.50358129059)
+✅ Weighted ALNS found a new best solution at iter=128, feasible=True, lex_key=(0.0, 2.0, 2.0, 38239.939221974084) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=130, destroy=random_subset, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 2.0, 38239.939221974084)
+ℹ️ Weighted ALNS generated a trial solution at iter=140, destroy=random_subset, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 2.0, 38239.939221974084)
+ℹ️ Weighted ALNS generated a trial solution at iter=150, destroy=route_segment, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 3.0, 38172.27296318426)
+ℹ️ Weighted ALNS generated a trial solution at iter=160, destroy=global_assigned, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 3.0, 3.0, 36994.53562941596)
+✅ Weighted ALNS found a new best solution at iter=162, feasible=True, lex_key=(0.0, 2.0, 2.0, 38080.235785367084) (also new best feasible)
+✅ Weighted ALNS found a new best solution at iter=167, feasible=True, lex_key=(0.0, 2.0, 2.0, 37576.137076086736) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=170, destroy=route_tail, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 5.0, 3.0, 35768.93449534617)
+ℹ️ Weighted ALNS generated a trial solution at iter=180, destroy=single_route, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 2.0, 37534.99169590842)
+✅ Weighted ALNS found a new best solution at iter=181, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048) (also new best feasible)
+ℹ️ Weighted ALNS generated a trial solution at iter=190, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=200, destroy=global_assigned, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 3.0, 2.0, 36265.25290034255)
+ℹ️ Weighted ALNS generated a trial solution at iter=210, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=220, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=230, destroy=route_segment, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 4.0, 2.0, 37427.267950070076)
+ℹ️ Weighted ALNS generated a trial solution at iter=240, destroy=single_route, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=250, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=260, destroy=global_assigned, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 2.0, 2.0, 36709.17218049867)
+ℹ️ Weighted ALNS generated a trial solution at iter=270, destroy=route_segment, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=280, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=290, destroy=single_route, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 3.0, 2.0, 36420.34421766868)
+ℹ️ Weighted ALNS generated a trial solution at iter=300, destroy=global_assigned, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 2.0, 2.0, 36709.17218049867)
+ℹ️ Weighted ALNS generated a trial solution at iter=310, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=320, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=330, destroy=global_assigned, repair=regret2_order, accepted=False, feasible=True, lex_key=(0.0, 3.0, 2.0, 36265.25290034255)
+ℹ️ Weighted ALNS generated a trial solution at iter=340, destroy=global_assigned, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 2.0, 2.0, 36709.17218049867)
+ℹ️ Weighted ALNS generated a trial solution at iter=350, destroy=random_subset, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 2.0, 1.0, 38407.64155870971)
+ℹ️ Weighted ALNS generated a trial solution at iter=360, destroy=global_assigned, repair=weighted_priority_order, accepted=False, feasible=True, lex_key=(0.0, 2.0, 2.0, 36709.17218049867)
+ℹ️ Weighted ALNS generated a trial solution at iter=370, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=380, destroy=random_subset, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 3 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     -1
+• advanced_incumbent       True
+• lex_key_changed          True
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 2.0, "random_subset": 1.2, "route_segment": 2.5, "route_tail": 1.8, "single_route": 2.2}, "repair_task_selector_priors": {"weighted_priority_order": 4.5, "regret2_order": 1.0}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 5.0, "tw_tightness": 2.5, "violation_risk": 6.0, "energy_pressure": 1.8, "detour_cost": 2.2, "service_burden": 1.0, "feasibility_scarcity": 3.5, "route_instability": 1.0}, "strength_ratio": 0.22, "acceptance": "sa", "accept_level": 0.7, "reaction_factor": 0.2, "prior_mix_lambda": 0.3} and budget {"time_limit_sec": 30.0, "max_iters": 2000}. feasible=True, lex_key=[0.0, 2.0, 1.0, 38031.3101009048], solver_diag={"algorithm": "weighted_alns", "total_iters": 386, "update_count": 7, "first_update_iter": 94, "last_update_iter": 181, "plateau_iters_after_last_update": 205, "update_iters_preview": [94, 96, 98, 128, 162, 167, 181], "last_acceptance_decision": {"compare_result": 0, "accepted": true, "accept_mode": "sa"}}
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 4
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 4,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 61.0,
+      "max_iters": 6000.0,
+      "solver_calls": 3.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 139.0,
+      "max_iters": 4000.0,
+      "solver_calls": 7.0
+    }
+  },
+  "search_state": {
+    "step_count": 4,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.0,
+        "random_subset": 1.2,
+        "route_segment": 2.5,
+        "route_tail": 1.8,
+        "single_route": 2.2
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.5,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.8,
+        "detour_cost": 2.2,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.22,
+      "acceptance": "sa",
+      "accept_level": 0.7,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.3
+    },
+    "last_action": {
+      "action_type": "run_weighted_alns",
+      "action_payload": {
+        "destroy_generator_priors": {
+          "global_assigned": 2.0,
+          "random_subset": 1.2,
+          "route_segment": 2.5,
+          "route_tail": 1.8,
+          "single_route": 2.2
+        },
+        "repair_task_selector_priors": {
+          "weighted_priority_order": 4.5,
+          "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "metric_weights": {
+          "priority": 5.0,
+          "tw_tightness": 2.5,
+          "violation_risk": 6.0,
+          "energy_pressure": 1.8,
+          "detour_cost": 2.2,
+          "service_burden": 1.0,
+          "feasibility_scarcity": 3.5,
+          "route_instability": 1.0
+        },
+        "strength_ratio": 0.22,
+        "acceptance": "sa",
+        "accept_level": 0.7,
+        "reaction_factor": 0.2,
+        "prior_mix_lambda": 0.3
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 4,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {
+    "destroy_generator_priors": {
+      "global_assigned": 2.0,
+      "random_subset": 1.2,
+      "route_segment": 2.5,
+      "route_tail": 1.8,
+      "single_route": 2.2
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": 4.5,
+      "regret2_order": 1.0
+    },
+    "repair_position_selector": "filtered_best_position",
+    "metric_weights": {
+      "priority": 5.0,
+      "tw_tightness": 2.5,
+      "violation_risk": 6.0,
+      "energy_pressure": 1.8,
+      "detour_cost": 2.2,
+      "service_burden": 1.0,
+      "feasibility_scarcity": 3.5,
+      "route_instability": 1.0
+    },
+    "strength_ratio": 0.22,
+    "acceptance": "sa",
+    "accept_level": 0.7,
+    "reaction_factor": 0.2,
+    "prior_mix_lambda": 0.3
+  },
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.0,
+        "random_subset": 1.2,
+        "route_segment": 2.5,
+        "route_tail": 1.8,
+        "single_route": 2.2
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.5,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.8,
+        "detour_cost": 2.2,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.22,
+      "acceptance": "sa",
+      "accept_level": 0.7,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.3
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    2.0,
+    1.0,
+    38031.3101009048
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 2.0,
+    "unassigned_count": 1.0,
+    "energy_total": 38031.3101,
+    "total_distance": 34571.4925,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": true,
+  "advanced": true,
+  "layer_deltas": [
+    0.0,
+    -1.0
+  ],
+  "first_advanced_layer": 2
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.0,
+        "random_subset": 1.2,
+        "route_segment": 2.5,
+        "route_tail": 1.8,
+        "single_route": 2.2
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.5,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.5,
+        "violation_risk": 6.0,
+        "energy_pressure": 1.8,
+        "detour_cost": 2.2,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 3.5,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.22,
+      "acceptance": "sa",
+      "accept_level": 0.7,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.3
+    }
+  },
+  "last_step_advanced_incumbent": true,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 3,
+  "best_update_count": 7,
+  "plateau_iters": 205,
+  "plateau_ratio": 0.5311
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 139.0,
+  "remaining_iters": 4000.0,
+  "remaining_solver_calls": 7.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 2.5,
+            "random_subset": 1.0,
+            "route_segment": 2.8,
+            "route_tail": 1.5,
+            "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 5.0,
+            "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.18,
+        "metric_weights": {
+            "priority": 5.0,
+            "tw_tightness": 2.0,
+            "violation_risk": 6.5,
+            "energy_pressure": 2.0,
+            "detour_cost": 2.0,
+            "service_burden": 1.0,
+            "feasibility_scarcity": 4.0,
+            "route_instability": 1.0
+        },
+        "acceptance": "sa",
+        "accept_level": 0.65,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+    },
+    "budget_request": {
+        "max_iters": 800
+    }
+}
+```
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=20, destroy=random_subset, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 4 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     0
+• advanced_incumbent       False
+• lex_key_changed          False
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 2.5, "random_subset": 1.0, "route_segment": 2.8, "route_tail": 1.5, "single_route": 2.0}, "repair_task_selector_priors": {"weighted_priority_order": 5.0, "regret2_order": 1.0}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 5.0, "tw_tightness": 2.0, "violation_risk": 6.5, "energy_pressure": 2.0, "detour_cost": 2.0, "service_burden": 1.0, "feasibility_scarcity": 4.0, "route_instability": 1.0}, "strength_ratio": 0.18, "acceptance": "sa", "accept_level": 0.65, "reaction_factor": 0.15, "prior_mix_lambda": 0.25} and budget {"time_limit_sec": 1.0, "max_iters": 800}. feasible=True, lex_key=[0.0, 2.0, 1.0, 38031.3101009048], incumbent_kept=true, solver_diag={"algorithm": "weighted_alns", "total_iters": 27, "update_count": 0, "first_update_iter": null, "last_update_iter": null, "plateau_iters_after_last_update": 27, "update_iters_preview": [], "last_acceptance_decision": {"compare_result": 0, "accepted": true, "accept_mode": "sa"}}
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 5
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 5,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 62.0,
+      "max_iters": 6800.0,
+      "solver_calls": 4.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 138.0,
+      "max_iters": 3200.0,
+      "solver_calls": 6.0
+    }
+  },
+  "search_state": {
+    "step_count": 5,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.5,
+        "random_subset": 1.0,
+        "route_segment": 2.8,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.65,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    },
+    "last_action": {
+      "action_type": "run_weighted_alns",
+      "action_payload": {
+        "destroy_generator_priors": {
+          "global_assigned": 2.5,
+          "random_subset": 1.0,
+          "route_segment": 2.8,
+          "route_tail": 1.5,
+          "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+          "weighted_priority_order": 5.0,
+          "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "metric_weights": {
+          "priority": 5.0,
+          "tw_tightness": 2.0,
+          "violation_risk": 6.5,
+          "energy_pressure": 2.0,
+          "detour_cost": 2.0,
+          "service_burden": 1.0,
+          "feasibility_scarcity": 4.0,
+          "route_instability": 1.0
+        },
+        "strength_ratio": 0.18,
+        "acceptance": "sa",
+        "accept_level": 0.65,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 5,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {
+    "destroy_generator_priors": {
+      "global_assigned": 2.5,
+      "random_subset": 1.0,
+      "route_segment": 2.8,
+      "route_tail": 1.5,
+      "single_route": 2.0
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": 5.0,
+      "regret2_order": 1.0
+    },
+    "repair_position_selector": "filtered_best_position",
+    "metric_weights": {
+      "priority": 5.0,
+      "tw_tightness": 2.0,
+      "violation_risk": 6.5,
+      "energy_pressure": 2.0,
+      "detour_cost": 2.0,
+      "service_burden": 1.0,
+      "feasibility_scarcity": 4.0,
+      "route_instability": 1.0
+    },
+    "strength_ratio": 0.18,
+    "acceptance": "sa",
+    "accept_level": 0.65,
+    "reaction_factor": 0.15,
+    "prior_mix_lambda": 0.25
+  },
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.5,
+        "random_subset": 1.0,
+        "route_segment": 2.8,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.65,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    2.0,
+    1.0,
+    38031.3101009048
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 2.0,
+    "unassigned_count": 1.0,
+    "energy_total": 38031.3101,
+    "total_distance": 34571.4925,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": true,
+  "advanced": true,
+  "layer_deltas": [
+    0.0,
+    -1.0
+  ],
+  "first_advanced_layer": 2
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 2.5,
+        "random_subset": 1.0,
+        "route_segment": 2.8,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.65,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  },
+  "last_step_advanced_incumbent": false,
+  "consecutive_flat_steps": 1,
+  "recent_same_action_repeat": 4,
+  "best_update_count": 0,
+  "plateau_iters": 27,
+  "plateau_ratio": 1.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 138.0,
+  "remaining_iters": 3200.0,
+  "remaining_solver_calls": 6.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 3.0,
+            "random_subset": 1.0,
+            "route_segment": 2.5,
+            "route_tail": 1.5,
+            "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 5.0,
+            "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.15,
+        "metric_weights": {
+            "priority": 5.0,
+            "tw_tightness": 2.0,
+            "violation_risk": 6.5,
+            "energy_pressure": 2.0,
+            "detour_cost": 2.0,
+            "service_burden": 1.0,
+            "feasibility_scarcity": 4.0,
+            "route_instability": 1.0
+        },
+        "acceptance": "sa",
+        "accept_level": 0.6,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+    },
+    "budget_request": {
+        "max_iters": 500
+    }
+}
+```
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=20, destroy=route_segment, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=30, destroy=single_route, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 5 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     0
+• advanced_incumbent       False
+• lex_key_changed          False
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 3.0, "random_subset": 1.0, "route_segment": 2.5, "route_tail": 1.5, "single_route": 2.0}, "repair_task_selector_priors": {"weighted_priority_order": 5.0, "regret2_order": 1.0}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 5.0, "tw_tightness": 2.0, "violation_risk": 6.5, "energy_pressure": 2.0, "detour_cost": 2.0, "service_burden": 1.0, "feasibility_scarcity": 4.0, "route_instability": 1.0}, "strength_ratio": 0.15, "acceptance": "sa", "accept_level": 0.6, "reaction_factor": 0.15, "prior_mix_lambda": 0.25} and budget {"time_limit_sec": 1.0, "max_iters": 500}. feasible=True, lex_key=[0.0, 2.0, 1.0, 38031.3101009048], incumbent_kept=true, solver_diag={"algorithm": "weighted_alns", "total_iters": 36, "update_count": 0, "first_update_iter": null, "last_update_iter": null, "plateau_iters_after_last_update": 36, "update_iters_preview": [], "last_acceptance_decision": {"compare_result": 0, "accepted": true, "accept_mode": "sa"}}
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 6
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 6,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 63.0,
+      "max_iters": 7300.0,
+      "solver_calls": 5.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 137.0,
+      "max_iters": 2700.0,
+      "solver_calls": 5.0
+    }
+  },
+  "search_state": {
+    "step_count": 6,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 3.0,
+        "random_subset": 1.0,
+        "route_segment": 2.5,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.6,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    },
+    "last_action": {
+      "action_type": "run_weighted_alns",
+      "action_payload": {
+        "destroy_generator_priors": {
+          "global_assigned": 3.0,
+          "random_subset": 1.0,
+          "route_segment": 2.5,
+          "route_tail": 1.5,
+          "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+          "weighted_priority_order": 5.0,
+          "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "metric_weights": {
+          "priority": 5.0,
+          "tw_tightness": 2.0,
+          "violation_risk": 6.5,
+          "energy_pressure": 2.0,
+          "detour_cost": 2.0,
+          "service_burden": 1.0,
+          "feasibility_scarcity": 4.0,
+          "route_instability": 1.0
+        },
+        "strength_ratio": 0.15,
+        "acceptance": "sa",
+        "accept_level": 0.6,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 6,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {
+    "destroy_generator_priors": {
+      "global_assigned": 3.0,
+      "random_subset": 1.0,
+      "route_segment": 2.5,
+      "route_tail": 1.5,
+      "single_route": 2.0
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": 5.0,
+      "regret2_order": 1.0
+    },
+    "repair_position_selector": "filtered_best_position",
+    "metric_weights": {
+      "priority": 5.0,
+      "tw_tightness": 2.0,
+      "violation_risk": 6.5,
+      "energy_pressure": 2.0,
+      "detour_cost": 2.0,
+      "service_burden": 1.0,
+      "feasibility_scarcity": 4.0,
+      "route_instability": 1.0
+    },
+    "strength_ratio": 0.15,
+    "acceptance": "sa",
+    "accept_level": 0.6,
+    "reaction_factor": 0.15,
+    "prior_mix_lambda": 0.25
+  },
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 3.0,
+        "random_subset": 1.0,
+        "route_segment": 2.5,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.6,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    2.0,
+    1.0,
+    38031.3101009048
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 2.0,
+    "unassigned_count": 1.0,
+    "energy_total": 38031.3101,
+    "total_distance": 34571.4925,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": true,
+  "advanced": true,
+  "layer_deltas": [
+    0.0,
+    -1.0
+  ],
+  "first_advanced_layer": 2
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+      "destroy_generator_priors": {
+        "global_assigned": 3.0,
+        "random_subset": 1.0,
+        "route_segment": 2.5,
+        "route_tail": 1.5,
+        "single_route": 2.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 5.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 6.5,
+        "energy_pressure": 2.0,
+        "detour_cost": 2.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "sa",
+      "accept_level": 0.6,
+      "reaction_factor": 0.15,
+      "prior_mix_lambda": 0.25
+    }
+  },
+  "last_step_advanced_incumbent": false,
+  "consecutive_flat_steps": 2,
+  "recent_same_action_repeat": 1,
+  "best_update_count": 0,
+  "plateau_iters": 36,
+  "plateau_ratio": 1.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 137.0,
+  "remaining_iters": 2700.0,
+  "remaining_solver_calls": 5.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "// repair task semantics": "task score only decides which task to repair next",
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "run_weighted_alns",
+    "action_payload": {
+        "destroy_generator_priors": {
+            "global_assigned": 3.0,
+            "random_subset": 1.0,
+            "route_segment": 2.5,
+            "route_tail": 1.5,
+            "single_route": 2.0
+        },
+        "repair_task_selector_priors": {
+            "weighted_priority_order": 5.0,
+            "regret2_order": 1.0
+        },
+        "repair_position_selector": "filtered_best_position",
+        "strength_ratio": 0.15,
+        "metric_weights": {
+            "priority": 5.0,
+            "tw_tightness": 2.0,
+            "violation_risk": 6.5,
+            "energy_pressure": 2.0,
+            "detour_cost": 2.0,
+            "service_burden": 1.0,
+            "feasibility_scarcity": 4.0,
+            "route_instability": 1.0
+        },
+        "acceptance": "sa",
+        "accept_level": 0.6,
+        "reaction_factor": 0.15,
+        "prior_mix_lambda": 0.25
+    },
+    "budget_request": {
+        "max_iters": 500
+    }
+}
+```
+ℹ️ Weighted ALNS generated a trial solution at iter=10, destroy=route_tail, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=20, destroy=global_assigned, repair=weighted_priority_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+ℹ️ Weighted ALNS generated a trial solution at iter=30, destroy=route_tail, repair=regret2_order, accepted=True, feasible=True, lex_key=(0.0, 2.0, 1.0, 38031.3101009048)
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 6 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   run_weighted_alns
+• compare_vs_incumbent     0
+• advanced_incumbent       False
+• lex_key_changed          False
+• stop                     False
+• result                   Executed weighted ALNS with {"destroy_generator_priors": {"global_assigned": 3.0, "random_subset": 1.0, "route_segment": 2.5, "route_tail": 1.5, "single_route": 2.0}, "repair_task_selector_priors": {"weighted_priority_order": 5.0, "regret2_order": 1.0}, "repair_position_selector": "filtered_best_position", "metric_weights": {"priority": 5.0, "tw_tightness": 2.0, "violation_risk": 6.5, "energy_pressure": 2.0, "detour_cost": 2.0, "service_burden": 1.0, "feasibility_scarcity": 4.0, "route_instability": 1.0}, "strength_ratio": 0.15, "acceptance": "sa", "accept_level": 0.6, "reaction_factor": 0.15, "prior_mix_lambda": 0.25} and budget {"time_limit_sec": 1.0, "max_iters": 500}. feasible=True, lex_key=[0.0, 2.0, 1.0, 38031.3101009048], incumbent_kept=true, solver_diag={"algorithm": "weighted_alns", "total_iters": 31, "update_count": 0, "first_update_iter": null, "last_update_iter": null, "plateau_iters_after_last_update": 31, "update_iters_preview": [], "last_acceptance_decision": {"compare_result": 0, "accepted": true, "accept_mode": "sa"}}
+🛑 Soft stop after step 6: no forward movement for 3 steps.
+
+════════════════════════════════════════════════════════════════════════════════════════
+🏁 Run Complete
+════════════════════════════════════════════════════════════════════════════════════════
+✅ Finished in 124.017s
+
+────────────────────────────────────────────────────────────────────────────────────────
+🛣️ Routes
+────────────────────────────────────────────────────────────────────────────────────────
+  • agent 0: [0, 1, 2, 37, 38, 46, 47, 23]
+  • agent 1: [9, 11, 12, 13, 3, 4, 16, 17, 7]
+  • agent 2: [18, 28, 29, 21, 22, 48, 8, 24]
+  • agent 3: [26, 27, 10, 19, 20, 30, 31, 32, 33]
+  • agent 4: [34, 35, 36, 39, 40, 49]
+  • agent 5: [42, 43, 44, 14, 15, 5, 6, 41, 25]
+📭 unassigned_count         1
+📭 unassigned               [45]
+✅ Artifacts saved to: sar_alloc\data\runs\20260330-172559-llm

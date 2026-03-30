@@ -37,11 +37,13 @@ NEXT_ACTION_SCHEMA = """{
       "route_tail": "number in [0.10, 5.0]",
       "single_route": "number in [0.10, 5.0]"
     },
+    "// repair task semantics": "task score only decides which task to repair next",
     "repair_task_selector_priors": {
       "weighted_priority_order": "number in [0.10, 5.0]",
       "regret2_order": "number in [0.10, 5.0]"
     },
     "repair_position_selector": "filtered_best_position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
     "strength_ratio": "number in [0.02, 0.40]",
     "metric_weights": {
       "priority": "number in [0, 5]",

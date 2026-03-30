@@ -1,0 +1,73 @@
+{
+  "eval": {
+    "objective_policy": {
+      "layers": [
+        {
+          "name": "feasibility",
+          "metric": "violation_total",
+          "direction": "min"
+        },
+        {
+          "name": "priority_rescue",
+          "metric": "missed_priority",
+          "direction": "min"
+        },
+        {
+          "name": "task_completion",
+          "metric": "unassigned_count",
+          "direction": "min"
+        },
+        {
+          "name": "resource_efficiency",
+          "metric": "energy_total",
+          "direction": "min"
+        }
+      ],
+      "max_layers": 6
+    },
+    "include_depot_legs": true,
+    "time_unit": "minute",
+    "energy_unit": "unit"
+  },
+  "init": {
+    "method": "insert",
+    "randomized": true,
+    "rcl_k": 5,
+    "allow_unassigned": true
+  },
+  "solver": {
+    "weighted_alns": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.0,
+        "random_subset": 1.0,
+        "route_segment": 1.0,
+        "route_tail": 1.0,
+        "single_route": 1.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 1.0,
+        "regret2_order": 1.0
+      },
+      "repair_position_selector": "filtered_best_position",
+      "metric_weights": {
+        "priority": 1.5,
+        "tw_tightness": 1.2,
+        "violation_risk": 4.0,
+        "energy_pressure": 1.6,
+        "detour_cost": 1.4,
+        "service_burden": 0.8,
+        "feasibility_scarcity": 2.2,
+        "route_instability": 0.7
+      },
+      "strength_ratio": 0.18,
+      "acceptance": "sa",
+      "accept_level": 0.25,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.25,
+      "default_time_limit_sec": 1.0,
+      "default_max_iters": 60
+    }
+  },
+  "rng_seed": 1298544984,
+  "extras": {}
+}

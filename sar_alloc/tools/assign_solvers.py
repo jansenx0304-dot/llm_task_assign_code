@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Weighted ALNS solver with unified metric-driven local operator decisions."""
+"""Weighted ALNS solver with two-stage repair decisions.
+
+Task score decides which task to repair next. Insert score decides the order of
+filtered insertion positions. Exact evaluation only refines a short checked
+prefix and certifies strict feasibility.
+"""
 
 import math
 import random
@@ -31,6 +36,27 @@ from ..solution import AssignmentSolution, EvalResult
 class _EvalStats:
     n: int = 0
     t: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _ScoredInsertCandidate:
+    position: InsertPosition
+    insert_score: float
+
+
+@dataclass(frozen=True, slots=True)
+class _StrictInsertCandidateEval:
+    scored_candidate: _ScoredInsertCandidate
+    trial: AssignmentSolution
+    ev: EvalResult
+
+
+@dataclass(frozen=True, slots=True)
+class _TaskRegretEstimate:
+    tid: int
+    regret: float
+    best_insert_score: float
+    ranked_positions: Tuple[_ScoredInsertCandidate, ...]
 
 
 EVAL_STATS = _EvalStats()
@@ -396,16 +422,11 @@ def _repair_with_weighted_priority(
     policy: WeightedALNSPolicy,
     rng: random.Random,
 ) -> AssignmentSolution:
-    """Repair in weighted task order, but restore exact-evaluate position choice.
-
-    The weighted metrics still decide which unassigned task to try first. The
-    final insertion position is selected only after exact trial construction and
-    global evaluator comparison across feasible filtered positions.
-    """
+    """Repair in weighted task order with insert-score-driven position choice."""
     sol = partial.clone(deep=True)
     ordered_tasks = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
     for tid in ordered_tasks:
-        choice = _select_best_feasible_position_by_eval(sol, tid, instance, config)
+        choice = _select_position_by_insert_score(sol, tid, instance, config, policy)
         if choice is not None:
             sol.add_task(int(choice.agent_id), int(tid), position=int(choice.position))
             sol.unassigned.discard(int(tid))
@@ -419,61 +440,55 @@ def _repair_with_regret2(
     policy: WeightedALNSPolicy,
     rng: random.Random,
 ) -> AssignmentSolution:
-    """Restore classic regret-2 based on exact feasible insert evaluations.
-
-    The weighted metrics can still help prioritize which task to inspect first,
-    but best1/best2 and the final chosen insertion are derived from exact trial
-    evaluation of feasible candidates rather than from insertion feature scores.
-    """
+    """Repair by regret-2 over insert scores, then place with the shared selector."""
     sol = partial.clone(deep=True)
+    skipped_tids: set[int] = set()
 
     while sol.unassigned:
-        chosen_tid: Optional[int] = None
-        chosen_position: Optional[InsertPosition] = None
-        chosen_best_ev: Optional[EvalResult] = None
-        chosen_regret = -float("inf")
-
-        candidate_tids = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
+        chosen: Optional[_TaskRegretEstimate] = None
+        candidate_tids = [
+            int(tid)
+            for tid in _order_tasks_weighted_priority(sol, instance, config, policy, rng)
+            if int(tid) not in skipped_tids
+        ]
         for tid in candidate_tids:
-            feasible_candidates = _collect_feasible_insert_evals(sol, int(tid), instance, config)
-            if not feasible_candidates:
+            ranked_positions = tuple(_rank_insert_positions_by_score(sol, int(tid), instance, config, policy))
+            regret = _regret2_from_ranked_insert_positions(ranked_positions)
+            if regret is None:
                 continue
-
-            best1: Optional[Tuple[InsertPosition, AssignmentSolution, EvalResult]] = None
-            best2: Optional[Tuple[InsertPosition, AssignmentSolution, EvalResult]] = None
-            for candidate in feasible_candidates:
-                _, _, ev_candidate = candidate
-                if best1 is None or compare(ev_candidate, best1[2], config) < 0:
-                    best2 = best1
-                    best1 = candidate
-                elif best2 is None or compare(ev_candidate, best2[2], config) < 0:
-                    best2 = candidate
-
-            if best1 is None:
+            candidate = _TaskRegretEstimate(
+                tid=int(tid),
+                regret=float(regret),
+                best_insert_score=float(ranked_positions[0].insert_score),
+                ranked_positions=ranked_positions,
+            )
+            if chosen is None:
+                chosen = candidate
                 continue
+            if candidate.regret > chosen.regret + 1e-12:
+                chosen = candidate
+                continue
+            if abs(candidate.regret - chosen.regret) <= 1e-12 and candidate.best_insert_score < chosen.best_insert_score - 1e-12:
+                chosen = candidate
 
-            best1_position, _, best1_ev = best1
-            if best2 is None:
-                regret = float("inf")
-            else:
-                regret = _cost_from_feasible_eval(best2[2], config) - _cost_from_feasible_eval(best1_ev, config)
-
-            if regret > chosen_regret + 1e-12:
-                chosen_tid = int(tid)
-                chosen_position = best1_position
-                chosen_best_ev = best1_ev
-                chosen_regret = float(regret)
-            elif abs(regret - chosen_regret) <= 1e-12:
-                if chosen_best_ev is None or compare(best1_ev, chosen_best_ev, config) < 0:
-                    chosen_tid = int(tid)
-                    chosen_position = best1_position
-                    chosen_best_ev = best1_ev
-
-        if chosen_tid is None or chosen_position is None:
+        if chosen is None:
             break
 
-        sol.add_task(int(chosen_position.agent_id), int(chosen_tid), position=int(chosen_position.position))
-        sol.unassigned.discard(int(chosen_tid))
+        chosen_position = _select_position_by_insert_score(
+            sol,
+            chosen.tid,
+            instance,
+            config,
+            policy,
+            ranked_candidates=chosen.ranked_positions,
+        )
+        if chosen_position is None:
+            skipped_tids.add(int(chosen.tid))
+            continue
+
+        sol.add_task(int(chosen_position.agent_id), int(chosen.tid), position=int(chosen_position.position))
+        sol.unassigned.discard(int(chosen.tid))
+        skipped_tids.clear()
 
     return sol
 
@@ -501,21 +516,127 @@ def _order_tasks_weighted_priority(
     return [tid for _, tid in scored]
 
 
-def _select_best_feasible_position_by_eval(
+def _rank_insert_positions_by_score(
+    sol: AssignmentSolution,
+    tid: int,
+    instance: Instance,
+    config: Config,
+    policy: WeightedALNSPolicy,
+) -> List[_ScoredInsertCandidate]:
+    """Rank loosely filtered insertion positions by insert score.
+
+    The filters only remove obviously bad positions. The returned order is the
+    formal position-choice priority used by weighted-priority repair and regret-2.
+    """
+    positions = enumerate_filtered_insert_positions(sol, tid, instance, config)
+    if not positions:
+        return []
+
+    feature_map = compute_insert_candidate_features_batch(sol, tid, positions, instance, config)
+    ranked = [
+        _ScoredInsertCandidate(
+            position=position,
+            insert_score=score_insert_candidate_features(feature_map[position], policy.metric_weights),
+        )
+        for position in positions
+    ]
+    ranked.sort(
+        key=lambda item: (
+            float(item.insert_score),
+            int(item.position.agent_id),
+            int(item.position.position),
+        )
+    )
+    return ranked
+
+
+def _progressive_refine_ranked_positions_by_eval(
+    sol: AssignmentSolution,
+    tid: int,
+    ranked_candidates: Sequence[_ScoredInsertCandidate],
+    instance: Instance,
+    config: Config,
+) -> List[_StrictInsertCandidateEval]:
+    """Strictly evaluate a ranked prefix until feasible evidence is good enough.
+
+    Exact evaluation is only a refinement layer: it checks ranked candidates in
+    order, stops after a configurable lookahead beyond the first strict-feasible
+    hit, and never reverts to all-candidate exact selection.
+    """
+    max_positions = max(1, int(getattr(config.solver.weighted_alns, "insert_eval_max_positions", 8)))
+    lookahead = max(0, int(getattr(config.solver.weighted_alns, "insert_eval_lookahead_after_first_feasible", 2)))
+    evaluated: List[_StrictInsertCandidateEval] = []
+    first_feasible_eval_count: Optional[int] = None
+
+    for candidate in ranked_candidates:
+        if len(evaluated) >= max_positions:
+            break
+        trial = sol.clone(deep=True)
+        position = candidate.position
+        trial.add_task(int(position.agent_id), int(tid), position=int(position.position))
+        ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
+        evaluated.append(
+            _StrictInsertCandidateEval(
+                scored_candidate=candidate,
+                trial=trial,
+                ev=ev_trial,
+            )
+        )
+        if ev_trial.is_feasible and first_feasible_eval_count is None:
+            first_feasible_eval_count = len(evaluated)
+        if first_feasible_eval_count is not None and len(evaluated) >= min(max_positions, first_feasible_eval_count + lookahead):
+            break
+
+    return evaluated
+
+
+def _select_position_by_insert_score(
+    sol: AssignmentSolution,
+    tid: int,
+    instance: Instance,
+    config: Config,
+    policy: WeightedALNSPolicy,
+    *,
+    ranked_candidates: Optional[Sequence[_ScoredInsertCandidate]] = None,
+) -> Optional[InsertPosition]:
+    """Select the final repair position from insert-score-ranked candidates."""
+    ranked = list(ranked_candidates) if ranked_candidates is not None else _rank_insert_positions_by_score(sol, tid, instance, config, policy)
+    if not ranked:
+        return None
+
+    checked_candidates = _progressive_refine_ranked_positions_by_eval(sol, tid, ranked, instance, config)
+    best_checked_feasible: Optional[_StrictInsertCandidateEval] = None
+    for candidate in checked_candidates:
+        if not candidate.ev.is_feasible:
+            continue
+        if best_checked_feasible is None or compare(candidate.ev, best_checked_feasible.ev, config) < 0:
+            best_checked_feasible = candidate
+
+    if best_checked_feasible is None:
+        return None
+    return best_checked_feasible.scored_candidate.position
+
+
+def _regret2_from_ranked_insert_positions(ranked_positions: Sequence[_ScoredInsertCandidate]) -> Optional[float]:
+    """Estimate regret-2 directly from the two best insert scores."""
+    if not ranked_positions:
+        return None
+    if len(ranked_positions) == 1:
+        return float("inf")
+    return float(ranked_positions[1].insert_score) - float(ranked_positions[0].insert_score)
+
+
+def _select_best_feasible_position_by_eval_legacy(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
     config: Config,
 ) -> Optional[InsertPosition]:
-    """Choose the best feasible filtered insertion position by exact trial evaluation.
-
-    Positions are still filtered cheaply first, but the final placement is chosen
-    only by evaluating each trial solution and comparing feasible results.
-    """
+    """Legacy exact-eval baseline; not used by the formal repair flow."""
     best_position: Optional[InsertPosition] = None
     best_ev: Optional[EvalResult] = None
 
-    for position, _, ev_trial in _collect_insert_trial_evals(sol, tid, instance, config):
+    for position, _, ev_trial in _collect_insert_trial_evals_legacy(sol, tid, instance, config):
         if not ev_trial.is_feasible:
             continue
         if best_ev is None or compare(ev_trial, best_ev, config) < 0:
@@ -525,7 +646,7 @@ def _select_best_feasible_position_by_eval(
     return best_position
 
 
-def _collect_insert_trial_evals(
+def _collect_insert_trial_evals_legacy(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
@@ -533,7 +654,7 @@ def _collect_insert_trial_evals(
     *,
     candidate_positions: Optional[Sequence[InsertPosition]] = None,
 ) -> List[Tuple[InsertPosition, AssignmentSolution, EvalResult]]:
-    """Enumerate filtered insertion moves and evaluate the resulting trials."""
+    """Legacy baseline that exact-evaluates every candidate position."""
     positions = list(candidate_positions) if candidate_positions is not None else enumerate_filtered_insert_positions(sol, tid, instance, config)
     evaluated: List[Tuple[InsertPosition, AssignmentSolution, EvalResult]] = []
 
@@ -546,7 +667,7 @@ def _collect_insert_trial_evals(
     return evaluated
 
 
-def _collect_feasible_insert_evals(
+def _collect_feasible_insert_evals_legacy(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
@@ -554,30 +675,27 @@ def _collect_feasible_insert_evals(
     *,
     candidate_positions: Optional[Sequence[InsertPosition]] = None,
 ) -> List[Tuple[InsertPosition, AssignmentSolution, EvalResult]]:
+    """Legacy feasible-only exact-eval baseline; not used by regret-2 anymore."""
     return [
         candidate
-        for candidate in _collect_insert_trial_evals(sol, tid, instance, config, candidate_positions=candidate_positions)
+        for candidate in _collect_insert_trial_evals_legacy(sol, tid, instance, config, candidate_positions=candidate_positions)
         if candidate[2].is_feasible
     ]
 
 
-def _cost_from_feasible_eval(ev: EvalResult, config: Config) -> float:
-    """Scalar regret cost for already-feasible trials; smaller is better."""
+def _cost_from_feasible_eval_legacy(ev: EvalResult, config: Config) -> float:
+    """Legacy scalar regret helper for exact-eval baselines."""
     return _soft_metric_value(ev, config, fallback_metric="energy_total")
 
 
-def _select_filtered_best_position_by_score(
+def _select_filtered_best_position_by_score_legacy(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
     config: Config,
     policy: WeightedALNSPolicy,
 ) -> Optional[InsertPosition]:
-    """Score-only helper retained for debugging/reference.
-
-    Repair, regret2, and local search no longer rely on this function for final
-    move decisions. Exact evaluator comparison drives those choices.
-    """
+    """Legacy score-only baseline kept only for debugging/reference."""
     positions = enumerate_filtered_insert_positions(sol, tid, instance, config)
     if not positions:
         return None
@@ -602,7 +720,7 @@ def _restore_feasibility(
     rng: random.Random,
     max_remove: int = 8,
 ) -> AssignmentSolution:
-    """Conservative feasibility restore restored to exact greedy repair behavior."""
+    """Conservative feasibility restore using the formal repair selector."""
     work = sol.clone(deep=True)
     work.normalize(instance)
     initial_ev = evaluate(work, instance, config, update_solution_schedule=False)

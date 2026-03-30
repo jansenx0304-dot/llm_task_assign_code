@@ -88,7 +88,9 @@ Inputs:
 Weighted ALNS architecture rules:
 1. Destroy operators are only candidate generators. They do not rank tasks themselves.
 2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
-3. All local value judgments are driven by one shared metric weight vector `metric_weights`.
+3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
+   - task score decides which unassigned task to try next,
+   - insert score decides the ranking of filtered insertion positions.
 4. Do not pick a single destroy operator or a single repair task selector.
    You must assign positive prior weights over the full destroy operator pool and repair-task pool.
 5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
@@ -101,8 +103,13 @@ Weighted ALNS architecture rules:
 7. Do not invent metrics beyond:
    `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
    `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
-8. `repair_position_selector` must be `filtered_best_position`.
-9. Output only fields defined in the schema. No commentary, no extra keys.
+8. `repair_position_selector` must be `filtered_best_position`, meaning:
+   - first enumerate loosely filtered candidate positions,
+   - then rank them by insert score,
+   - then run progressive strict evaluation on that ranked list,
+   - then choose the best checked strict-feasible position.
+9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+10. Output only fields defined in the schema. No commentary, no extra keys.
 
 Decision rules:
 1. Choose exactly one action from `allowed_actions`.

@@ -1,0 +1,39 @@
+{
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    2.0,
+    3.0,
+    35316.901912558955
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 2.0,
+    "unassigned_count": 3.0,
+    "energy_total": 35316.901912558955,
+    "total_distance": 31642.466667860746,
+    "makespan": 9358.394081918594
+  },
+  "objective_layers": [
+    {
+      "name": "feasibility",
+      "metric": "violation_total",
+      "direction": "min"
+    },
+    {
+      "name": "priority_rescue",
+      "metric": "missed_priority",
+      "direction": "min"
+    },
+    {
+      "name": "task_completion",
+      "metric": "unassigned_count",
+      "direction": "min"
+    },
+    {
+      "name": "resource_efficiency",
+      "metric": "energy_total",
+      "direction": "min"
+    }
+  ]
+}

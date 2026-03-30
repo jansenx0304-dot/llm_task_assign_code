@@ -1,0 +1,622 @@
+[LOG] Writing run log to: sar_alloc\data\runs\20260329-184217-llm.log
+
+════════════════════════════════════════════════════════════════════════════════════════
+🚀 Runner Start
+════════════════════════════════════════════════════════════════════════════════════════
+📦 instance                 json:sar_alloc/data/instances/demo/seed42_T50_A6.json
+🤖 dummy_llm                False
+🎲 seed                     337008501
+🔁 max_agent_steps          10
+🧮 max_solver_calls         10
+📉 max_stagnation_steps     3
+⏱️ budget                   time_limit_sec=200.0, max_iters=10000
+🎯 goal                     我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are defining the locked lexicographic objective for a closed-loop optimization controller.
+
+Inputs:
+- User goal: 我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+- Available metrics:
+Available metrics:
+- violation_total: Total constraint violation (0 means feasible).
+- unassigned_count: Number of unassigned tasks.
+- missed_priority: Sum of priorities of unassigned tasks.
+- energy_total: Total energy used.
+- total_distance: Total travel distance.
+- makespan: Max route completion time over agents.
+- Output schema:
+{
+  "layers": [
+    {
+      "name": "feasibility",
+      "metric": "...",
+      "direction": "min|max"
+    }
+  ]
+}
+
+Rules:
+- Feasibility must be the first layer and use `violation_total`.
+- Use only provided metric names exactly as written.
+- Use at most 5 layers.
+- Prefer a minimal, non-redundant objective.
+- Earlier layers must strictly dominate later layers.
+
+Return JSON only.
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 LLM Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "layers": [
+        {
+            "name": "feasibility",
+            "metric": "violation_total",
+            "direction": "min"
+        },
+        {
+            "name": "priority_rescue",
+            "metric": "missed_priority",
+            "direction": "min"
+        },
+        {
+            "name": "task_completion",
+            "metric": "unassigned_count",
+            "direction": "min"
+        },
+        {
+            "name": "resource_efficiency",
+            "metric": "energy_total",
+            "direction": "min"
+        }
+    ]
+}
+```
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 0
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 0,
+  "allowed_actions": [
+    "build_initial_solution",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "search_state": {
+    "step_count": 0,
+    "incumbent_exists": false,
+    "current_init_method": null,
+    "current_weighted_policy": {},
+    "last_action": null
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 0,
+  "incumbent_exists": false,
+  "current_init_method": null,
+  "current_weighted_policy": {},
+  "last_action": null
+}
+
+- Current incumbent metrics:
+{
+  "exists": false,
+  "is_feasible": null,
+  "lex_key": [],
+  "metrics": {
+    "violation_total": null,
+    "missed_priority": null,
+    "unassigned_count": null,
+    "energy_total": null,
+    "total_distance": null,
+    "makespan": null
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": false,
+  "advanced": false,
+  "layer_deltas": [],
+  "first_advanced_layer": null
+}
+
+- Search progress summary:
+{
+  "last_action": null,
+  "last_step_advanced_incumbent": null,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 0,
+  "best_update_count": 0,
+  "plateau_iters": 0,
+  "plateau_ratio": 0.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 200.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Allowed actions:
+[
+  "build_initial_solution",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. All local value judgments are driven by one shared metric weight vector `metric_weights`.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`.
+9. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Output
+────────────────────────────────────────────────────────────────────────────────────────
+```json
+{
+    "action_type": "build_initial_solution",
+    "action_payload": {
+        "init_method": "insert"
+    },
+    "budget_request": {
+        "time_limit_sec": 10.0,
+        "max_iters": 1000
+    }
+}
+```
+✅ Initial solution ready: method=insert, assigned=42, unassigned=8
+
+────────────────────────────────────────────────────────────────────────────────────────
+• Step 0 Result
+────────────────────────────────────────────────────────────────────────────────────────
+• action                   build_initial_solution
+• compare_vs_incumbent     -1
+• advanced_incumbent       True
+• lex_key_changed          True
+• stop                     False
+• result                   Built incumbent solution with init_method=insert. feasible=True, lex_key=[0.0, 12.0, 8.0, 36375.724584857475]
+
+════════════════════════════════════════════════════════════════════════════════════════
+📌 Agent Step 1
+════════════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────────────
+🧾 Observation
+────────────────────────────────────────────────────────────────────────────────────────
+{
+  "step_id": 1,
+  "allowed_actions": [
+    "run_weighted_alns",
+    "stop"
+  ],
+  "budget_state": {
+    "total_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    },
+    "used_budget": {
+      "time_limit_sec": 0.0,
+      "max_iters": 0.0,
+      "solver_calls": 0.0
+    },
+    "remaining_budget": {
+      "time_limit_sec": 200.0,
+      "max_iters": 10000.0,
+      "solver_calls": 10.0
+    }
+  },
+  "search_state": {
+    "step_count": 1,
+    "incumbent_exists": true,
+    "current_init_method": "insert",
+    "current_weighted_policy": {},
+    "last_action": {
+      "action_type": "build_initial_solution",
+      "action_payload": {
+        "init_method": "insert"
+      }
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────────────────
+📄 Next Action Prompt
+────────────────────────────────────────────────────────────────────────────────────────
+You are the controller of a closed-loop optimization process for multi-agent task assignment.
+
+Objective layers are locked. Earlier layers dominate later layers strictly.
+
+Inputs:
+- User goal:
+我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。
+
+- Locked objective layers:
+[
+  {
+    "index": 1,
+    "name": "feasibility",
+    "metric": "violation_total",
+    "direction": "min"
+  },
+  {
+    "index": 2,
+    "name": "priority_rescue",
+    "metric": "missed_priority",
+    "direction": "min"
+  },
+  {
+    "index": 3,
+    "name": "task_completion",
+    "metric": "unassigned_count",
+    "direction": "min"
+  },
+  {
+    "index": 4,
+    "name": "resource_efficiency",
+    "metric": "energy_total",
+    "direction": "min"
+  }
+]
+
+- Instance summary:
+{
+  "version": 4,
+  "n_tasks": 50,
+  "n_agents": 6,
+  "skills": {
+    "uncoverable_task_frac": 0.0,
+    "hard_tasks_frac": 0.0
+  },
+  "time_window_risk": {
+    "negative_slack_frac_lb": 0.0
+  },
+  "energy_risk": {
+    "energy_tight_frac_lb": 0.0
+  },
+  "spatial": {
+    "cluster_strength": 0.7704662663330671,
+    "radius95_to_depot": 1208.7987695941265
+  }
+}
+
+- Current search state:
+{
+  "step_count": 1,
+  "incumbent_exists": true,
+  "current_init_method": "insert",
+  "current_weighted_policy": {},
+  "last_action": {
+    "action_type": "build_initial_solution",
+    "action_payload": {
+      "init_method": "insert"
+    }
+  }
+}
+
+- Current incumbent metrics:
+{
+  "exists": true,
+  "is_feasible": true,
+  "lex_key": [
+    0.0,
+    12.0,
+    8.0,
+    36375.724584857475
+  ],
+  "metrics": {
+    "violation_total": 0.0,
+    "missed_priority": 12.0,
+    "unassigned_count": 8.0,
+    "energy_total": 36375.7246,
+    "total_distance": 33816.318,
+    "makespan": 9339.8238
+  }
+}
+
+- Delta from previous incumbent:
+{
+  "has_previous_incumbent": false,
+  "advanced": false,
+  "layer_deltas": [],
+  "first_advanced_layer": null
+}
+
+- Search progress summary:
+{
+  "last_action": {
+    "action_type": "build_initial_solution",
+    "action_payload": {
+      "init_method": "insert"
+    }
+  },
+  "last_step_advanced_incumbent": true,
+  "consecutive_flat_steps": 0,
+  "recent_same_action_repeat": 1,
+  "best_update_count": 0,
+  "plateau_iters": 0,
+  "plateau_ratio": 0.0
+}
+
+- Remaining budget:
+{
+  "remaining_time_sec": 200.0,
+  "remaining_iters": 10000.0,
+  "remaining_solver_calls": 10.0
+}
+
+- Allowed actions:
+[
+  "run_weighted_alns",
+  "stop"
+]
+
+Weighted ALNS architecture rules:
+1. Destroy operators are only candidate generators. They do not rank tasks themselves.
+2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
+3. All local value judgments are driven by one shared metric weight vector `metric_weights`.
+4. Do not pick a single destroy operator or a single repair task selector.
+   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
+5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
+   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
+   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
+6. `violation_risk` means local time-window / feasibility pressure:
+   - assigned task removal: current slack or tardiness pressure,
+   - unassigned task reinsertion: best reachable slack lower-bound pressure,
+   - insertion move: minimum slack or violation pressure on the impacted suffix.
+7. Do not invent metrics beyond:
+   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+8. `repair_position_selector` must be `filtered_best_position`.
+9. Output only fields defined in the schema. No commentary, no extra keys.
+
+Decision rules:
+1. Choose exactly one action from `allowed_actions`.
+2. Objective layers are locked; optimize under them and never rewrite them.
+3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
+4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+5. Request budget only for the next action and never exceed `remaining_budget`.
+6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. If no incumbent exists, prefer `build_initial_solution`.
+
+Output:
+- Return JSON only.
+- Follow this schema exactly:
+{
+  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_payload": {},
+  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// run_weighted_alns payload": {
+    "destroy_generator_priors": {
+      "global_assigned": "number in [0.10, 5.0]",
+      "random_subset": "number in [0.10, 5.0]",
+      "route_segment": "number in [0.10, 5.0]",
+      "route_tail": "number in [0.10, 5.0]",
+      "single_route": "number in [0.10, 5.0]"
+    },
+    "repair_task_selector_priors": {
+      "weighted_priority_order": "number in [0.10, 5.0]",
+      "regret2_order": "number in [0.10, 5.0]"
+    },
+    "repair_position_selector": "filtered_best_position",
+    "strength_ratio": "number in [0.02, 0.40]",
+    "metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "acceptance": "greedy|threshold|sa",
+    "accept_level": "number in [0, 1]",
+    "reaction_factor": "number in [0.05, 0.40]",
+    "prior_mix_lambda": "number in [0.20, 0.35]"
+  },
+  "// stop payload": {},
+  "budget_request": {
+    "time_limit_sec": "optional positive number",
+    "max_iters": "optional positive integer"
+  }
+}
+[ERROR] Run failed: Remote end closed connection without response
+Traceback (most recent call last):
+  File "d:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\runner.py", line 382, in main
+    _plain_main(settings=s)
+  File "d:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\runner.py", line 325, in main
+    sol = run_orchestrator(
+          ^^^^^^^^^^^^^^^^^
+  File "D:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\llm_orchestrator.py", line 172, in run_orchestrator
+    action = _stage_decide_next_action(client, user_goal_text, inst_sum, state, budget_state, allowed_actions, cfg)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\llm_orchestrator.py", line 226, in _stage_decide_next_action
+    raw = _call_llm(client, get_system_prompt(), prompt)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\llm_orchestrator.py", line 494, in _call_llm
+    return client.chat([{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SJTU\Smart\LLM_Task_Assign\llm_task_assign_code\sar_alloc\llm_client.py", line 75, in chat
+    with urllib.request.urlopen(req, timeout=float(timeout_sec)) as resp:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 215, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 515, in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 532, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 492, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 1392, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\urllib\request.py", line 1348, in do_open
+    r = h.getresponse()
+        ^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\http\client.py", line 1430, in getresponse
+    response.begin()
+  File "D:\miniconda3\Lib\http\client.py", line 331, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "D:\miniconda3\Lib\http\client.py", line 300, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+http.client.RemoteDisconnected: Remote end closed connection without response

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-"""Centralized scoring functions for unified weighted ALNS operators."""
+"""Centralized scoring functions for unified weighted ALNS operators.
+
+Task score and insert score share one metric vector, but task score orders
+tasks while insert score ranks filtered insertion positions.
+"""
 
 from .types import InsertCandidateFeatures, MetricWeights, ReinsertTaskFeatures, RemoveFeatures
 
@@ -25,7 +29,10 @@ def score_remove_features(features: RemoveFeatures, weights: MetricWeights) -> f
 
 
 def score_reinsert_task_features(features: ReinsertTaskFeatures, weights: MetricWeights) -> float:
-    """Higher is better for choosing which unassigned task to reinsert next."""
+    """Higher is better for choosing which unassigned task to reinsert next.
+
+    This score never chooses the final insertion position.
+    """
     return (
         float(weights.priority) * float(features.priority)
         + float(weights.tw_tightness) * float(features.tw_tightness)
@@ -41,7 +48,8 @@ def score_reinsert_task_features(features: ReinsertTaskFeatures, weights: Metric
 def score_insert_candidate_features(features: InsertCandidateFeatures, weights: MetricWeights) -> float:
     """Lower is better for an insertion action.
 
-    This is a loss-style score so all insert-position consumers minimize it.
+    This is the primary ranking signal for filtered insertion positions.
+    Exact evaluation only refines the checked prefix afterwards.
     """
     return (
         float(weights.priority) * (1.0 - float(features.priority))

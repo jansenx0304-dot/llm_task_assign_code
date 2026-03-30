@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Typed objects for the unified weighted-operator ALNS architecture."""
+"""Typed objects for the unified weighted-operator ALNS architecture.
+
+Repair is explicitly split into task selectors and one position selector. The
+external selector name `filtered_best_position` is stable, but its semantics are
+insert-score ranking plus progressive strict evaluation.
+"""
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Tuple
