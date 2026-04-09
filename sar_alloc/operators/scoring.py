@@ -49,7 +49,7 @@ def score_insert_candidate_features(features: InsertCandidateFeatures, weights: 
     """Lower is better for an insertion action.
 
     This is the primary ranking signal for filtered insertion positions.
-    Exact evaluation only refines the checked prefix afterwards.
+    Strict evaluation only certifies feasibility after ranking.
     """
     return (
         float(weights.priority) * (1.0 - float(features.priority))

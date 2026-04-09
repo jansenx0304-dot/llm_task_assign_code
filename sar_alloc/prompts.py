@@ -106,9 +106,9 @@ Weighted ALNS architecture rules:
 8. `repair_position_selector` must be `filtered_best_position`, meaning:
    - first enumerate loosely filtered candidate positions,
    - then rank them by insert score,
-   - then run progressive strict evaluation on that ranked list,
-   - then choose the best checked strict-feasible position.
-9. Strict evaluation is only a refinement and feasibility-certification step for checked candidates. It must not be treated as an all-candidate position-ranking pass.
+   - then run strict feasibility checks on that ranked list in order until a feasible insertion is found or all candidates fail,
+   - then choose the first strict-feasible position found in ranked order.
+9. Strict evaluation is only a feasibility-certification step after ranking. It must not be treated as a separate all-candidate position-ranking pass.
 10. Output only fields defined in the schema. No commentary, no extra keys.
 
 Decision rules:
@@ -117,8 +117,9 @@ Decision rules:
 3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
 4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
 5. Request budget only for the next action and never exceed `remaining_budget`.
-6. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
-7. If no incumbent exists, prefer `build_initial_solution`.
+6. If `action_type` is `run_alns`, `budget_request.time_limit_sec` is required and must be positive. `budget_request.max_iters` is optional.
+7. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+8. If no incumbent exists, prefer `build_initial_solution`.
 
 Output:
 - Return JSON only.

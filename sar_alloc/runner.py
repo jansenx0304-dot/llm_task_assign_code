@@ -51,7 +51,7 @@ DEV_SETTINGS: Dict[str, Any] = {
     "user_goal_text": "我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。",
 
     # 例如：data/instances/demo.json
-    "instance_path": "sar_alloc/data/instances/demo/seed42_T50_A6.json",
+    "instance_path": "sar_alloc/data/instances/demo/seed42_T100_A6.json",
 
     # 是否使用 dummy LLM （测试除大模型以外的功能用）
     "dummy_llm": False,

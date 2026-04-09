@@ -4,7 +4,7 @@ from __future__ import annotations
 
 All local value judgments flow through this module. Task-level reinsertion
 features drive only task ordering, while insert-candidate features drive only
-filtered position ranking before progressive strict evaluation.
+filtered position ranking before ranked strict feasibility checks.
 """
 
 from dataclasses import dataclass
@@ -95,10 +95,13 @@ def compute_insert_candidate_features(
 ) -> InsertCandidateFeatures:
     """Compute normalized features for ranking one insertion move `(aid, tid, pos)`."""
     key = InsertPosition(agent_id=int(aid), position=int(pos))
+    positions = [key] if candidate_positions is None else list(candidate_positions)
+    if not positions:
+        raise KeyError(key)
     return compute_insert_candidate_features_batch(
         sol=sol,
         tid=tid,
-        positions=candidate_positions or [key],
+        positions=positions,
         instance=instance,
         config=config,
     )[key]
@@ -252,9 +255,12 @@ def basic_insertion_feasibility_filter(
     reachability, or trivial route-independent energy lower bounds.
     """
     task = instance.task_by_id(int(tid))
+    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    if not positions:
+        return []
     out: List[InsertPosition] = []
 
-    for position in candidate_positions or _all_insert_positions(sol, instance):
+    for position in positions:
         agent = instance.agent_by_id(int(position.agent_id))
         if not _agent_can_do_task(agent, task):
             continue
@@ -286,11 +292,14 @@ def insertion_lower_bound_filter(
     candidates or smuggle in extra heuristics.
     """
     task = instance.task_by_id(int(tid))
+    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    if not positions:
+        return []
     survivors: List[InsertPosition] = []
     route_timing_cache = _build_route_timing_cache(sol, instance)
     route_bounds_cache: Dict[int, Tuple[List[float], List[float], bool]] = {}
 
-    for position in candidate_positions or _all_insert_positions(sol, instance):
+    for position in positions:
         aid = int(position.agent_id)
         route = list(sol.routes.get(aid, []))
         if not route:
@@ -348,10 +357,13 @@ def dominated_position_filter(
     affected suffix ratio, and reachable slack lower bound, with at least one strict
     improvement. No learned or weighted score is used here.
     """
+    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    if not positions:
+        return []
     lower_bounds = _lower_bounds_by_position(
         sol=sol,
         tid=tid,
-        positions=candidate_positions or _all_insert_positions(sol, instance),
+        positions=positions,
         instance=instance,
         config=config,
     )
@@ -378,8 +390,12 @@ def enumerate_filtered_insert_positions(
     config: Config,
 ) -> List[InsertPosition]:
     """Enumerate loosely filtered insertion positions before insert-score ranking."""
-    positions = basic_insertion_feasibility_filter(sol, tid, instance, config)
+    positions = basic_insertion_feasibility_filter(sol, tid, instance, config, candidate_positions=None)
+    if not positions:
+        return []
     positions = insertion_lower_bound_filter(sol, tid, instance, config, candidate_positions=positions)
+    if not positions:
+        return []
     positions = dominated_position_filter(sol, tid, instance, config, candidate_positions=positions)
     return positions
 

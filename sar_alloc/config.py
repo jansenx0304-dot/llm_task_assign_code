@@ -57,7 +57,8 @@ class WeightedALNSConfig:
 
     Task selectors decide repair order. `filtered_best_position` keeps its
     external name, but internally it means: rank filtered positions by insert
-    score, then progressively strict-evaluate only a short checked prefix.
+    score, then strict-evaluate them in that ranked order until a feasible
+    insertion is found or all candidates are exhausted.
     """
     destroy_generator_priors: Dict[str, float] = field(
         default_factory=lambda: {
@@ -76,8 +77,6 @@ class WeightedALNSConfig:
     accept_level: float = 0.25
     reaction_factor: float = 0.20
     prior_mix_lambda: float = 0.25
-    insert_eval_max_positions: int = 8
-    insert_eval_lookahead_after_first_feasible: int = 2
     default_time_limit_sec: float = 1.0
     default_max_iters: int = 60
 

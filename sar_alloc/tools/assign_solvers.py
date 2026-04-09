@@ -3,8 +3,8 @@ from __future__ import annotations
 """Weighted ALNS solver with two-stage repair decisions.
 
 Task score decides which task to repair next. Insert score decides the order of
-filtered insertion positions. Exact evaluation only refines a short checked
-prefix and certifies strict feasibility.
+filtered insertion positions. Strict evaluation certifies feasibility in that
+ranked order and never truncates the search to a short prefix.
 """
 
 import math
@@ -45,18 +45,53 @@ class _ScoredInsertCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class _StrictInsertCandidateEval:
-    scored_candidate: _ScoredInsertCandidate
-    trial: AssignmentSolution
-    ev: EvalResult
+class _TaskFeasibleInsertAnalysis:
+    tid: int
+    ranked_candidates: Tuple[_ScoredInsertCandidate, ...]
+    feasible_candidates: Tuple[_ScoredInsertCandidate, ...]
+    checked_candidate_count: int
+    prefix_failures_before_first_feasible: int
+    all_candidates_checked: bool
+
+    @property
+    def feasible_count(self) -> int:
+        return len(self.feasible_candidates)
+
+    @property
+    def best_feasible_candidate(self) -> Optional[_ScoredInsertCandidate]:
+        if not self.feasible_candidates:
+            return None
+        return self.feasible_candidates[0]
+
+    @property
+    def best_feasible_position(self) -> Optional[InsertPosition]:
+        candidate = self.best_feasible_candidate
+        if candidate is None:
+            return None
+        return candidate.position
+
+    @property
+    def best_feasible_score(self) -> Optional[float]:
+        candidate = self.best_feasible_candidate
+        if candidate is None:
+            return None
+        return float(candidate.insert_score)
+
+    @property
+    def second_best_feasible_score(self) -> Optional[float]:
+        if len(self.feasible_candidates) < 2:
+            return None
+        return float(self.feasible_candidates[1].insert_score)
 
 
 @dataclass(frozen=True, slots=True)
 class _TaskRegretEstimate:
     tid: int
+    feasible_count: int
     regret: float
-    best_insert_score: float
-    ranked_positions: Tuple[_ScoredInsertCandidate, ...]
+    best_feasible_score: float
+    second_best_feasible_score: Optional[float]
+    insertion_analysis: _TaskFeasibleInsertAnalysis
 
 
 EVAL_STATS = _EvalStats()
@@ -157,7 +192,7 @@ def _solve_weighted_alns(
     restore_every = _clamp_int(int(30 + 70 * (1.0 - accept_level)), 20, 120)
     infeasible_streak = 0
     iteration = 0
-    started_at = time.time()
+    started_at = time.perf_counter()
 
     while _budget_ok(budget, started_at, iteration):
         iteration += 1
@@ -262,11 +297,13 @@ def _solve_weighted_alns(
     returned = best_feasible if best_feasible is not None else best
     returned_source = "best_feasible" if best_feasible is not None else "best_overall"
     evaluate(returned, instance, config, update_solution_schedule=True)
+    actual_time_used_sec = max(0.0, time.perf_counter() - started_at)
     return _attach_solver_diagnostics(
         returned,
         _build_solver_diagnostics(
             policy=policy,
             total_iters=iteration,
+            actual_time_used_sec=actual_time_used_sec,
             best_update_iters=best_update_iters,
             best_update_lex_keys=best_update_lex_keys,
             returned_solution_source=returned_source,
@@ -426,7 +463,8 @@ def _repair_with_weighted_priority(
     sol = partial.clone(deep=True)
     ordered_tasks = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
     for tid in ordered_tasks:
-        choice = _select_position_by_insert_score(sol, tid, instance, config, policy)
+        analysis = _find_best_feasible_insertion(sol, tid, instance, config, policy)
+        choice = analysis.best_feasible_position if analysis is not None else None
         if choice is not None:
             sol.add_task(int(choice.agent_id), int(tid), position=int(choice.position))
             sol.unassigned.discard(int(tid))
@@ -440,55 +478,37 @@ def _repair_with_regret2(
     policy: WeightedALNSPolicy,
     rng: random.Random,
 ) -> AssignmentSolution:
-    """Repair by regret-2 over insert scores, then place with the shared selector."""
+    """Repair by regret-2 over strictly feasible insertion positions."""
     sol = partial.clone(deep=True)
-    skipped_tids: set[int] = set()
 
     while sol.unassigned:
         chosen: Optional[_TaskRegretEstimate] = None
-        candidate_tids = [
-            int(tid)
-            for tid in _order_tasks_weighted_priority(sol, instance, config, policy, rng)
-            if int(tid) not in skipped_tids
-        ]
+        candidate_tids = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
         for tid in candidate_tids:
-            ranked_positions = tuple(_rank_insert_positions_by_score(sol, int(tid), instance, config, policy))
-            regret = _regret2_from_ranked_insert_positions(ranked_positions)
+            analysis = _collect_feasible_insert_positions(sol, int(tid), instance, config, policy)
+            regret = _compute_regret2_from_feasible_positions(analysis)
             if regret is None:
                 continue
             candidate = _TaskRegretEstimate(
                 tid=int(tid),
+                feasible_count=int(analysis.feasible_count),
                 regret=float(regret),
-                best_insert_score=float(ranked_positions[0].insert_score),
-                ranked_positions=ranked_positions,
+                best_feasible_score=float(analysis.best_feasible_score),
+                second_best_feasible_score=analysis.second_best_feasible_score,
+                insertion_analysis=analysis,
             )
-            if chosen is None:
-                chosen = candidate
-                continue
-            if candidate.regret > chosen.regret + 1e-12:
-                chosen = candidate
-                continue
-            if abs(candidate.regret - chosen.regret) <= 1e-12 and candidate.best_insert_score < chosen.best_insert_score - 1e-12:
+            if _is_higher_regret_priority(candidate, chosen):
                 chosen = candidate
 
         if chosen is None:
             break
 
-        chosen_position = _select_position_by_insert_score(
-            sol,
-            chosen.tid,
-            instance,
-            config,
-            policy,
-            ranked_candidates=chosen.ranked_positions,
-        )
+        chosen_position = chosen.insertion_analysis.best_feasible_position
         if chosen_position is None:
-            skipped_tids.add(int(chosen.tid))
-            continue
+            break
 
         sol.add_task(int(chosen_position.agent_id), int(chosen.tid), position=int(chosen_position.position))
         sol.unassigned.discard(int(chosen.tid))
-        skipped_tids.clear()
 
     return sol
 
@@ -550,47 +570,58 @@ def _rank_insert_positions_by_score(
     return ranked
 
 
-def _progressive_refine_ranked_positions_by_eval(
+def _strict_eval_insert_candidate(
     sol: AssignmentSolution,
     tid: int,
+    candidate: _ScoredInsertCandidate,
+    instance: Instance,
+    config: Config,
+) -> bool:
+    """Run strict feasibility evaluation for one scored insertion candidate."""
+    trial = sol.clone(deep=True)
+    position = candidate.position
+    trial.add_task(int(position.agent_id), int(tid), position=int(position.position))
+    ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
+    return bool(ev_trial.is_feasible)
+
+
+def _scan_ranked_insert_candidates(
+    sol: AssignmentSolution,
+    tid: int,
+    *,
     ranked_candidates: Sequence[_ScoredInsertCandidate],
     instance: Instance,
     config: Config,
-) -> List[_StrictInsertCandidateEval]:
-    """Strictly evaluate a ranked prefix until feasible evidence is good enough.
-
-    Exact evaluation is only a refinement layer: it checks ranked candidates in
-    order, stops after a configurable lookahead beyond the first strict-feasible
-    hit, and never reverts to all-candidate exact selection.
-    """
-    max_positions = max(1, int(getattr(config.solver.weighted_alns, "insert_eval_max_positions", 8)))
-    lookahead = max(0, int(getattr(config.solver.weighted_alns, "insert_eval_lookahead_after_first_feasible", 2)))
-    evaluated: List[_StrictInsertCandidateEval] = []
-    first_feasible_eval_count: Optional[int] = None
+    stop_after_first_feasible: bool,
+) -> _TaskFeasibleInsertAnalysis:
+    """Strictly scan scored insertion candidates in ranked order."""
+    feasible_candidates: List[_ScoredInsertCandidate] = []
+    prefix_failures_before_first_feasible = 0
+    checked_candidate_count = 0
 
     for candidate in ranked_candidates:
-        if len(evaluated) >= max_positions:
-            break
-        trial = sol.clone(deep=True)
-        position = candidate.position
-        trial.add_task(int(position.agent_id), int(tid), position=int(position.position))
-        ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
-        evaluated.append(
-            _StrictInsertCandidateEval(
-                scored_candidate=candidate,
-                trial=trial,
-                ev=ev_trial,
-            )
-        )
-        if ev_trial.is_feasible and first_feasible_eval_count is None:
-            first_feasible_eval_count = len(evaluated)
-        if first_feasible_eval_count is not None and len(evaluated) >= min(max_positions, first_feasible_eval_count + lookahead):
-            break
+        checked_candidate_count += 1
+        is_feasible = _strict_eval_insert_candidate(sol, tid, candidate, instance, config)
+        if is_feasible:
+            feasible_candidates.append(candidate)
+            if stop_after_first_feasible:
+                break
+            continue
+        if not feasible_candidates:
+            prefix_failures_before_first_feasible += 1
 
-    return evaluated
+    analysis = _TaskFeasibleInsertAnalysis(
+        tid=int(tid),
+        ranked_candidates=tuple(ranked_candidates),
+        feasible_candidates=tuple(feasible_candidates),
+        checked_candidate_count=int(checked_candidate_count),
+        prefix_failures_before_first_feasible=int(prefix_failures_before_first_feasible),
+        all_candidates_checked=bool(checked_candidate_count == len(ranked_candidates)),
+    )
+    return analysis
 
 
-def _select_position_by_insert_score(
+def _collect_feasible_insert_positions(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
@@ -598,32 +629,87 @@ def _select_position_by_insert_score(
     policy: WeightedALNSPolicy,
     *,
     ranked_candidates: Optional[Sequence[_ScoredInsertCandidate]] = None,
-) -> Optional[InsertPosition]:
-    """Select the final repair position from insert-score-ranked candidates."""
-    ranked = list(ranked_candidates) if ranked_candidates is not None else _rank_insert_positions_by_score(sol, tid, instance, config, policy)
+) -> _TaskFeasibleInsertAnalysis:
+    """Collect all strictly feasible insertion positions for one task."""
+    ranked = tuple(ranked_candidates) if ranked_candidates is not None else tuple(_rank_insert_positions_by_score(sol, tid, instance, config, policy))
+    if not ranked:
+        return _TaskFeasibleInsertAnalysis(
+            tid=int(tid),
+            ranked_candidates=(),
+            feasible_candidates=(),
+            checked_candidate_count=0,
+            prefix_failures_before_first_feasible=0,
+            all_candidates_checked=True,
+        )
+    return _scan_ranked_insert_candidates(
+        sol,
+        tid,
+        ranked_candidates=ranked,
+        instance=instance,
+        config=config,
+        stop_after_first_feasible=False,
+    )
+
+
+def _find_best_feasible_insertion(
+    sol: AssignmentSolution,
+    tid: int,
+    instance: Instance,
+    config: Config,
+    policy: WeightedALNSPolicy,
+    *,
+    ranked_candidates: Optional[Sequence[_ScoredInsertCandidate]] = None,
+) -> Optional[_TaskFeasibleInsertAnalysis]:
+    """Return the first strictly feasible insertion in insert-score order."""
+    ranked = tuple(ranked_candidates) if ranked_candidates is not None else tuple(_rank_insert_positions_by_score(sol, tid, instance, config, policy))
     if not ranked:
         return None
-
-    checked_candidates = _progressive_refine_ranked_positions_by_eval(sol, tid, ranked, instance, config)
-    best_checked_feasible: Optional[_StrictInsertCandidateEval] = None
-    for candidate in checked_candidates:
-        if not candidate.ev.is_feasible:
-            continue
-        if best_checked_feasible is None or compare(candidate.ev, best_checked_feasible.ev, config) < 0:
-            best_checked_feasible = candidate
-
-    if best_checked_feasible is None:
+    analysis = _scan_ranked_insert_candidates(
+        sol,
+        tid,
+        ranked_candidates=ranked,
+        instance=instance,
+        config=config,
+        stop_after_first_feasible=True,
+    )
+    if analysis.best_feasible_position is None:
         return None
-    return best_checked_feasible.scored_candidate.position
+    return analysis
 
 
-def _regret2_from_ranked_insert_positions(ranked_positions: Sequence[_ScoredInsertCandidate]) -> Optional[float]:
-    """Estimate regret-2 directly from the two best insert scores."""
-    if not ranked_positions:
+def _compute_regret2_from_feasible_positions(analysis: _TaskFeasibleInsertAnalysis) -> Optional[float]:
+    """Compute regret-2 from strictly feasible insertion positions only."""
+    if analysis.feasible_count == 0:
         return None
-    if len(ranked_positions) == 1:
+    if analysis.feasible_count == 1:
         return float("inf")
-    return float(ranked_positions[1].insert_score) - float(ranked_positions[0].insert_score)
+    best_score = analysis.best_feasible_score
+    second_best_score = analysis.second_best_feasible_score
+    if best_score is None or second_best_score is None:
+        return None
+    return float(second_best_score) - float(best_score)
+
+
+def _is_higher_regret_priority(
+    candidate: _TaskRegretEstimate,
+    incumbent: Optional[_TaskRegretEstimate],
+) -> bool:
+    """Prefer single-feasible tasks, otherwise maximize regret-2."""
+    if incumbent is None:
+        return True
+
+    candidate_single = candidate.feasible_count == 1
+    incumbent_single = incumbent.feasible_count == 1
+    if candidate_single != incumbent_single:
+        return candidate_single
+    if candidate_single and incumbent_single:
+        return candidate.best_feasible_score < incumbent.best_feasible_score - 1e-12
+
+    if candidate.regret > incumbent.regret + 1e-12:
+        return True
+    if abs(candidate.regret - incumbent.regret) <= 1e-12 and candidate.best_feasible_score < incumbent.best_feasible_score - 1e-12:
+        return True
+    return False
 
 
 def _select_best_feasible_position_by_eval_legacy(
@@ -781,6 +867,7 @@ def _build_solver_diagnostics(
     *,
     policy: WeightedALNSPolicy,
     total_iters: int,
+    actual_time_used_sec: float,
     best_update_iters: List[int],
     best_update_lex_keys: List[List[float]],
     returned_solution_source: str,
@@ -794,6 +881,8 @@ def _build_solver_diagnostics(
         "algorithm": "weighted_alns",
         "policy": policy.as_dict(),
         "total_iters": int(total_iters),
+        "actual_iters_used": int(total_iters),
+        "actual_time_used_sec": max(0.0, float(actual_time_used_sec)),
         "best_update_count": len(best_update_iters),
         "best_update_iters": [int(x) for x in best_update_iters],
         "best_update_lex_keys": [list(x) for x in best_update_lex_keys],
@@ -998,7 +1087,7 @@ def _reset_segment_scores(scores: Dict[str, float], used: Dict[str, int]) -> Non
 
 
 def _budget_ok(budget: Budget, started_at: float, iteration: int) -> bool:
-    if budget.time_limit_sec is not None and (time.time() - started_at) >= float(budget.time_limit_sec):
+    if budget.time_limit_sec is not None and (time.perf_counter() - started_at) >= float(budget.time_limit_sec):
         return False
     if budget.max_iters is not None and iteration >= int(budget.max_iters):
         return False

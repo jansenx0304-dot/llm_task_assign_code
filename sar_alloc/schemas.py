@@ -26,10 +26,10 @@ OBJECTIVE_LAYER_SCHEMA = """{
 
 
 NEXT_ACTION_SCHEMA = """{
-  "action_type": "build_initial_solution|run_weighted_alns|stop",
+  "action_type": "build_initial_solution|run_alns|stop",
   "action_payload": {},
   "// build_initial_solution payload": {"init_method": "insert|sweep"},
-  "// run_weighted_alns payload": {
+  "// run_alns payload": {
     "destroy_generator_priors": {
       "global_assigned": "number in [0.10, 5.0]",
       "random_subset": "number in [0.10, 5.0]",
@@ -43,7 +43,7 @@ NEXT_ACTION_SCHEMA = """{
       "regret2_order": "number in [0.10, 5.0]"
     },
     "repair_position_selector": "filtered_best_position",
-    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then progressively strict-evaluate a short prefix and choose the best checked strict-feasible position",
+    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then strict-evaluate candidates in that order until a feasible insertion is found or all candidates are proven infeasible",
     "strength_ratio": "number in [0.02, 0.40]",
     "metric_weights": {
       "priority": "number in [0, 5]",
@@ -62,7 +62,7 @@ NEXT_ACTION_SCHEMA = """{
   },
   "// stop payload": {},
   "budget_request": {
-    "time_limit_sec": "optional positive number",
+    "time_limit_sec": "required positive number for run_alns",
     "max_iters": "optional positive integer"
   }
 }"""
@@ -72,7 +72,7 @@ SCHEMA_CONSTRAINTS = {
     "next_action": {
         "action_type": [
             "build_initial_solution",
-            "run_weighted_alns",
+            "run_alns",
             "stop",
         ],
         "init_method": ["insert", "sweep"],

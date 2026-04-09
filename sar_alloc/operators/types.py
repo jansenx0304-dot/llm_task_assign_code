@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Repair is explicitly split into task selectors and one position selector. The
 external selector name `filtered_best_position` is stable, but its semantics are
-insert-score ranking plus progressive strict evaluation.
+insert-score ranking plus ranked strict feasibility checks over all candidates.
 """
 
 from dataclasses import dataclass, fields

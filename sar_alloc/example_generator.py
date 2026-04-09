@@ -482,7 +482,7 @@ if __name__ == "__main__":
     # - spatial_scale: 地图尺度
     # - cluster_spread: 簇内离散度
     cfg = GenConfig(
-        n_tasks=300,
+        n_tasks=100,
         n_agents=6,
         seed=42,
         tw_late_slack=100.0,
