@@ -114,6 +114,7 @@ class StepRecord:
     action_payload: Dict[str, Any]
     budget_request: Dict[str, Any]
     budget_allocated: Dict[str, Any]
+    rationale: str
     compare_vs_incumbent: Optional[int]
     advanced_incumbent: bool
     lex_key_changed: bool
@@ -141,7 +142,11 @@ class AgentState:
             "incumbent_exists": self.incumbent_summary is not None,
             "current_init_method": self.current_init_method,
             "current_weighted_policy": self.current_weighted_policy,
-            "last_action": None if last is None else {"action_type": last.action_type, "action_payload": last.action_payload},
+            "last_action": None if last is None else {
+                "action_type": last.action_type,
+                "action_payload": last.action_payload,
+                "rationale": last.rationale,
+            },
         }
 
 
@@ -184,6 +189,7 @@ def run_orchestrator(
 
         subsection(f"Step {step_id} Result")
         kv("action", record.action_type)
+        kv("rationale", record.rationale)
         kv("compare_vs_incumbent", record.compare_vs_incumbent)
         kv("advanced_incumbent", record.advanced_incumbent)
         kv("lex_key_changed", record.lex_key_changed)
@@ -229,6 +235,7 @@ def _stage_build_objective(client: LLMClientProtocol, user_goal_text: str, cfg: 
     if not bool(result.get("ok", False)):
         _log_llm_fallback("objective", "validation", str(result.get("error", "invalid objective payload")))
         return False
+    kv("objective_rationale", _sanitize_rationale(parsed.get("rationale"), fallback="No rationale provided."))
     return True
 
 
@@ -272,6 +279,7 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
     action_type = str(action["action_type"]).strip()
     payload = dict(action.get("action_payload", {}))
     budget_request = dict(action.get("budget_request", {}))
+    rationale = _sanitize_rationale(action.get("rationale"), fallback=_default_action_rationale(action_type))
     should_stop = False
     result_summary = "No action executed."
     budget_allocated: Dict[str, Any] = {}
@@ -365,7 +373,7 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         if solver_diagnostics:
             result_summary = f"{result_summary}, solver_diag={json.dumps(_condense_solver_diagnostics(solver_diagnostics), ensure_ascii=True)}"
 
-    return StepRecord(step_id=step_id, action_type=action_type, action_payload=payload, budget_request=budget_request, budget_allocated=budget_allocated, compare_vs_incumbent=compare_vs_incumbent, advanced_incumbent=advanced, lex_key_changed=lex_changed, stop=should_stop, result_summary=result_summary, solver_diagnostics=solver_diagnostics)
+    return StepRecord(step_id=step_id, action_type=action_type, action_payload=payload, budget_request=budget_request, budget_allocated=budget_allocated, rationale=rationale, compare_vs_incumbent=compare_vs_incumbent, advanced_incumbent=advanced, lex_key_changed=lex_changed, stop=should_stop, result_summary=result_summary, solver_diagnostics=solver_diagnostics)
 
 
 def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
@@ -376,10 +384,12 @@ def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
 
 def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state: AgentState, budget_state: BudgetState, cfg: Config) -> Dict[str, Any]:
     fallback = "build_initial_solution" if state.incumbent_solution is None else (RUN_ALNS_ACTION if RUN_ALNS_ACTION in allowed_actions else "stop")
+    raw_rationale = _sanitize_rationale(parsed.get("rationale") if isinstance(parsed, dict) else None)
     action_type = str(parsed.get("action_type", "")).strip() if isinstance(parsed, dict) else ""
     if action_type not in allowed_actions:
         warning(f"Illegal or missing action '{action_type}', fallback to '{fallback}'.")
         action_type = fallback
+        raw_rationale = f"Fallback to '{fallback}' because the LLM response did not choose an allowed action."
     payload = parsed.get("action_payload", {}) if isinstance(parsed, dict) else {}
     payload = payload if isinstance(payload, dict) else {}
     compiled_policy: Optional[WeightedALNSPolicy] = None
@@ -394,7 +404,12 @@ def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state:
     budget_request = _sanitize_budget_request(parsed.get("budget_request", {}) if isinstance(parsed, dict) else {})
     if action_type == RUN_ALNS_ACTION:
         budget_request = _ensure_run_alns_budget_request(budget_request, cfg)
-    out = {"action_type": action_type, "action_payload": normalized_payload, "budget_request": budget_request}
+    out = {
+        "action_type": action_type,
+        "action_payload": normalized_payload,
+        "budget_request": budget_request,
+        "rationale": raw_rationale or _default_action_rationale(action_type),
+    }
     if compiled_policy is not None:
         out["_compiled_policy"] = compiled_policy
     return _enforce_action_guardrails(out, allowed_actions, state, budget_state, cfg)
@@ -404,21 +419,33 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
     guarded = dict(action)
     if state.incumbent_solution is None and "build_initial_solution" in allowed_actions and guarded.get("action_type") != "build_initial_solution":
         warning("No incumbent is available; forcing action_type='build_initial_solution'.")
-        return {"action_type": "build_initial_solution", "action_payload": {"init_method": "insert"}, "budget_request": guarded.get("budget_request", {})}
+        return {
+            "action_type": "build_initial_solution",
+            "action_payload": {"init_method": "insert"},
+            "budget_request": guarded.get("budget_request", {}),
+            "rationale": "Forced build_initial_solution because no incumbent is available yet.",
+        }
     if guarded.get("action_type") == "stop" and not _should_allow_stop(state, budget_state):
         fallback = "build_initial_solution" if state.incumbent_solution is None else RUN_ALNS_ACTION
         warning(f"Stop rejected by guardrails; forcing action_type='{fallback}'.")
         if fallback == "build_initial_solution":
-            return {"action_type": fallback, "action_payload": {"init_method": "insert"}, "budget_request": guarded.get("budget_request", {})}
+            return {
+                "action_type": fallback,
+                "action_payload": {"init_method": "insert"},
+                "budget_request": guarded.get("budget_request", {}),
+                "rationale": "Stop was rejected by guardrails, so the controller forced build_initial_solution.",
+            }
         compiled = compile_weighted_alns_policy(cfg, {})
         return {
             "action_type": fallback,
             "action_payload": dict(compiled["applied"]),
             "budget_request": _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg),
+            "rationale": "Stop was rejected by guardrails, so the controller forced run_alns.",
             "_compiled_policy": compiled["policy"],
         }
     if guarded.get("action_type") == RUN_ALNS_ACTION:
         guarded["budget_request"] = _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg)
+    guarded["rationale"] = _sanitize_rationale(guarded.get("rationale"), fallback=_default_action_rationale(str(guarded.get("action_type", ""))))
     return guarded
 
 
@@ -476,7 +503,11 @@ def _build_search_progress_summary(state: AgentState) -> Dict[str, Any]:
     total_iters = float(diag.get("total_iters") or 0.0)
     plateau = float(diag.get("plateau_iters_after_last_update") or 0.0)
     return {
-        "last_action": None if last is None else {"action_type": last.action_type, "action_payload": last.action_payload},
+        "last_action": None if last is None else {
+            "action_type": last.action_type,
+            "action_payload": last.action_payload,
+            "rationale": last.rationale,
+        },
         "last_step_advanced_incumbent": None if last is None else bool(last.advanced_incumbent),
         "consecutive_flat_steps": int(state.consecutive_flat_steps),
         "recent_same_action_repeat": _count_recent_same_action_repeat(state.history),
@@ -618,7 +649,7 @@ def _extract_solver_actual_usage(diagnostics: Dict[str, Any]) -> Tuple[int, floa
 
 
 def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
-    unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"layers"})
+    unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"rationale", "layers"})
     if unknown_top_level:
         return f"unknown field '{unknown_top_level[0]}'"
     if "layers" not in parsed:
@@ -659,7 +690,7 @@ def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
 
 
 def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) -> Optional[str]:
-    unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"action_type", "action_payload", "budget_request"})
+    unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"rationale", "action_type", "action_payload", "budget_request"})
     if unknown_top_level:
         return f"unknown field '{unknown_top_level[0]}'"
     allowed_action_types = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("action_type", []) or [])
@@ -857,6 +888,25 @@ def _round_number(value: Optional[float]) -> Optional[float]:
 
 def _round_dict(data: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
     return {key: _round_number(value) for key, value in data.items()}
+
+
+def _sanitize_rationale(value: Any, fallback: str = "") -> str:
+    if isinstance(value, str):
+        normalized = " ".join(value.strip().split())
+        if normalized:
+            return normalized
+    return fallback
+
+
+def _default_action_rationale(action_type: str) -> str:
+    normalized = str(action_type).strip()
+    if normalized == "build_initial_solution":
+        return "Build an initial incumbent because no incumbent is available yet."
+    if normalized == RUN_ALNS_ACTION:
+        return "Run weighted ALNS to improve the incumbent under the remaining budget."
+    if normalized == "stop":
+        return "Stop because the remaining budget or recent progress is not enough for a meaningful next step."
+    return "No rationale provided."
 
 
 def _as_optional_float(value: Any) -> Optional[float]:

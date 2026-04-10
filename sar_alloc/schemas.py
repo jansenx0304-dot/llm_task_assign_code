@@ -15,6 +15,7 @@ from .operators import (
 
 
 OBJECTIVE_LAYER_SCHEMA = """{
+  "rationale": "short string explaining why these layers match the user goal",
   "layers": [
     {
       "name": "feasibility",
@@ -26,6 +27,7 @@ OBJECTIVE_LAYER_SCHEMA = """{
 
 
 NEXT_ACTION_SCHEMA = """{
+  "rationale": "short string explaining why this is the best next action now",
   "action_type": "build_initial_solution|run_alns|stop",
   "action_payload": {},
   "// build_initial_solution payload": {"init_method": "insert|sweep"},

@@ -72,7 +72,7 @@ DEV_SETTINGS: Dict[str, Any] = {
 
     # 预算：两者任意设置其一或多个，solver 会满足“任一达到就停”
     "budget": {
-        "time_limit_sec": 200.0,
+        "time_limit_sec": 500.0,
         "max_iters": 10000,
     },
 

@@ -9,7 +9,8 @@ from typing import Iterable
 def get_system_prompt() -> str:
     return (
         "You are an optimization expert for multi-agent task assignment. "
-        "Return strict JSON only and never emit fields outside the requested schema."
+        "Return strict JSON only and never emit fields outside the requested schema. "
+        "Always include the requested `rationale` field as a concise string."
     )
 
 
@@ -34,6 +35,7 @@ Rules:
 - Use at most 5 layers.
 - Prefer a minimal, non-redundant objective.
 - Earlier layers must strictly dominate later layers.
+- Include `rationale` as a concise explanation of why these layers match the user goal.
 
 Return JSON only.
 """.strip()
@@ -55,7 +57,8 @@ def get_next_action_prompt(
     return f"""
 You are the controller of a closed-loop optimization process for multi-agent task assignment.
 
-Objective layers are locked. Earlier layers dominate later layers strictly.
+The lexicographic objective is already locked.
+Earlier objective layers strictly dominate later layers.
 
 Inputs:
 - User goal:
@@ -85,44 +88,31 @@ Inputs:
 - Allowed actions:
 {_render_block(allowed)}
 
-Weighted ALNS architecture rules:
-1. Destroy operators are only candidate generators. They do not rank tasks themselves.
-2. Repair is split into task ordering and the single allowed position selector `filtered_best_position`.
-3. Task score and insert score use the same shared metric weight vector `metric_weights`, but they have different roles:
-   - task score decides which unassigned task to try next,
-   - insert score decides the ranking of filtered insertion positions.
-4. Do not pick a single destroy operator or a single repair task selector.
-   You must assign positive prior weights over the full destroy operator pool and repair-task pool.
-5. The solver keeps those LLM priors fixed for this run and combines them with adaptive rule weights internally:
-   `w_final = (w_rule)^(1-lambda) * (w_llm)^(lambda)`.
-   Use higher prior weights to bias sampling frequency, not to hard-disable adaptive learning.
-6. `violation_risk` means local time-window / feasibility pressure:
-   - assigned task removal: current slack or tardiness pressure,
-   - unassigned task reinsertion: best reachable slack lower-bound pressure,
-   - insertion move: minimum slack or violation pressure on the impacted suffix.
-7. Do not invent metrics beyond:
-   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
-   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
-8. `repair_position_selector` must be `filtered_best_position`, meaning:
-   - first enumerate loosely filtered candidate positions,
-   - then rank them by insert score,
-   - then run strict feasibility checks on that ranked list in order until a feasible insertion is found or all candidates fail,
-   - then choose the first strict-feasible position found in ranked order.
-9. Strict evaluation is only a feasibility-certification step after ranking. It must not be treated as a separate all-candidate position-ranking pass.
-10. Output only fields defined in the schema. No commentary, no extra keys.
+ALNS control semantics:
+- Destroy operators are sampled from the full destroy pool using positive prior weights; do not choose a single destroy operator.
+- Repair task selectors are sampled from the full repair-task pool using positive prior weights; do not choose a single repair task selector.
+- `metric_weights` are shared scoring weights used by the repair logic for task ordering and insertion ranking.
+- `repair_position_selector` must remain `filtered_best_position`.
+- Use only these metric names exactly as provided:
+  `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
+  `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
+- Do not invent metrics, operators, enums, or extra fields.
 
 Decision rules:
 1. Choose exactly one action from `allowed_actions`.
-2. Objective layers are locked; optimize under them and never rewrite them.
-3. Do not trade away an unresolved higher-priority layer for a lower-priority gain.
-4. Use current incumbent metrics, deltas, and progress signals as the main evidence.
+2. Never rewrite or reinterpret the locked objective.
+3. Never accept a worse unresolved higher-priority layer in exchange for a better lower-priority layer.
+4. Base the decision mainly on current incumbent metrics, recent deltas, progress signals, and remaining budget.
 5. Request budget only for the next action and never exceed `remaining_budget`.
 6. If `action_type` is `run_alns`, `budget_request.time_limit_sec` is required and must be positive. `budget_request.max_iters` is optional.
-7. Prefer `stop` only when remaining budget is too small for a meaningful step or progress is clearly exhausted.
+7. Prefer `stop` only when progress is clearly exhausted or the remaining budget is too small for a meaningful next step.
 8. If no incumbent exists, prefer `build_initial_solution`.
+9. When selecting `run_alns`, use the policy fields to express a search bias, not a hard deterministic choice.
 
-Output:
+Output requirements:
 - Return JSON only.
+- Always include `rationale` as a concise explanation of why this is the best next action now.
+- Keep `rationale` grounded in the incumbent metrics, recent progress, and remaining budget.
 - Follow this schema exactly:
 {json_schema}
 """.strip()

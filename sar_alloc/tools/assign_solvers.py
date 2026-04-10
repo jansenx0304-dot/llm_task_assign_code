@@ -3,8 +3,9 @@ from __future__ import annotations
 """Weighted ALNS solver with two-stage repair decisions.
 
 Task score decides which task to repair next. Insert score decides the order of
-filtered insertion positions. Strict evaluation certifies feasibility in that
-ranked order and never truncates the search to a short prefix.
+filtered insertion positions. Weighted-priority repair keeps the full ranked
+scan, while regret-2 can optionally use task/position top-k truncation for
+faster A/B experiments.
 """
 
 import math
@@ -95,6 +96,10 @@ class _TaskRegretEstimate:
 
 
 EVAL_STATS = _EvalStats()
+
+REGRET2_USE_TRUNCATED_DEFAULT = True
+REGRET2_TOPK_TASKS_DEFAULT = 8
+REGRET2_TOPK_POSITIONS_DEFAULT = 6
 
 
 def evaluate(*args, **kwargs):  # noqa: F811
@@ -188,6 +193,7 @@ def _solve_weighted_alns(
     best_update_iters: List[int] = []
     best_update_lex_keys: List[List[float]] = []
     last_acceptance_decision: Optional[Dict[str, Any]] = None
+    regret2_repair_summary = _init_regret2_repair_summary()
 
     restore_every = _clamp_int(int(30 + 70 * (1.0 - accept_level)), 20, 120)
     infeasible_streak = 0
@@ -215,9 +221,13 @@ def _solve_weighted_alns(
 
         partial = cur.clone(deep=True)
         _remove_tasks(partial, removed)
+        partial.solver_diagnostics = {}
         partial.normalize(instance)
 
         trial = repair_task_ops[r_name](partial, instance, config, policy, rng)
+        trial_regret2_stats = dict((getattr(trial, "solver_diagnostics", {}) or {}).get("last_regret2_repair", {}) or {})
+        if r_name == "regret2_order" and trial_regret2_stats:
+            _accumulate_regret2_repair_summary(regret2_repair_summary, trial_regret2_stats)
 
         trial.normalize(instance)
         ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
@@ -234,11 +244,14 @@ def _solve_weighted_alns(
         accepted = acceptance.accepted
         last_acceptance_decision = acceptance.as_dict()
         if iteration % 10 == 0:
-            info(
+            message = (
                 f"Weighted ALNS generated a trial solution at iter={iteration}, "
                 f"destroy={d_name}, repair={r_name}, accepted={bool(accepted)}, "
                 f"feasible={bool(ev_trial.is_feasible)}, lex_key={ev_trial.lex_key}"
             )
+            if r_name == "regret2_order" and trial_regret2_stats:
+                message = f"{message}, {_format_regret2_repair_log(trial_regret2_stats)}"
+            info(message)
 
         reward = 0.0
         if accepted:
@@ -310,6 +323,7 @@ def _solve_weighted_alns(
             initial_solution_feasible=initial_solution_feasible,
             returned_solution_feasible=bool(getattr(returned.eval, "is_feasible", False)),
             last_acceptance_decision=last_acceptance_decision,
+            regret2_repair_summary=_finalize_regret2_repair_summary(regret2_repair_summary),
             operator_weights={
                 "destroy_candidate_generators": {
                     "adaptive": d_w,
@@ -480,12 +494,37 @@ def _repair_with_regret2(
 ) -> AssignmentSolution:
     """Repair by regret-2 over strictly feasible insertion positions."""
     sol = partial.clone(deep=True)
+    settings = _get_regret2_repair_settings(config)
+    round_stats: List[Dict[str, Any]] = []
+    tasks_inserted = 0
 
     while sol.unassigned:
         chosen: Optional[_TaskRegretEstimate] = None
-        candidate_tids = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
+        ordered_tids = _order_tasks_weighted_priority(sol, instance, config, policy, rng)
+        candidate_tids = list(ordered_tids)
+        if settings["use_truncated_regret2"]:
+            candidate_tids = candidate_tids[: settings["regret2_topk_tasks"]]
+        task_scans: List[Dict[str, Any]] = []
         for tid in candidate_tids:
-            analysis = _collect_feasible_insert_positions(sol, int(tid), instance, config, policy)
+            ranked_candidates = tuple(_rank_insert_positions_by_score(sol, int(tid), instance, config, policy))
+            if settings["use_truncated_regret2"]:
+                ranked_candidates = ranked_candidates[: settings["regret2_topk_positions"]]
+            analysis = _collect_feasible_insert_positions(
+                sol,
+                int(tid),
+                instance,
+                config,
+                policy,
+                ranked_candidates=ranked_candidates,
+            )
+            task_scans.append(
+                {
+                    "tid": int(tid),
+                    "ranked_position_count": int(len(ranked_candidates)),
+                    "positions_checked": int(analysis.checked_candidate_count),
+                    "feasible_position_count": int(analysis.feasible_count),
+                }
+            )
             regret = _compute_regret2_from_feasible_positions(analysis)
             if regret is None:
                 continue
@@ -500,6 +539,16 @@ def _repair_with_regret2(
             if _is_higher_regret_priority(candidate, chosen):
                 chosen = candidate
 
+        round_stats.append(
+            {
+                "remaining_unassigned": int(len(sol.unassigned)),
+                "ranked_task_count": int(len(ordered_tids)),
+                "analyzed_task_count": int(len(candidate_tids)),
+                "selected_tid": (None if chosen is None else int(chosen.tid)),
+                "task_scans": task_scans,
+            }
+        )
+
         if chosen is None:
             break
 
@@ -509,8 +558,119 @@ def _repair_with_regret2(
 
         sol.add_task(int(chosen_position.agent_id), int(chosen.tid), position=int(chosen_position.position))
         sol.unassigned.discard(int(chosen.tid))
+        tasks_inserted += 1
+
+    sol.solver_diagnostics["last_regret2_repair"] = _build_regret2_repair_stats(
+        settings=settings,
+        rounds=round_stats,
+        tasks_inserted=tasks_inserted,
+    )
 
     return sol
+
+
+def _get_regret2_repair_settings(config: Config) -> Dict[str, Any]:
+    extras = dict(getattr(config, "extras", {}) or {})
+    return {
+        "use_truncated_regret2": _coerce_boolish(extras.get("use_truncated_regret2"), REGRET2_USE_TRUNCATED_DEFAULT),
+        "regret2_topk_tasks": _coerce_positive_int(extras.get("regret2_topk_tasks"), REGRET2_TOPK_TASKS_DEFAULT),
+        "regret2_topk_positions": _coerce_positive_int(extras.get("regret2_topk_positions"), REGRET2_TOPK_POSITIONS_DEFAULT),
+    }
+
+
+def _build_regret2_repair_stats(
+    *,
+    settings: Dict[str, Any],
+    rounds: Sequence[Dict[str, Any]],
+    tasks_inserted: int,
+) -> Dict[str, Any]:
+    round_count = len(rounds)
+    total_tasks_analyzed = sum(int(round_stat.get("analyzed_task_count", 0)) for round_stat in rounds)
+    total_positions_checked = sum(
+        int(task_scan.get("positions_checked", 0))
+        for round_stat in rounds
+        for task_scan in list(round_stat.get("task_scans", []) or [])
+    )
+    return {
+        "mode": ("truncated" if settings["use_truncated_regret2"] else "full"),
+        "use_truncated_regret2": bool(settings["use_truncated_regret2"]),
+        "regret2_topk_tasks": int(settings["regret2_topk_tasks"]),
+        "regret2_topk_positions": int(settings["regret2_topk_positions"]),
+        "round_count": int(round_count),
+        "tasks_inserted": int(tasks_inserted),
+        "total_tasks_analyzed": int(total_tasks_analyzed),
+        "avg_tasks_analyzed_per_round": round(float(total_tasks_analyzed) / float(round_count), 4) if round_count else 0.0,
+        "total_positions_checked": int(total_positions_checked),
+        "avg_positions_checked_per_task": round(float(total_positions_checked) / float(total_tasks_analyzed), 4) if total_tasks_analyzed else 0.0,
+        "rounds": [dict(round_stat) for round_stat in rounds],
+    }
+
+
+def _format_regret2_repair_log(stats: Dict[str, Any]) -> str:
+    rounds = list(stats.get("rounds", []) or [])
+    if not rounds:
+        return f"regret2={stats.get('mode', 'unknown')}, rounds=0"
+
+    last_round = dict(rounds[-1])
+    task_scans = list(last_round.get("task_scans", []) or [])
+    preview_limit = 8
+    preview = ", ".join(
+        f"{int(scan.get('tid', -1))}:{int(scan.get('positions_checked', 0))}"
+        for scan in task_scans[:preview_limit]
+    )
+    if len(task_scans) > preview_limit:
+        preview = f"{preview}, ...+{len(task_scans) - preview_limit}" if preview else f"...+{len(task_scans) - preview_limit}"
+
+    return (
+        f"regret2={stats.get('mode', 'unknown')}, "
+        f"tasks={int(last_round.get('analyzed_task_count', 0))}/{int(last_round.get('ranked_task_count', 0))}, "
+        f"pos_checks=[{preview}], "
+        f"rounds={int(stats.get('round_count', 0))}, "
+        f"avg_pos={float(stats.get('avg_positions_checked_per_task', 0.0)):.2f}"
+    )
+
+
+def _init_regret2_repair_summary() -> Dict[str, Any]:
+    return {
+        "calls": 0,
+        "mode": None,
+        "use_truncated_regret2": None,
+        "regret2_topk_tasks": REGRET2_TOPK_TASKS_DEFAULT,
+        "regret2_topk_positions": REGRET2_TOPK_POSITIONS_DEFAULT,
+        "total_repair_rounds": 0,
+        "total_tasks_analyzed": 0,
+        "total_positions_checked": 0,
+        "last_call": {},
+    }
+
+
+def _accumulate_regret2_repair_summary(summary: Dict[str, Any], call_stats: Dict[str, Any]) -> None:
+    summary["calls"] = int(summary.get("calls", 0)) + 1
+    summary["mode"] = call_stats.get("mode")
+    summary["use_truncated_regret2"] = bool(call_stats.get("use_truncated_regret2", False))
+    summary["regret2_topk_tasks"] = int(call_stats.get("regret2_topk_tasks", REGRET2_TOPK_TASKS_DEFAULT))
+    summary["regret2_topk_positions"] = int(call_stats.get("regret2_topk_positions", REGRET2_TOPK_POSITIONS_DEFAULT))
+    summary["total_repair_rounds"] = int(summary.get("total_repair_rounds", 0)) + int(call_stats.get("round_count", 0))
+    summary["total_tasks_analyzed"] = int(summary.get("total_tasks_analyzed", 0)) + int(call_stats.get("total_tasks_analyzed", 0))
+    summary["total_positions_checked"] = int(summary.get("total_positions_checked", 0)) + int(call_stats.get("total_positions_checked", 0))
+    summary["last_call"] = dict(call_stats)
+
+
+def _finalize_regret2_repair_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    calls = int(summary.get("calls", 0))
+    if calls <= 0:
+        return {}
+
+    total_rounds = int(summary.get("total_repair_rounds", 0))
+    total_tasks = int(summary.get("total_tasks_analyzed", 0))
+    finalized = dict(summary)
+    finalized["avg_tasks_analyzed_per_round"] = round(float(total_tasks) / float(total_rounds), 4) if total_rounds else 0.0
+    finalized["avg_positions_checked_per_task"] = (
+        round(float(int(summary.get("total_positions_checked", 0))) / float(total_tasks), 4)
+        if total_tasks
+        else 0.0
+    )
+    return finalized
 
 
 def _order_tasks_weighted_priority(
@@ -875,9 +1035,10 @@ def _build_solver_diagnostics(
     returned_solution_feasible: bool,
     operator_weights: Dict[str, Any],
     last_acceptance_decision: Optional[Dict[str, Any]],
+    regret2_repair_summary: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     last_best_iter = best_update_iters[-1] if best_update_iters else None
-    return {
+    diagnostics = {
         "algorithm": "weighted_alns",
         "policy": policy.as_dict(),
         "total_iters": int(total_iters),
@@ -895,6 +1056,9 @@ def _build_solver_diagnostics(
         "last_acceptance_decision": dict(last_acceptance_decision or {}),
         "operator_weights": _numericize_weight_tree(operator_weights),
     }
+    if regret2_repair_summary:
+        diagnostics["regret2_repair"] = dict(regret2_repair_summary)
+    return diagnostics
 
 
 @dataclass(slots=True)
@@ -1092,6 +1256,29 @@ def _budget_ok(budget: Budget, started_at: float, iteration: int) -> bool:
     if budget.max_iters is not None and iteration >= int(budget.max_iters):
         return False
     return True
+
+
+def _coerce_positive_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _coerce_boolish(value: Any, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(default)
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
