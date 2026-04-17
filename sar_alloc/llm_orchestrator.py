@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Budget, Config
-from .console import info, json_block, kv, section, stop, subsection, text_block, warning
+from .console import info, json_block, kv, section, stop, text_block, warning
 from .models import Instance
 from .operators import WeightedALNSPolicy
 from .prompts import get_next_action_prompt, get_objective_layer_prompt, get_system_prompt
@@ -22,7 +22,10 @@ from .tools import (
     solve_assignment,
     solution_summary,
 )
-from .tools.llm_utils import format_available_metrics
+from .tools.llm_utils import (
+    format_available_metrics,
+    llm_parse_operator_intent as parse_operator_intent,
+)
 
 
 DEFAULT_MAX_STAGNATION_STEPS = 3
@@ -111,6 +114,8 @@ class BudgetState:
 class StepRecord:
     step_id: int
     action_type: str
+    action_from_llm: bool
+    operator_intent: Optional[Dict[str, str]]
     action_payload: Dict[str, Any]
     budget_request: Dict[str, Any]
     budget_allocated: Dict[str, Any]
@@ -120,6 +125,8 @@ class StepRecord:
     lex_key_changed: bool
     stop: bool
     result_summary: str
+    candidate_summary: Optional[Dict[str, Any]] = None
+    incumbent_summary_after: Optional[Dict[str, Any]] = None
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -144,6 +151,7 @@ class AgentState:
             "current_weighted_policy": self.current_weighted_policy,
             "last_action": None if last is None else {
                 "action_type": last.action_type,
+                "operator_intent": last.operator_intent,
                 "action_payload": last.action_payload,
                 "rationale": last.rationale,
             },
@@ -173,6 +181,18 @@ def run_orchestrator(
         objective_layers=_objective_layers_prompt_view(cfg.eval.objective_policy.layers),
         objective_from_llm=objective_from_llm,
     )
+    section("Agent Search Setup")
+    kv("max_agent_steps", max_steps)
+    kv("max_solver_calls", solver_calls)
+    kv("max_stagnation_steps", max_stagnation_steps)
+    json_block("Search Budget", budget_state.to_prompt_dict())
+    json_block(
+        "Active Objective",
+        {
+            "objective_from_llm": bool(state.objective_from_llm),
+            "layers": state.objective_layers,
+        },
+    )
 
     step_id = 0
     while step_id < max_steps:
@@ -186,15 +206,7 @@ def run_orchestrator(
         action = _stage_decide_next_action(client, user_goal_text, inst_sum, state, budget_state, allowed_actions, cfg)
         record = _execute_action(action, state, budget_state, instance, cfg, rng_seed, step_id)
         state.history.append(record)
-
-        subsection(f"Step {step_id} Result")
-        kv("action", record.action_type)
-        kv("rationale", record.rationale)
-        kv("compare_vs_incumbent", record.compare_vs_incumbent)
-        kv("advanced_incumbent", record.advanced_incumbent)
-        kv("lex_key_changed", record.lex_key_changed)
-        kv("stop", record.stop)
-        kv("result", record.result_summary)
+        json_block("Step Result", _step_result_log_view(record, budget_state))
 
         if record.advanced_incumbent:
             state.consecutive_flat_steps = 0
@@ -215,27 +227,37 @@ def run_orchestrator(
         objective_from_llm=state.objective_from_llm,
         action_from_llm=False,
     )
-    return _safe_build_initial_solution("insert", instance, cfg, rng_seed)
+    return _safe_build_initial_solution("weighted_insert", instance, cfg, rng_seed)
 
 
 def _stage_build_objective(client: LLMClientProtocol, user_goal_text: str, cfg: Config) -> bool:
+    section("Objective Planning")
+    kv("user_goal", user_goal_text)
     prompt = get_objective_layer_prompt(user_goal_text, format_available_metrics(available_metrics()), OBJECTIVE_LAYER_SCHEMA)
-    text_block("Prompt", prompt)
+    text_block("Objective Prompt", prompt)
     raw = _call_llm(client, get_system_prompt(), prompt)
-    text_block("LLM Output", raw)
+    text_block("Objective LLM Output", raw)
     parsed, parse_error = _parse_json_obj_with_reason(raw)
     if parse_error is not None:
         _log_llm_fallback("objective", "parse", parse_error)
+        _log_active_objective(cfg, objective_from_llm=False)
         return False
     validation_error = _validate_objective_spec(parsed)
     if validation_error is not None:
         _log_llm_fallback("objective", "validation", validation_error)
+        _log_active_objective(cfg, objective_from_llm=False)
         return False
     result = apply_objective(cfg, parsed)
     if not bool(result.get("ok", False)):
         _log_llm_fallback("objective", "validation", str(result.get("error", "invalid objective payload")))
+        _log_active_objective(cfg, objective_from_llm=False)
         return False
-    kv("objective_rationale", _sanitize_rationale(parsed.get("rationale"), fallback="No rationale provided."))
+    json_block("LLM Objective Proposal", parsed)
+    _log_active_objective(
+        cfg,
+        objective_from_llm=True,
+        rationale=_sanitize_rationale(parsed.get("rationale"), fallback="No rationale provided."),
+    )
     return True
 
 
@@ -243,6 +265,17 @@ def _stage_decide_next_action(client: LLMClientProtocol, user_goal_text: str, in
     current_summary = _build_incumbent_metrics_summary(state.incumbent_summary)
     delta_summary = _build_delta_from_prev_incumbent(state.objective_layers, state.incumbent_summary, state.previous_incumbent_summary)
     progress_summary = _build_search_progress_summary(state)
+    json_block(
+        "Decision Context",
+        _decision_context_log_view(
+            state=state,
+            allowed_actions=allowed_actions,
+            current_summary=current_summary,
+            delta_summary=delta_summary,
+            progress_summary=progress_summary,
+            budget_state=budget_state,
+        ),
+    )
     prompt = get_next_action_prompt(
         user_goal_text=user_goal_text,
         objective_layers=state.objective_layers,
@@ -264,19 +297,78 @@ def _stage_decide_next_action(client: LLMClientProtocol, user_goal_text: str, in
         parsed = {}
         action_from_llm = False
     else:
+        json_block("LLM Parsed Action", _action_log_view(parsed))
         validation_error = _validate_action_spec(parsed, allowed_actions)
         action_from_llm = validation_error is None
         if validation_error is not None:
             _log_llm_fallback("action", "validation", validation_error)
+            parsed = {}
     normalized = _normalize_action(parsed, allowed_actions, state, budget_state, cfg)
     normalized["_action_from_llm"] = action_from_llm
+    selected_action = _action_log_view(normalized)
+    selected_action["action_from_llm"] = bool(action_from_llm)
+    json_block("Selected Action", selected_action)
     return normalized
+
+
+def _log_active_objective(cfg: Config, *, objective_from_llm: bool, rationale: str = "") -> None:
+    payload: Dict[str, Any] = {
+        "objective_from_llm": bool(objective_from_llm),
+        "layers": _objective_layers_prompt_view(cfg.eval.objective_policy.layers),
+    }
+    if rationale:
+        payload["rationale"] = rationale
+    json_block("Active Objective", payload)
+
+
+def _decision_context_log_view(
+    *,
+    state: AgentState,
+    allowed_actions: List[str],
+    current_summary: Dict[str, Any],
+    delta_summary: Dict[str, Any],
+    progress_summary: Dict[str, Any],
+    budget_state: BudgetState,
+) -> Dict[str, Any]:
+    return {
+        "step_count": len(state.history),
+        "allowed_actions": list(allowed_actions),
+        "current_search_state": state.search_state(),
+        "current_incumbent_metrics": current_summary,
+        "delta_from_prev_incumbent": delta_summary,
+        "search_progress": progress_summary,
+        "remaining_budget": budget_state.to_compact_prompt_dict(),
+    }
+
+
+def _step_result_log_view(record: StepRecord, budget_state: BudgetState) -> Dict[str, Any]:
+    return {
+        "step_id": int(record.step_id),
+        "action_type": record.action_type,
+        "action_from_llm": bool(record.action_from_llm),
+        "operator_intent": record.operator_intent,
+        "rationale": record.rationale,
+        "action_payload": record.action_payload,
+        "budget_request": record.budget_request,
+        "budget_allocated": record.budget_allocated,
+        "compare_vs_incumbent": record.compare_vs_incumbent,
+        "advanced_incumbent": bool(record.advanced_incumbent),
+        "lex_key_changed": bool(record.lex_key_changed),
+        "stop": bool(record.stop),
+        "candidate_summary": _compact_solution_summary(record.candidate_summary),
+        "incumbent_summary_after": _compact_solution_summary(record.incumbent_summary_after),
+        "solver_diagnostics": _condense_solver_diagnostics(record.solver_diagnostics),
+        "remaining_budget": _round_dict(budget_state.remaining),
+        "result_summary": record.result_summary,
+    }
 
 
 def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: BudgetState, instance: Instance, cfg: Config, rng_seed: int, step_id: int) -> StepRecord:
     prev_solution = state.incumbent_solution
     prev_eval = getattr(prev_solution, "eval", None)
     action_type = str(action["action_type"]).strip()
+    action_from_llm = bool(action.get("_action_from_llm", False))
+    operator_intent = _parse_operator_intent_from_action(action)
     payload = dict(action.get("action_payload", {}))
     budget_request = dict(action.get("budget_request", {}))
     rationale = _sanitize_rationale(action.get("rationale"), fallback=_default_action_rationale(action_type))
@@ -286,35 +378,45 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
     solver_diagnostics: Dict[str, Any] = {}
     actual_usage: Dict[str, Any] = {}
     new_solution: Optional[AssignmentSolution] = None
+    candidate_summary: Optional[Dict[str, Any]] = None
+    incumbent_summary_after = state.incumbent_summary
 
     if action_type == "stop":
         should_stop = True
-        result_summary = "LLM chose stop."
+        result_summary = "Controller requested stop."
     elif action_type == "build_initial_solution":
         _log_algorithm_input_source(
             phase="build_initial_solution",
             objective_from_llm=state.objective_from_llm,
-            action_from_llm=bool(action.get("_action_from_llm", False)),
+            action_from_llm=action_from_llm,
         )
         init_method = _sanitize_init_method(payload.get("init_method"))
         new_solution = _safe_build_initial_solution(init_method, instance, cfg, rng_seed + step_id)
         state.current_init_method = init_method
         state.current_weighted_policy = {}
-        result_summary = f"Built incumbent solution with init_method={init_method}."
+        result_summary = f"Built initial incumbent with init_method={init_method}."
     elif action_type == RUN_ALNS_ACTION:
         policy = action.get("_compiled_policy")
         if not isinstance(policy, WeightedALNSPolicy):
             compiled = compile_weighted_alns_policy(cfg, payload)
-            policy = compiled["policy"]
-            payload = dict(compiled["applied"])
+            if bool(compiled.get("ok", False)):
+                policy = compiled["policy"]
+                payload = dict(compiled["applied"])
+            else:
+                warning(
+                    "Invalid weighted ALNS payload reached execution; "
+                    f"fallback to default policy. reason={compiled.get('error', 'unknown error')}"
+                )
+                policy = _default_weighted_alns_policy(cfg)
+                payload = policy.as_dict()
         init_solution = prev_solution
         prefix = ""
         if init_solution is None:
-            fallback_init = _sanitize_init_method(state.current_init_method or "insert")
+            fallback_init = _sanitize_init_method(state.current_init_method or "weighted_insert")
             _log_algorithm_input_source(
                 phase="build_initial_solution",
                 objective_from_llm=state.objective_from_llm,
-                action_from_llm=bool(action.get("_action_from_llm", False)),
+                action_from_llm=action_from_llm,
             )
             init_solution = _safe_build_initial_solution(fallback_init, instance, cfg, rng_seed + step_id)
             state.current_init_method = fallback_init
@@ -325,7 +427,16 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         _log_algorithm_input_source(
             phase=RUN_ALNS_ACTION,
             objective_from_llm=state.objective_from_llm,
-            action_from_llm=bool(action.get("_action_from_llm", False)),
+            action_from_llm=action_from_llm,
+        )
+        json_block(
+            "Solver Request",
+            {
+                "operator_intent": operator_intent,
+                "policy": payload,
+                "requested_budget": dict(requested_budget),
+                "granted_budget": dict(budget_allocated),
+            },
         )
         new_solution = solve_assignment(instance=instance, init_solution=init_solution, config=cfg, budget=slice_budget, policy=policy, rng_seed=rng_seed + step_id)
         solver_diagnostics = dict(getattr(new_solution, "solver_diagnostics", {}) or {})
@@ -338,12 +449,7 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         }
         _log_solver_budget(requested_budget, budget_allocated, actual_usage, budget_state)
         state.current_weighted_policy = policy.as_dict()
-        result_summary = (
-            f"{prefix}Executed weighted ALNS with {json.dumps(policy.as_dict(), ensure_ascii=True)}. "
-            f"requested_budget={json.dumps(requested_budget, ensure_ascii=True)}, "
-            f"granted_budget={json.dumps(budget_allocated, ensure_ascii=True)}, "
-            f"actual_usage={json.dumps(actual_usage, ensure_ascii=True)}"
-        )
+        result_summary = f"{prefix}Executed weighted ALNS."
     else:
         should_stop = True
         result_summary = f"Illegal action '{action_type}' after normalization. Stopped."
@@ -354,6 +460,7 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
     if new_solution is not None and getattr(new_solution, "eval", None) is not None:
         solver_diagnostics = dict(getattr(new_solution, "solver_diagnostics", {}) or {})
         new_summary = solution_summary(solution=new_solution, instance=instance, config=cfg)
+        candidate_summary = new_summary
         if prev_eval is None:
             compare_vs_incumbent = -1
             advanced = True
@@ -367,13 +474,34 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
             state.previous_incumbent_summary = state.incumbent_summary
             state.incumbent_solution = new_solution
             state.incumbent_summary = new_summary
-        result_summary = f"{result_summary} feasible={bool(new_summary.get('is_feasible', False))}, lex_key={new_summary.get('lex_key', [])}"
+        incumbent_summary_after = state.incumbent_summary
+        result_summary = (
+            f"{result_summary} candidate_feasible={bool(new_summary.get('is_feasible', False))}, "
+            f"candidate_lex_key={new_summary.get('lex_key', [])}"
+        )
         if not advanced and prev_eval is not None:
             result_summary = f"{result_summary}, incumbent_kept=true"
-        if solver_diagnostics:
-            result_summary = f"{result_summary}, solver_diag={json.dumps(_condense_solver_diagnostics(solver_diagnostics), ensure_ascii=True)}"
+    else:
+        incumbent_summary_after = state.incumbent_summary
 
-    return StepRecord(step_id=step_id, action_type=action_type, action_payload=payload, budget_request=budget_request, budget_allocated=budget_allocated, rationale=rationale, compare_vs_incumbent=compare_vs_incumbent, advanced_incumbent=advanced, lex_key_changed=lex_changed, stop=should_stop, result_summary=result_summary, solver_diagnostics=solver_diagnostics)
+    return StepRecord(
+        step_id=step_id,
+        action_type=action_type,
+        action_from_llm=action_from_llm,
+        operator_intent=operator_intent,
+        action_payload=payload,
+        budget_request=budget_request,
+        budget_allocated=budget_allocated,
+        rationale=rationale,
+        compare_vs_incumbent=compare_vs_incumbent,
+        advanced_incumbent=advanced,
+        lex_key_changed=lex_changed,
+        stop=should_stop,
+        result_summary=result_summary,
+        candidate_summary=candidate_summary,
+        incumbent_summary_after=incumbent_summary_after,
+        solver_diagnostics=solver_diagnostics,
+    )
 
 
 def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
@@ -386,10 +514,13 @@ def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state:
     fallback = "build_initial_solution" if state.incumbent_solution is None else (RUN_ALNS_ACTION if RUN_ALNS_ACTION in allowed_actions else "stop")
     raw_rationale = _sanitize_rationale(parsed.get("rationale") if isinstance(parsed, dict) else None)
     action_type = str(parsed.get("action_type", "")).strip() if isinstance(parsed, dict) else ""
+    operator_intent: Optional[Dict[str, str]] = None
     if action_type not in allowed_actions:
         warning(f"Illegal or missing action '{action_type}', fallback to '{fallback}'.")
         action_type = fallback
         raw_rationale = f"Fallback to '{fallback}' because the LLM response did not choose an allowed action."
+    elif isinstance(parsed, dict):
+        operator_intent = _parse_operator_intent_from_action(parsed)
     payload = parsed.get("action_payload", {}) if isinstance(parsed, dict) else {}
     payload = payload if isinstance(payload, dict) else {}
     compiled_policy: Optional[WeightedALNSPolicy] = None
@@ -397,8 +528,16 @@ def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state:
         normalized_payload = {"init_method": _sanitize_init_method(payload.get("init_method"))}
     elif action_type == RUN_ALNS_ACTION:
         compiled = compile_weighted_alns_policy(cfg, payload)
-        normalized_payload = dict(compiled["applied"])
-        compiled_policy = compiled["policy"]
+        if bool(compiled.get("ok", False)):
+            normalized_payload = dict(compiled["applied"])
+            compiled_policy = compiled["policy"]
+        else:
+            warning(
+                "Invalid weighted ALNS payload after normalization; "
+                f"fallback to default policy. reason={compiled.get('error', 'unknown error')}"
+            )
+            compiled_policy = _default_weighted_alns_policy(cfg)
+            normalized_payload = compiled_policy.as_dict()
     else:
         normalized_payload = {}
     budget_request = _sanitize_budget_request(parsed.get("budget_request", {}) if isinstance(parsed, dict) else {})
@@ -406,6 +545,7 @@ def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state:
         budget_request = _ensure_run_alns_budget_request(budget_request, cfg)
     out = {
         "action_type": action_type,
+        "operator_intent": operator_intent,
         "action_payload": normalized_payload,
         "budget_request": budget_request,
         "rationale": raw_rationale or _default_action_rationale(action_type),
@@ -421,7 +561,8 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
         warning("No incumbent is available; forcing action_type='build_initial_solution'.")
         return {
             "action_type": "build_initial_solution",
-            "action_payload": {"init_method": "insert"},
+            "operator_intent": None,
+            "action_payload": {"init_method": "weighted_insert"},
             "budget_request": guarded.get("budget_request", {}),
             "rationale": "Forced build_initial_solution because no incumbent is available yet.",
         }
@@ -431,17 +572,19 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
         if fallback == "build_initial_solution":
             return {
                 "action_type": fallback,
-                "action_payload": {"init_method": "insert"},
+                "operator_intent": None,
+                "action_payload": {"init_method": "weighted_insert"},
                 "budget_request": guarded.get("budget_request", {}),
                 "rationale": "Stop was rejected by guardrails, so the controller forced build_initial_solution.",
             }
-        compiled = compile_weighted_alns_policy(cfg, {})
+        policy = _default_weighted_alns_policy(cfg)
         return {
             "action_type": fallback,
-            "action_payload": dict(compiled["applied"]),
+            "operator_intent": None,
+            "action_payload": policy.as_dict(),
             "budget_request": _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg),
             "rationale": "Stop was rejected by guardrails, so the controller forced run_alns.",
-            "_compiled_policy": compiled["policy"],
+            "_compiled_policy": policy,
         }
     if guarded.get("action_type") == RUN_ALNS_ACTION:
         guarded["budget_request"] = _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg)
@@ -451,18 +594,14 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
 
 def _safe_build_initial_solution(method: str, instance: Instance, cfg: Config, rng_seed: int) -> AssignmentSolution:
     safe_method = _sanitize_init_method(method)
-    try:
-        return build_initial_solution(method=safe_method, instance=instance, config=cfg, rng_seed=rng_seed)
-    except Exception:
-        if safe_method != "insert":
-            warning(f"Init method '{safe_method}' failed; fallback to 'insert'.")
-            return build_initial_solution(method="insert", instance=instance, config=cfg, rng_seed=rng_seed)
-        raise
+    return build_initial_solution(method=safe_method, instance=instance, config=cfg, rng_seed=rng_seed)
 
 
 def _sanitize_init_method(value: Any) -> str:
-    method = str(value or "insert").strip().lower()
-    return method if method in ("insert", "sweep") else "insert"
+    method = str(value or "weighted_insert").strip().lower()
+    if method in {"weighted_insert", "insert", "sweep"}:
+        return "weighted_insert"
+    return "weighted_insert"
 
 
 def _objective_layers_prompt_view(layers: List[Any]) -> List[Dict[str, Any]]:
@@ -474,6 +613,20 @@ def _build_incumbent_metrics_summary(summary: Optional[Dict[str, Any]]) -> Dict[
         return {"exists": False, "is_feasible": None, "lex_key": [], "metrics": {key: None for key in CANONICAL_METRIC_KEYS}}
     metrics = dict(summary.get("metrics", {}) or {})
     return {"exists": True, "is_feasible": bool(summary.get("is_feasible", False)), "lex_key": list(summary.get("lex_key", []) or []), "metrics": {key: _round_number(float(metrics[key])) if key in metrics else None for key in CANONICAL_METRIC_KEYS}}
+
+
+def _compact_solution_summary(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not summary:
+        return None
+    metrics = dict(summary.get("metrics", {}) or {})
+    return {
+        "is_feasible": bool(summary.get("is_feasible", False)),
+        "lex_key": list(summary.get("lex_key", []) or []),
+        "metrics": {
+            key: _round_number(float(metrics[key])) if key in metrics else None
+            for key in CANONICAL_METRIC_KEYS
+        },
+    }
 
 
 def _build_delta_from_prev_incumbent(objective_layers: List[Dict[str, Any]], current_summary: Optional[Dict[str, Any]], previous_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -505,6 +658,7 @@ def _build_search_progress_summary(state: AgentState) -> Dict[str, Any]:
     return {
         "last_action": None if last is None else {
             "action_type": last.action_type,
+            "operator_intent": last.operator_intent,
             "action_payload": last.action_payload,
             "rationale": last.rationale,
         },
@@ -614,13 +768,13 @@ def _call_llm(client: LLMClientProtocol, system_prompt: str, user_prompt: str) -
 
 def _log_llm_fallback(kind: str, failure_type: str, reason: str) -> None:
     detail = str(reason).strip() or "unknown error"
-    warning(f"[LLM][{kind}] {failure_type} failed: {detail}, fallback to default")
+    warning(f"llm_fallback stage={kind} failure_type={failure_type} detail={detail}")
 
 
 def _log_algorithm_input_source(phase: str, objective_from_llm: bool, action_from_llm: bool) -> None:
     info(
-        f"[LLM][algorithm_input] phase={phase}, "
-        f"objective_from_llm={str(bool(objective_from_llm)).lower()}, "
+        f"algorithm_input_source phase={phase} "
+        f"objective_from_llm={str(bool(objective_from_llm)).lower()} "
         f"action_from_llm={str(bool(action_from_llm)).lower()}"
     )
 
@@ -690,9 +844,21 @@ def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
 
 
 def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) -> Optional[str]:
-    unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"rationale", "action_type", "action_payload", "budget_request"})
+    unknown_top_level = sorted(
+        str(key)
+        for key in parsed.keys()
+        if str(key) not in {"rationale", "operator_intent", "action_type", "action_payload", "budget_request"}
+    )
     if unknown_top_level:
         return f"unknown field '{unknown_top_level[0]}'"
+    operator_intent_error = _validate_required_short_phrase_map(
+        parsed=parsed,
+        field_name="operator_intent",
+        required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("operator_intent_fields", []),
+        max_words=int(SCHEMA_CONSTRAINTS.get("next_action", {}).get("operator_intent_max_words", 12) or 12),
+    )
+    if operator_intent_error is not None:
+        return operator_intent_error
     allowed_action_types = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("action_type", []) or [])
     if "action_type" not in parsed:
         return "missing field 'action_type'"
@@ -737,7 +903,9 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
             "destroy_generator_priors",
             "repair_task_selector_priors",
             "repair_position_selector",
-            "metric_weights",
+            "remove_metric_weights",
+            "reinsert_metric_weights",
+            "insert_metric_weights",
             "strength_ratio",
             "acceptance",
             "accept_level",
@@ -747,17 +915,20 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         unknown_payload_fields = sorted(str(key) for key in payload.keys() if str(key) not in allowed_payload_fields)
         if unknown_payload_fields:
             return f"unknown field 'action_payload.{unknown_payload_fields[0]}'"
+        metric_weight_maps = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_weight_maps", []) or [])
         for field_name in (
             "destroy_generator_priors",
             "repair_task_selector_priors",
             "repair_position_selector",
-            "metric_weights",
             "strength_ratio",
             "acceptance",
             "accept_level",
             "reaction_factor",
             "prior_mix_lambda",
         ):
+            if field_name not in payload:
+                return f"missing field 'action_payload.{field_name}'"
+        for field_name in metric_weight_maps:
             if field_name not in payload:
                 return f"missing field 'action_payload.{field_name}'"
 
@@ -775,13 +946,14 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         )
         if nested_error is not None:
             return nested_error
-        nested_error = _validate_required_number_map(
-            payload=payload,
-            field_name="metric_weights",
-            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_fields", []),
-        )
-        if nested_error is not None:
-            return nested_error
+        for field_name in metric_weight_maps:
+            nested_error = _validate_required_number_map(
+                payload=payload,
+                field_name=field_name,
+                required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_fields", []),
+            )
+            if nested_error is not None:
+                return nested_error
 
         repair_position_selector = payload.get("repair_position_selector")
         if not isinstance(repair_position_selector, str):
@@ -821,6 +993,59 @@ def _validate_required_number_map(payload: Dict[str, Any], field_name: str, requ
         if not _is_plain_number(raw.get(key)):
             return f"field 'action_payload.{field_name}.{key}' must be numeric"
     return None
+
+
+def _validate_required_short_phrase_map(
+    *,
+    parsed: Dict[str, Any],
+    field_name: str,
+    required_keys: List[str],
+    max_words: int,
+) -> Optional[str]:
+    raw = parsed.get(field_name)
+    if raw is None:
+        return f"missing field '{field_name}'"
+    if not isinstance(raw, dict):
+        return f"field '{field_name}' must be an object"
+    allowed_keys = {str(key) for key in required_keys}
+    unknown_keys = sorted(str(key) for key in raw.keys() if str(key) not in allowed_keys)
+    if unknown_keys:
+        return f"unknown field '{field_name}.{unknown_keys[0]}'"
+    for key in required_keys:
+        if key not in raw:
+            return f"missing field '{field_name}.{key}'"
+        value = raw.get(key)
+        if not isinstance(value, str):
+            return f"field '{field_name}.{key}' must be a string"
+        normalized = " ".join(value.strip().split())
+        if not normalized:
+            return f"field '{field_name}.{key}' must be a non-empty string"
+        if len(normalized.split()) > int(max_words):
+            return f"field '{field_name}.{key}' must be at most {int(max_words)} words"
+    return None
+
+
+def _default_weighted_alns_policy(cfg: Config) -> WeightedALNSPolicy:
+    defaults = cfg.solver.weighted_alns
+    return WeightedALNSPolicy(
+        destroy_generator_priors={
+            str(name): float(weight)
+            for name, weight in defaults.destroy_generator_priors.items()
+        },
+        repair_task_selector_priors={
+            str(name): float(weight)
+            for name, weight in defaults.repair_task_selector_priors.items()
+        },
+        repair_position_selector=str(defaults.repair_position_selector),
+        remove_metric_weights=defaults.remove_metric_weights,
+        reinsert_metric_weights=defaults.reinsert_metric_weights,
+        insert_metric_weights=defaults.insert_metric_weights,
+        strength_ratio=float(defaults.strength_ratio),
+        acceptance=str(defaults.acceptance),
+        accept_level=float(defaults.accept_level),
+        reaction_factor=float(defaults.reaction_factor),
+        prior_mix_lambda=float(defaults.prior_mix_lambda),
+    )
 
 
 def _validate_budget_request_spec(budget_request: Dict[str, Any], require_time_limit_sec: bool = False) -> Optional[str]:
@@ -888,6 +1113,39 @@ def _round_number(value: Optional[float]) -> Optional[float]:
 
 def _round_dict(data: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
     return {key: _round_number(value) for key, value in data.items()}
+
+
+def _action_log_view(action: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(action, dict):
+        return {}
+    return {
+        "action_type": action.get("action_type"),
+        "operator_intent": action.get("operator_intent"),
+        "action_payload": action.get("action_payload"),
+        "budget_request": action.get("budget_request"),
+        "rationale": action.get("rationale"),
+    }
+
+
+def _action_summary_log_view(action: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(action, dict):
+        return {}
+    return {
+        "action_type": action.get("action_type"),
+        "operator_intent": action.get("operator_intent"),
+        "rationale": action.get("rationale"),
+    }
+
+
+def _parse_operator_intent_from_action(action: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    if not isinstance(action, dict):
+        return None
+    parsed = parse_operator_intent(action.get("operator_intent"))
+    if bool(parsed.get("ok", False)):
+        return dict(parsed.get("applied", {}))
+    if action.get("operator_intent") is not None:
+        warning(f"Invalid operator_intent after validation: {parsed.get('error', 'unknown error')}")
+    return None
 
 
 def _sanitize_rationale(value: Any, fallback: str = "") -> str:

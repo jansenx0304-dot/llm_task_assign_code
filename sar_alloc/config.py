@@ -71,7 +71,9 @@ class WeightedALNSConfig:
         }
     )
     repair_position_selector: Literal["filtered_best_position"] = "filtered_best_position"
-    metric_weights: MetricWeights = field(default_factory=MetricWeights)
+    remove_metric_weights: MetricWeights = field(default_factory=MetricWeights)
+    reinsert_metric_weights: MetricWeights = field(default_factory=MetricWeights)
+    insert_metric_weights: MetricWeights = field(default_factory=MetricWeights)
     strength_ratio: float = 0.18
     acceptance: Literal["greedy", "threshold", "sa"] = "sa"
     accept_level: float = 0.25
@@ -83,8 +85,18 @@ class WeightedALNSConfig:
 
 @dataclass(slots=True)
 class InitConstructConfig:
-    method: Literal["insert", "sweep"] = "insert"
+    """Initial construction aligned with weighted repair scoring.
+
+    `task_top_k` limits how many highest-scored unassigned tasks are attempted
+    each dynamic re-scoring round. `position_top_k` limits how many lowest-scored
+    insertion positions receive strict feasibility evaluation for a chosen task.
+    `rcl_k` only randomizes within those score-ranked prefixes.
+    """
+
+    method: Literal["weighted_insert"] = "weighted_insert"
     randomized: bool = True
+    task_top_k: int = 4
+    position_top_k: int = 4
     rcl_k: int = 5
     allow_unassigned: bool = True
 

@@ -21,10 +21,18 @@ from ..operators import (
     MetricWeights,
     WeightedALNSPolicy,
 )
+from ..schemas import SCHEMA_CONSTRAINTS
 from ..solution import AssignmentSolution
 
 
 _EPS = 1e-9
+_OPERATOR_INTENT_FIELDS: Tuple[str, ...] = tuple(
+    str(name)
+    for name in (SCHEMA_CONSTRAINTS.get("next_action", {}).get("operator_intent_fields", []) or [])
+)
+_OPERATOR_INTENT_MAX_WORDS = int(
+    SCHEMA_CONSTRAINTS.get("next_action", {}).get("operator_intent_max_words", 12) or 12
+)
 
 
 def llm_solution_summary(
@@ -231,12 +239,15 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
     defaults = config.solver.weighted_alns
     raw = dict(payload or {}) if isinstance(payload, dict) else {}
     dropped: List[Dict[str, Any]] = []
+    validation_errors: List[str] = []
 
     allowed_fields = {
         "destroy_generator_priors",
         "repair_task_selector_priors",
         "repair_position_selector",
-        "metric_weights",
+        "remove_metric_weights",
+        "reinsert_metric_weights",
+        "insert_metric_weights",
         "strength_ratio",
         "acceptance",
         "accept_level",
@@ -246,6 +257,7 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
     for key in raw.keys():
         if key not in allowed_fields:
             dropped.append({"field": key, "reason": "unknown field"})
+            validation_errors.append(f"unknown field '{key}'")
 
     destroy_generator_priors = _compile_operator_prior_map(
         raw_value=raw.get("destroy_generator_priors"),
@@ -275,32 +287,44 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
         field_name="acceptance",
         dropped=dropped,
     )
-
-    metric_weights_raw = raw.get("metric_weights", {})
-    if not isinstance(metric_weights_raw, dict):
-        metric_weights_raw = {}
-        dropped.append({"field": "metric_weights", "reason": "must be an object"})
-    weight_defaults = defaults.metric_weights.as_dict()
-    weights: Dict[str, float] = {}
-    for name in METRIC_FIELDS:
-        lo, hi = METRIC_WEIGHT_BOUNDS[name]
-        weights[name] = _clamp_number(
-            raw_value=metric_weights_raw.get(name, weight_defaults[name]),
-            default=weight_defaults[name],
-            lower=lo,
-            upper=hi,
-            field_name=f"metric_weights.{name}",
-            dropped=dropped,
-        )
-    for name in metric_weights_raw.keys():
-        if name not in METRIC_FIELDS:
-            dropped.append({"field": f"metric_weights.{name}", "reason": "unknown field"})
+    remove_metric_weights = _compile_metric_weight_map(
+        raw_value=raw.get("remove_metric_weights"),
+        field_name="remove_metric_weights",
+        dropped=dropped,
+        validation_errors=validation_errors,
+    )
+    reinsert_metric_weights = _compile_metric_weight_map(
+        raw_value=raw.get("reinsert_metric_weights"),
+        field_name="reinsert_metric_weights",
+        dropped=dropped,
+        validation_errors=validation_errors,
+    )
+    insert_metric_weights = _compile_metric_weight_map(
+        raw_value=raw.get("insert_metric_weights"),
+        field_name="insert_metric_weights",
+        dropped=dropped,
+        validation_errors=validation_errors,
+    )
+    if (
+        remove_metric_weights is None
+        or reinsert_metric_weights is None
+        or insert_metric_weights is None
+        or validation_errors
+    ):
+        return {
+            "ok": False,
+            "error": validation_errors[0] if validation_errors else "invalid metric weight maps",
+            "applied": {},
+            "dropped": dropped,
+        }
 
     policy = WeightedALNSPolicy(
         destroy_generator_priors=destroy_generator_priors,
         repair_task_selector_priors=repair_task_selector_priors,
         repair_position_selector=repair_position_selector,
-        metric_weights=MetricWeights(**weights),
+        remove_metric_weights=remove_metric_weights,
+        reinsert_metric_weights=reinsert_metric_weights,
+        insert_metric_weights=insert_metric_weights,
         strength_ratio=_clamp_number(
             raw_value=raw.get("strength_ratio", defaults.strength_ratio),
             default=defaults.strength_ratio,
@@ -340,6 +364,75 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
         "ok": True,
         "policy": policy,
         "applied": policy.as_dict(),
+        "dropped": dropped,
+    }
+
+
+def llm_parse_operator_intent(raw: Any) -> Dict[str, Any]:
+    dropped: List[Dict[str, Any]] = []
+    validation_errors: List[str] = []
+    if raw is None:
+        return {
+            "ok": False,
+            "error": "missing field 'operator_intent'",
+            "applied": None,
+            "dropped": [{"field": "operator_intent", "reason": "missing field"}],
+        }
+    if not isinstance(raw, dict):
+        return {
+            "ok": False,
+            "error": "field 'operator_intent' must be an object",
+            "applied": None,
+            "dropped": [{"field": "operator_intent", "reason": "must be an object"}],
+        }
+
+    compiled: Dict[str, str] = {}
+    allowed_fields = set(_OPERATOR_INTENT_FIELDS)
+    for key in raw.keys():
+        field_name = str(key)
+        if field_name not in allowed_fields:
+            dropped.append({"field": f"operator_intent.{field_name}", "reason": "unknown field"})
+            validation_errors.append(f"unknown field 'operator_intent.{field_name}'")
+
+    for field_name in _OPERATOR_INTENT_FIELDS:
+        if field_name not in raw:
+            dropped.append({"field": f"operator_intent.{field_name}", "reason": "missing field"})
+            validation_errors.append(f"missing field 'operator_intent.{field_name}'")
+            continue
+        value = raw.get(field_name)
+        if not isinstance(value, str):
+            dropped.append({"field": f"operator_intent.{field_name}", "reason": "must be a string"})
+            validation_errors.append(f"field 'operator_intent.{field_name}' must be a string")
+            continue
+        normalized = " ".join(value.strip().split())
+        if not normalized:
+            dropped.append({"field": f"operator_intent.{field_name}", "reason": "must be a non-empty string"})
+            validation_errors.append(f"field 'operator_intent.{field_name}' must be a non-empty string")
+            continue
+        if len(normalized.split()) > _OPERATOR_INTENT_MAX_WORDS:
+            dropped.append(
+                {
+                    "field": f"operator_intent.{field_name}",
+                    "reason": f"must be at most {_OPERATOR_INTENT_MAX_WORDS} words",
+                }
+            )
+            validation_errors.append(
+                f"field 'operator_intent.{field_name}' must be at most {_OPERATOR_INTENT_MAX_WORDS} words"
+            )
+            continue
+        compiled[field_name] = normalized
+
+    if len(compiled) != len(_OPERATOR_INTENT_FIELDS) or validation_errors:
+        return {
+            "ok": False,
+            "error": validation_errors[0] if validation_errors else "invalid operator_intent",
+            "applied": None,
+            "dropped": dropped,
+        }
+    return {
+        "ok": True,
+        "operator_intent": compiled,
+        "applied": dict(compiled),
         "dropped": dropped,
     }
 
@@ -428,6 +521,59 @@ def _compile_operator_prior_map(
         if str(name) not in allowed:
             dropped.append({"field": f"{field_name}.{name}", "reason": "unknown field"})
     return compiled
+
+
+def _compile_metric_weight_map(
+    *,
+    raw_value: Any,
+    field_name: str,
+    dropped: List[Dict[str, Any]],
+    validation_errors: List[str],
+) -> Optional[MetricWeights]:
+    if not isinstance(raw_value, dict):
+        dropped.append({"field": field_name, "reason": "must be an object"})
+        validation_errors.append(f"field '{field_name}' must be an object")
+        return None
+
+    compiled: Dict[str, float] = {}
+    metric_fields = set(METRIC_FIELDS)
+    for name in raw_value.keys():
+        normalized = str(name)
+        if normalized not in metric_fields:
+            dropped.append({"field": f"{field_name}.{normalized}", "reason": "unknown field"})
+            validation_errors.append(f"unknown field '{field_name}.{normalized}'")
+
+    for name in METRIC_FIELDS:
+        if name not in raw_value:
+            dropped.append({"field": f"{field_name}.{name}", "reason": "missing field"})
+            validation_errors.append(f"missing field '{field_name}.{name}'")
+            continue
+        raw_metric_value = raw_value.get(name)
+        if raw_metric_value is None or isinstance(raw_metric_value, bool):
+            dropped.append({"field": f"{field_name}.{name}", "reason": "must be numeric", "value": repr(raw_metric_value)})
+            validation_errors.append(f"field '{field_name}.{name}' must be numeric")
+            continue
+        try:
+            numeric_value = float(raw_metric_value)
+        except Exception:
+            dropped.append({"field": f"{field_name}.{name}", "reason": "must be numeric", "value": repr(raw_metric_value)})
+            validation_errors.append(f"field '{field_name}.{name}' must be numeric")
+            continue
+
+        lower, upper = METRIC_WEIGHT_BOUNDS[name]
+        if numeric_value < lower or numeric_value > upper:
+            dropped.append(
+                {
+                    "field": f"{field_name}.{name}",
+                    "reason": f"clamped to [{lower}, {upper}]",
+                    "value": numeric_value,
+                }
+            )
+        compiled[name] = max(float(lower), min(float(upper), numeric_value))
+
+    if len(compiled) != len(METRIC_FIELDS) or validation_errors:
+        return None
+    return MetricWeights(**compiled)
 
 
 def _clamp_number(

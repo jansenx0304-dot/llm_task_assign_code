@@ -89,10 +89,27 @@ Inputs:
 {_render_block(allowed)}
 
 ALNS control semantics:
+- Before setting numeric controls, first decide three operator intents: `remove`, `reinsert`, `insert`.
+- `operator_intent.remove` describes what kind of already-assigned tasks are most useful to remove now.
+- `operator_intent.reinsert` describes what kind of unassigned tasks should be reconsidered earlier now.
+- `operator_intent.insert` describes what kind of insertion positions are most promising to try first now.
+- Each intent must be a very short phrase.
+- Each phrase must be under 12 words.
+- Do not make the three intents say the same thing.
+- Do not provide long explanations.
 - Destroy operators are sampled from the full destroy pool using positive prior weights; do not choose a single destroy operator.
 - Repair task selectors are sampled from the full repair-task pool using positive prior weights; do not choose a single repair task selector.
-- `metric_weights` are shared scoring weights used by the repair logic for task ordering and insertion ranking.
 - `repair_position_selector` must remain `filtered_best_position`.
+- `build_initial_solution.init_method` must remain `weighted_insert`.
+- `weighted_insert` is the only initial construction method. It starts from the empty solution and follows the same task-score / insert-score philosophy as weighted repair; do not request sweep.
+- These are three separate metric profiles for three operator-level decisions, not one global preference.
+- `remove_metric_weights` rank removal candidates only.
+- `reinsert_metric_weights` rank unassigned tasks only.
+- `insert_metric_weights` rank insertion positions only.
+- Weak answers have poor operator-role separation.
+- Avoid answers where `remove` / `reinsert` / `insert` mean nearly the same thing.
+- Avoid making all three metric profiles nearly identical.
+- Avoid uniformly high weights everywhere.
 - Use only these metric names exactly as provided:
   `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
   `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
@@ -110,8 +127,11 @@ Decision rules:
 9. When selecting `run_alns`, use the policy fields to express a search bias, not a hard deterministic choice.
 
 Output requirements:
-- Return JSON only.
+- Output exactly one JSON object.
+- No prose outside the JSON.
 - Always include `rationale` as a concise explanation of why this is the best next action now.
+- `operator_intent` is required.
+- Always include top-level `operator_intent`.
 - Keep `rationale` grounded in the incumbent metrics, recent progress, and remaining budget.
 - Follow this schema exactly:
 {json_schema}

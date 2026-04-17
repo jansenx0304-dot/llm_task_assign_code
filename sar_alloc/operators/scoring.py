@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Centralized scoring functions for unified weighted ALNS operators.
+"""Centralized scoring functions for weighted ALNS operators.
 
-Task score and insert score share one metric vector, but task score orders
-tasks while insert score ranks filtered insertion positions.
+Destroy removal, repair task ordering, and insertion-position ranking each use
+their own metric profile, but the metric definitions stay aligned.
 """
 
 from .types import InsertCandidateFeatures, MetricWeights, ReinsertTaskFeatures, RemoveFeatures

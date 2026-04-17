@@ -7,67 +7,78 @@ from typing import Any, Iterable
 LINE_WIDTH = 88
 
 
-def section(title: str, icon: str = "📌") -> None:
-    line = _line("═", "=")
+def section(title: str, icon: str = "section") -> None:
+    del icon
+    line = "=" * LINE_WIDTH
     _emit("")
     _emit(line)
-    _emit(f"{_safe_icon(icon, '[SECTION]')} {title}")
+    _emit(f"[SECTION] {title}")
     _emit(line)
 
 
-def subsection(title: str, icon: str = "•") -> None:
-    line = _line("─", "-")
+def subsection(title: str, icon: str = "detail") -> None:
+    del icon
     _emit("")
-    _emit(line)
-    _emit(f"{_safe_icon(icon, '[DETAIL]')} {title}")
-    _emit(line)
+    _emit(f"[SUBSECTION] {title}")
+    _emit("-" * LINE_WIDTH)
 
 
-def kv(label: str, value: Any, icon: str = "•") -> None:
+def kv(label: str, value: Any, icon: str = "item") -> None:
+    del icon
     rendered = _stringify(value).splitlines() or [""]
-    prefix = f"{_safe_icon(icon, '-')} {label:<24} "
+    prefix = f"  - {label}: "
     _emit(prefix + rendered[0])
     for line in rendered[1:]:
         _emit(" " * len(prefix) + line)
 
 
 def info(message: str) -> None:
-    _emit(f"{_safe_icon('ℹ️', '[INFO]')} {message}")
+    _emit(f"[INFO] {message}")
 
 
 def success(message: str) -> None:
-    _emit(f"{_safe_icon('✅', '[OK]')} {message}")
+    _emit(f"[OK] {message}")
 
 
 def warning(message: str) -> None:
-    _emit(f"{_safe_icon('⚠️', '[WARN]')} {message}")
+    _emit(f"[WARN] {message}")
+
+
+def error(message: str) -> None:
+    _emit(f"[ERROR] {message}")
 
 
 def stop(message: str) -> None:
-    _emit(f"{_safe_icon('🛑', '[STOP]')} {message}")
+    _emit(f"[STOP] {message}")
 
 
-def text_block(title: str, text: str, icon: str = "📄") -> None:
-    subsection(title, icon=icon)
+def text_block(title: str, text: str, icon: str = "text") -> None:
+    del icon
+    _emit("")
+    _emit(f"[BEGIN] {title}")
+    _emit("-" * LINE_WIDTH)
     _emit((text or "").rstrip() or "(empty)")
+    _emit("-" * LINE_WIDTH)
+    _emit(f"[END] {title}")
 
 
-def json_block(title: str, data: Any, icon: str = "🧾") -> None:
+def json_block(title: str, data: Any, icon: str = "json") -> None:
+    del icon
     text_block(
         title=title,
         text=json.dumps(data, ensure_ascii=False, indent=2),
-        icon=icon,
     )
 
 
-def bullets(title: str, items: Iterable[str], icon: str = "📋") -> None:
-    subsection(title, icon=icon)
+def bullets(title: str, items: Iterable[str], icon: str = "list") -> None:
+    del icon
+    subsection(title)
     has_item = False
     for item in items:
         has_item = True
-        _emit(f"  {_safe_icon('•', '-')} {item}")
+        _emit(f"  - {item}")
     if not has_item:
-        _emit(f"  {_safe_icon('•', '-')} (empty)")
+        _emit("  - (empty)")
 
 
 def _stringify(value: Any) -> str:
@@ -86,25 +97,3 @@ def _emit(text: str) -> None:
 def _sanitize(text: str) -> str:
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
-
-
-def _safe_icon(icon: str, fallback: str) -> str:
-    if not _prefer_unicode():
-        return fallback
-    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
-    try:
-        icon.encode(encoding)
-        return icon
-    except Exception:
-        return fallback
-
-
-def _line(unicode_char: str, ascii_char: str) -> str:
-    if _prefer_unicode():
-        return unicode_char * LINE_WIDTH
-    return ascii_char * LINE_WIDTH
-
-
-def _prefer_unicode() -> bool:
-    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
-    return "utf" in encoding

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Weighted ALNS solver with two-stage repair decisions.
+"""Weighted ALNS solver with separate operator-level scoring profiles.
 
-Task score decides which task to repair next. Insert score decides the order of
-filtered insertion positions. Weighted-priority repair keeps the full ranked
-scan, while regret-2 can optionally use task/position top-k truncation for
-faster A/B experiments.
+Reinsert-task score decides which task to repair next. Insert score decides the
+order of filtered insertion positions. Weighted-priority repair keeps the full
+ranked scan, while regret-2 can optionally use task/position top-k truncation
+for faster A/B experiments.
 """
 
 import math
@@ -127,6 +127,15 @@ def solve_assignment(
     cur = init_solution.clone(deep=True)
     cur.normalize(instance)
     cur_ev = evaluate(cur, instance, config, update_solution_schedule=False)
+    info(
+        "alns_start "
+        f"acceptance={policy.acceptance} "
+        f"strength_ratio={float(policy.strength_ratio)} "
+        f"budget_time_limit_sec={budget.time_limit_sec} "
+        f"budget_max_iters={budget.max_iters} "
+        f"init_feasible={bool(cur_ev.is_feasible)} "
+        f"init_lex_key={cur_ev.lex_key}"
+    )
 
     best = cur.clone(deep=True)
     best_ev = cur_ev
@@ -245,12 +254,13 @@ def _solve_weighted_alns(
         last_acceptance_decision = acceptance.as_dict()
         if iteration % 10 == 0:
             message = (
-                f"Weighted ALNS generated a trial solution at iter={iteration}, "
-                f"destroy={d_name}, repair={r_name}, accepted={bool(accepted)}, "
-                f"feasible={bool(ev_trial.is_feasible)}, lex_key={ev_trial.lex_key}"
+                f"alns_progress iter={iteration} "
+                f"destroy={d_name} repair={r_name} "
+                f"accepted={bool(accepted)} feasible={bool(ev_trial.is_feasible)} "
+                f"lex_key={ev_trial.lex_key}"
             )
             if r_name == "regret2_order" and trial_regret2_stats:
-                message = f"{message}, {_format_regret2_repair_log(trial_regret2_stats)}"
+                message = f"{message} {_format_regret2_repair_log(trial_regret2_stats)}"
             info(message)
 
         reward = 0.0
@@ -285,11 +295,12 @@ def _solve_weighted_alns(
 
         if best_updated:
             message = (
-                f"Weighted ALNS found a new best solution at iter={iteration}, "
-                f"feasible={bool(best_ev.is_feasible)}, lex_key={best_ev.lex_key}"
+                f"alns_best_update iter={iteration} "
+                f"feasible={bool(best_ev.is_feasible)} "
+                f"lex_key={best_ev.lex_key}"
             )
             if best_feasible_updated:
-                message += " (also new best feasible)"
+                message += " best_feasible_updated=true"
             success(message)
 
         d_score[d_name] += reward
@@ -311,35 +322,44 @@ def _solve_weighted_alns(
     returned_source = "best_feasible" if best_feasible is not None else "best_overall"
     evaluate(returned, instance, config, update_solution_schedule=True)
     actual_time_used_sec = max(0.0, time.perf_counter() - started_at)
+    diagnostics = _build_solver_diagnostics(
+        policy=policy,
+        total_iters=iteration,
+        actual_time_used_sec=actual_time_used_sec,
+        best_update_iters=best_update_iters,
+        best_update_lex_keys=best_update_lex_keys,
+        returned_solution_source=returned_source,
+        initial_solution_feasible=initial_solution_feasible,
+        returned_solution_feasible=bool(getattr(returned.eval, "is_feasible", False)),
+        last_acceptance_decision=last_acceptance_decision,
+        regret2_repair_summary=_finalize_regret2_repair_summary(regret2_repair_summary),
+        operator_weights={
+            "destroy_candidate_generators": {
+                "adaptive": d_w,
+                "llm_prior": destroy_priors,
+                "fused_final": _blend_operator_weights(d_w, destroy_priors, prior_mix_lambda),
+            },
+            "repair_task_selectors": {
+                "adaptive": r_w,
+                "llm_prior": repair_task_priors,
+                "fused_final": _blend_operator_weights(r_w, repair_task_priors, prior_mix_lambda),
+            },
+            "repair_position_selectors": {
+                "adaptive": p_w,
+            },
+        },
+    )
+    success(
+        "alns_complete "
+        f"returned_source={returned_source} "
+        f"total_iters={iteration} "
+        f"best_update_count={len(best_update_iters)} "
+        f"actual_time_used_sec={round(actual_time_used_sec, 4)} "
+        f"returned_feasible={bool(getattr(returned.eval, 'is_feasible', False))}"
+    )
     return _attach_solver_diagnostics(
         returned,
-        _build_solver_diagnostics(
-            policy=policy,
-            total_iters=iteration,
-            actual_time_used_sec=actual_time_used_sec,
-            best_update_iters=best_update_iters,
-            best_update_lex_keys=best_update_lex_keys,
-            returned_solution_source=returned_source,
-            initial_solution_feasible=initial_solution_feasible,
-            returned_solution_feasible=bool(getattr(returned.eval, "is_feasible", False)),
-            last_acceptance_decision=last_acceptance_decision,
-            regret2_repair_summary=_finalize_regret2_repair_summary(regret2_repair_summary),
-            operator_weights={
-                "destroy_candidate_generators": {
-                    "adaptive": d_w,
-                    "llm_prior": destroy_priors,
-                    "fused_final": _blend_operator_weights(d_w, destroy_priors, prior_mix_lambda),
-                },
-                "repair_task_selectors": {
-                    "adaptive": r_w,
-                    "llm_prior": repair_task_priors,
-                    "fused_final": _blend_operator_weights(r_w, repair_task_priors, prior_mix_lambda),
-                },
-                "repair_position_selectors": {
-                    "adaptive": p_w,
-                },
-            },
-        ),
+        diagnostics,
     )
 
 
@@ -367,7 +387,7 @@ def select_tasks_to_remove(
     features = compute_task_remove_features_batch(sol, candidate_tids, instance, config)
     scored = [
         (
-            score_remove_features(features[int(tid)], policy.metric_weights),
+            score_remove_features(features[int(tid)], policy.remove_metric_weights),
             int(tid),
         )
         for tid in candidate_tids
@@ -687,7 +707,7 @@ def _order_tasks_weighted_priority(
     features = compute_reinsert_task_features_batch(sol, tasks, instance, config)
     scored = [
         (
-            score_reinsert_task_features(features[int(tid)], policy.metric_weights),
+            score_reinsert_task_features(features[int(tid)], policy.reinsert_metric_weights),
             int(tid),
         )
         for tid in tasks
@@ -716,7 +736,7 @@ def _rank_insert_positions_by_score(
     ranked = [
         _ScoredInsertCandidate(
             position=position,
-            insert_score=score_insert_candidate_features(feature_map[position], policy.metric_weights),
+            insert_score=score_insert_candidate_features(feature_map[position], policy.insert_metric_weights),
         )
         for position in positions
     ]
@@ -949,7 +969,7 @@ def _select_filtered_best_position_by_score_legacy(
     feature_map = compute_insert_candidate_features_batch(sol, tid, positions, instance, config)
     scored = [
         (
-            score_insert_candidate_features(feature_map[position], policy.metric_weights),
+            score_insert_candidate_features(feature_map[position], policy.insert_metric_weights),
             position,
         )
         for position in positions

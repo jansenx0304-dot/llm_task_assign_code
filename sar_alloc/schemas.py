@@ -28,9 +28,16 @@ OBJECTIVE_LAYER_SCHEMA = """{
 
 NEXT_ACTION_SCHEMA = """{
   "rationale": "short string explaining why this is the best next action now",
+  "// operator_intent semantics": "required for every action_type; split remove / reinsert / insert before setting numeric controls",
+  "operator_intent": {
+    "remove": "short phrase, under 12 words: what assigned tasks are most useful to remove now",
+    "reinsert": "short phrase, under 12 words: what unassigned tasks should be reconsidered earlier now",
+    "insert": "short phrase, under 12 words: what insertion positions are most promising to try first now"
+  },
   "action_type": "build_initial_solution|run_alns|stop",
   "action_payload": {},
-  "// build_initial_solution payload": {"init_method": "insert|sweep"},
+  "// build_initial_solution payload": {"init_method": "weighted_insert"},
+  "// weighted_insert semantics": "build from the empty solution using the same reinsert-task and insert-position scoring philosophy as weighted repair; sweep is not available",
   "// run_alns payload": {
     "destroy_generator_priors": {
       "global_assigned": "number in [0.10, 5.0]",
@@ -46,8 +53,8 @@ NEXT_ACTION_SCHEMA = """{
     },
     "repair_position_selector": "filtered_best_position",
     "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then strict-evaluate candidates in that order until a feasible insertion is found or all candidates are proven infeasible",
-    "strength_ratio": "number in [0.02, 0.40]",
-    "metric_weights": {
+    "// remove_metric_weights": "ranks destroy removal candidates",
+    "remove_metric_weights": {
       "priority": "number in [0, 5]",
       "tw_tightness": "number in [0, 5]",
       "violation_risk": "number in [0, 8]",
@@ -57,6 +64,29 @@ NEXT_ACTION_SCHEMA = """{
       "feasibility_scarcity": "number in [0, 5]",
       "route_instability": "number in [0, 3]"
     },
+    "// reinsert_metric_weights": "ranks unassigned tasks for repair order",
+    "reinsert_metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "// insert_metric_weights": "ranks candidate insertion positions for a chosen task",
+    "insert_metric_weights": {
+      "priority": "number in [0, 5]",
+      "tw_tightness": "number in [0, 5]",
+      "violation_risk": "number in [0, 8]",
+      "energy_pressure": "number in [0, 5]",
+      "detour_cost": "number in [0, 5]",
+      "service_burden": "number in [0, 5]",
+      "feasibility_scarcity": "number in [0, 5]",
+      "route_instability": "number in [0, 3]"
+    },
+    "strength_ratio": "number in [0.02, 0.40]",
     "acceptance": "greedy|threshold|sa",
     "accept_level": "number in [0, 1]",
     "reaction_factor": "number in [0.05, 0.40]",
@@ -77,14 +107,21 @@ SCHEMA_CONSTRAINTS = {
             "run_alns",
             "stop",
         ],
-        "init_method": ["insert", "sweep"],
+        "operator_intent_fields": ["remove", "reinsert", "insert"],
+        "operator_intent_max_words": 12,
+        "init_method": ["weighted_insert"],
         "destroy_generator_priors": list(DESTROY_CANDIDATE_GENERATORS),
         "repair_task_selector_priors": list(REPAIR_TASK_SELECTORS),
         "repair_position_selector": list(REPAIR_POSITION_SELECTORS),
         "acceptance": list(ACCEPTANCE_MODES),
+        "metric_weight_maps": [
+            "remove_metric_weights",
+            "reinsert_metric_weights",
+            "insert_metric_weights",
+        ],
         "metric_fields": list(METRIC_FIELDS),
     },
-    "metric_weights": dict(METRIC_WEIGHT_BOUNDS),
+    "metric_weight_bounds": dict(METRIC_WEIGHT_BOUNDS),
     "operator_prior_bounds": {
         "lower": OPERATOR_PRIOR_BOUNDS[0],
         "upper": OPERATOR_PRIOR_BOUNDS[1],

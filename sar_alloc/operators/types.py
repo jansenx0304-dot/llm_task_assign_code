@@ -141,7 +141,9 @@ class WeightedALNSPolicy:
     destroy_generator_priors: Dict[str, float]
     repair_task_selector_priors: Dict[str, float]
     repair_position_selector: str
-    metric_weights: MetricWeights
+    remove_metric_weights: MetricWeights
+    reinsert_metric_weights: MetricWeights
+    insert_metric_weights: MetricWeights
     strength_ratio: float
     acceptance: str
     accept_level: float
@@ -159,7 +161,9 @@ class WeightedALNSPolicy:
                 for name, weight in self.repair_task_selector_priors.items()
             },
             "repair_position_selector": str(self.repair_position_selector),
-            "metric_weights": self.metric_weights.as_dict(),
+            "remove_metric_weights": self.remove_metric_weights.as_dict(),
+            "reinsert_metric_weights": self.reinsert_metric_weights.as_dict(),
+            "insert_metric_weights": self.insert_metric_weights.as_dict(),
             "strength_ratio": float(self.strength_ratio),
             "acceptance": str(self.acceptance),
             "accept_level": float(self.accept_level),

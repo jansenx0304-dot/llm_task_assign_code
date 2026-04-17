@@ -37,7 +37,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 # 业务 imports（使用绝对 import，配合上面的 sys.path 注入更稳）
 # ---------------------------------------------------------
 from sar_alloc.config import Config, Budget  # noqa: E40222
-from sar_alloc.console import bullets, kv, section, success  # noqa: E402
+from sar_alloc.console import bullets, error, info, json_block, kv, section, success  # noqa: E402
 from sar_alloc.models import Instance, Depot, Agent, Task  # noqa: E402
 from sar_alloc.llm_client import build_llm_client  # noqa: E402
 from sar_alloc.llm_orchestrator import run_orchestrator  # noqa: E402
@@ -254,7 +254,8 @@ def tee_console_to_file(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     original_stdout = sys.stdout
     original_stderr = sys.stderr
-    with log_path.open("a", encoding="utf-8") as fh:
+    # Use UTF-8 with BOM so Windows tools can reliably detect the encoding.
+    with log_path.open("w", encoding="utf-8-sig") as fh:
         sys.stdout = _TeeTextStream(original_stdout, fh)
         sys.stderr = _TeeTextStream(original_stderr, fh)
         try:
@@ -341,6 +342,7 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
 
     section("Run Complete", icon="🏁")
     success(f"Finished in {dt:.3f}s")
+    json_block("Final Solution Summary", sol_sum)
     bullets(
         "Routes",
         [f"agent {aid}: {seq}" for aid, seq in sorted(sol.routes.items(), key=lambda x: x[0])],
@@ -377,11 +379,11 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
         tag=("dummy" if bool(s.get("dummy_llm", True)) else "llm"),
     )
     with tee_console_to_file(log_path):
-        print(f"[LOG] Writing run log to: {log_path}")
+        info(f"Run log path: {log_path}")
         try:
             _plain_main(settings=s)
         except Exception as exc:
-            print(f"[ERROR] Run failed: {exc}")
+            error(f"Run failed: {exc}")
             traceback.print_exc()
             raise
 

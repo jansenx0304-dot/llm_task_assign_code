@@ -36,7 +36,7 @@ D. 技能异质性（Skill complexity / bottleneck）
 
 E. 空间结构（Spatial structure）
    - spatial_scale（地图尺度，越大路程越长 -> 时间窗/能量更紧）
-   - cluster_spread（簇内离散度；小=明显聚类，适合 sweep/insert；大=更像随机散点）
+   - cluster_spread（簇内离散度；小=明显聚类，更适合构造型初始解；大=更像随机散点）
    - n_clusters（通常≈n_agents；也可以设置不同以制造跨簇访问）
 
 F. 目标冲突与策略鲁棒性（Objective tradeoff）
