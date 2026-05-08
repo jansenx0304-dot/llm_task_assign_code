@@ -9,7 +9,6 @@ from .operators import (
     METRIC_WEIGHT_BOUNDS,
     OPERATOR_PRIOR_BOUNDS,
     POLICY_BOUNDS,
-    REPAIR_POSITION_SELECTORS,
     REPAIR_TASK_SELECTORS,
 )
 
@@ -36,8 +35,7 @@ NEXT_ACTION_SCHEMA = """{
   },
   "action_type": "build_initial_solution|run_alns|stop",
   "action_payload": {},
-  "// build_initial_solution payload": {"init_method": "weighted_insert"},
-  "// weighted_insert semantics": "build from the empty solution using the same reinsert-task and insert-position scoring philosophy as weighted repair; sweep is not available",
+  "// build_initial_solution payload": {},
   "// run_alns payload": {
     "destroy_generator_priors": {
       "global_assigned": "number in [0.10, 5.0]",
@@ -51,8 +49,6 @@ NEXT_ACTION_SCHEMA = """{
       "weighted_priority_order": "number in [0.10, 5.0]",
       "regret2_order": "number in [0.10, 5.0]"
     },
-    "repair_position_selector": "filtered_best_position",
-    "// filtered_best_position semantics": "rank loosely filtered positions by insert score, then strict-evaluate candidates in that order until a feasible insertion is found or all candidates are proven infeasible",
     "// remove_metric_weights": "ranks destroy removal candidates",
     "remove_metric_weights": {
       "priority": "number in [0, 5]",
@@ -109,10 +105,8 @@ SCHEMA_CONSTRAINTS = {
         ],
         "operator_intent_fields": ["remove", "reinsert", "insert"],
         "operator_intent_max_words": 12,
-        "init_method": ["weighted_insert"],
         "destroy_generator_priors": list(DESTROY_CANDIDATE_GENERATORS),
         "repair_task_selector_priors": list(REPAIR_TASK_SELECTORS),
-        "repair_position_selector": list(REPAIR_POSITION_SELECTORS),
         "acceptance": list(ACCEPTANCE_MODES),
         "metric_weight_maps": [
             "remove_metric_weights",

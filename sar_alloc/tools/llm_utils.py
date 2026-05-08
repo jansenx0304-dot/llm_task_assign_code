@@ -16,7 +16,6 @@ from ..operators import (
     METRIC_WEIGHT_BOUNDS,
     OPERATOR_PRIOR_BOUNDS,
     POLICY_BOUNDS,
-    REPAIR_POSITION_SELECTORS,
     REPAIR_TASK_SELECTORS,
     MetricWeights,
     WeightedALNSPolicy,
@@ -184,44 +183,31 @@ def llm_apply_objective(config: Config, objective_spec: Dict[str, Any]) -> Dict[
         return {
             "ok": False,
             "error": "objective_spec.layers must be a non-empty list",
-            "allowed_metrics": sorted(_ALLOWED_OBJECTIVE_METRICS),
+        }
+
+    max_layers = max(1, min(int(config.eval.objective_policy.max_layers), 5))
+    if len(layers_raw) > max_layers:
+        return {
+            "ok": False,
+            "error": f"objective_spec.layers must contain at most {max_layers} layers",
         }
 
     normalized: List[ObjectiveLayer] = []
-    dropped: List[Dict[str, Any]] = []
-    max_layers = max(1, min(int(config.eval.objective_policy.max_layers), 5))
+    for item in layers_raw:
+        if not isinstance(item, dict):
+            return {"ok": False, "error": "objective_spec.layers entries must be objects"}
 
-    for index, item in enumerate(layers_raw):
-        if len(normalized) >= max_layers:
-            break
-        if isinstance(item, str):
-            metric = item
-            direction = "min"
-            name = item
-        elif isinstance(item, dict):
-            metric = str(item.get("metric", ""))
-            direction = str(item.get("direction", "min"))
-            name = str(item.get("name", metric or f"layer_{index + 1}"))
-        else:
-            dropped.append({"index": index, "reason": "layer must be string or object"})
-            continue
-
+        name = str(item.get("name", "")).strip()
+        metric = str(item.get("metric", "")).strip()
+        direction = str(item.get("direction", "")).strip()
+        if not name:
+            return {"ok": False, "error": "objective layer name must be a non-empty string"}
         if metric not in _ALLOWED_OBJECTIVE_METRICS:
-            dropped.append({"index": index, "reason": "unknown metric", "metric": metric})
-            continue
+            return {"ok": False, "error": f"unknown objective metric: {metric}"}
         if direction not in ("min", "max"):
-            dropped.append({"index": index, "reason": "direction must be min|max", "direction": direction})
-            continue
+            return {"ok": False, "error": "objective layer direction must be min|max"}
 
         normalized.append(ObjectiveLayer(name=name, metric=metric, direction=direction))
-
-    if not normalized:
-        return {
-            "ok": False,
-            "error": "No valid objective layers after validation",
-            "dropped_layers": dropped,
-            "allowed_metrics": sorted(_ALLOWED_OBJECTIVE_METRICS),
-        }
 
     config.eval.objective_policy.layers = normalized
     return {
@@ -230,7 +216,6 @@ def llm_apply_objective(config: Config, objective_spec: Dict[str, Any]) -> Dict[
             {"name": layer.name, "metric": layer.metric, "direction": layer.direction}
             for layer in normalized
         ],
-        "dropped_layers": dropped,
     }
 
 
@@ -244,7 +229,6 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
     allowed_fields = {
         "destroy_generator_priors",
         "repair_task_selector_priors",
-        "repair_position_selector",
         "remove_metric_weights",
         "reinsert_metric_weights",
         "insert_metric_weights",
@@ -271,13 +255,6 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
         defaults=defaults.repair_task_selector_priors,
         allowed=REPAIR_TASK_SELECTORS,
         field_name="repair_task_selector_priors",
-        dropped=dropped,
-    )
-    repair_position_selector = _pick_enum(
-        raw_value=raw.get("repair_position_selector"),
-        default=defaults.repair_position_selector,
-        allowed=REPAIR_POSITION_SELECTORS,
-        field_name="repair_position_selector",
         dropped=dropped,
     )
     acceptance = _pick_enum(
@@ -321,7 +298,6 @@ def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) ->
     policy = WeightedALNSPolicy(
         destroy_generator_priors=destroy_generator_priors,
         repair_task_selector_priors=repair_task_selector_priors,
-        repair_position_selector=repair_position_selector,
         remove_metric_weights=remove_metric_weights,
         reinsert_metric_weights=reinsert_metric_weights,
         insert_metric_weights=insert_metric_weights,

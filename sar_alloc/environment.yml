@@ -1,0 +1,5 @@
+name: LLM_task_assign
+channels:
+  - defaults
+dependencies:
+  - python=3.12

@@ -46,8 +46,6 @@ class EvalResult:
     # 可选：缓存的字典序 key（比如 (violation_total, missed_priority, energy_total)）
     lex_key: Optional[Tuple[float, ...]] = None
 
-    eval_version: int = 0
-
     def get_metric(self, name: str) -> float:
         """
         统一访问口径：优先从 metrics 取。
@@ -80,6 +78,7 @@ class AssignmentSolution:
     # 评估结果缓存（由 evaluator 写入/更新）
     eval: Optional[EvalResult] = None
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    run_summary: Dict[str, Any] = field(default_factory=dict)
 
     def clone(self, deep: bool = True) -> "AssignmentSolution":
         if not deep:
@@ -89,6 +88,7 @@ class AssignmentSolution:
                 schedule=self.schedule,
                 eval=self.eval,
                 solver_diagnostics=self.solver_diagnostics,
+                run_summary=self.run_summary,
             )
         return AssignmentSolution(
             routes={aid: list(seq) for aid, seq in self.routes.items()},
@@ -96,6 +96,7 @@ class AssignmentSolution:
             schedule=dict(self.schedule),
             eval=self.eval,  # 通常结构改变后 eval 需要置空；此处由调用方决定
             solver_diagnostics=deepcopy(self.solver_diagnostics),
+            run_summary=deepcopy(self.run_summary),
         )
 
     @staticmethod
@@ -173,6 +174,7 @@ class AssignmentSolution:
             "schedule": {f"{aid}:{tid}": [st, en] for (aid, tid), (st, en) in self.schedule.items()},
             "eval": ev_dict,
             "solver_diagnostics": deepcopy(self.solver_diagnostics),
+            "run_summary": deepcopy(self.run_summary),
         }
     
     @staticmethod
@@ -190,6 +192,7 @@ class AssignmentSolution:
             unassigned=unassigned,
             schedule=schedule,
             solver_diagnostics=dict(data.get("solver_diagnostics", {}) or {}),
+            run_summary=dict(data.get("run_summary", {}) or {}),
         )
 
         # eval 建议由 evaluator 重算；这里默认不反序列化为强一致性

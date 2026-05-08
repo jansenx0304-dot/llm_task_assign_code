@@ -99,9 +99,6 @@ ALNS control semantics:
 - Do not provide long explanations.
 - Destroy operators are sampled from the full destroy pool using positive prior weights; do not choose a single destroy operator.
 - Repair task selectors are sampled from the full repair-task pool using positive prior weights; do not choose a single repair task selector.
-- `repair_position_selector` must remain `filtered_best_position`.
-- `build_initial_solution.init_method` must remain `weighted_insert`.
-- `weighted_insert` is the only initial construction method. It starts from the empty solution and follows the same task-score / insert-score philosophy as weighted repair; do not request sweep.
 - These are three separate metric profiles for three operator-level decisions, not one global preference.
 - `remove_metric_weights` rank removal candidates only.
 - `reinsert_metric_weights` rank unassigned tasks only.

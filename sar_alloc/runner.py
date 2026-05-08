@@ -48,7 +48,7 @@ from sar_alloc.tools import instance_summary, solution_summary  # noqa: E402
 # =========================================================
 DEV_SETTINGS: Dict[str, Any] = {
     # 目标描述（自然语言）
-    "user_goal_text": "我需要抢救高价值的任务，然后在保证所有任务完成的同时尽可能减少油耗等资源浪费。",
+    "user_goal_text": "我需要抢救高价值的任务，保证所有任务完成，最后尽可能减少油耗等资源浪费。",
 
     # 例如：data/instances/demo.json
     "instance_path": "sar_alloc/data/instances/demo/seed42_T100_A6.json",
@@ -339,9 +339,15 @@ def main(settings: Optional[Dict[str, Any]] = None) -> None:
     # ---------- 5) 打印摘要（对齐 objective_policy） ----------
     inst_sum = instance_summary(instance=inst)
     sol_sum = solution_summary(solution=sol, instance=inst, config=cfg)
+    run_summary = dict(getattr(sol, "run_summary", {}) or {})
 
     section("Run Complete", icon="🏁")
     success(f"Finished in {dt:.3f}s")
+    kv("total_wall_time_sec", f"{dt:.3f}", icon="⏱️")
+    if run_summary:
+        kv("total_solver_time_sec", run_summary.get("total_solver_time_sec", 0.0), icon="⏱️")
+        kv("total_solver_iters", run_summary.get("total_solver_iters", 0), icon="🔁")
+        kv("total_solver_calls", run_summary.get("total_solver_calls", 0), icon="🧮")
     json_block("Final Solution Summary", sol_sum)
     bullets(
         "Routes",

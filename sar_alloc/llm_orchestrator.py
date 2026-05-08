@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -137,7 +138,6 @@ class AgentState:
     incumbent_solution: Optional[AssignmentSolution] = None
     incumbent_summary: Optional[Dict[str, Any]] = None
     previous_incumbent_summary: Optional[Dict[str, Any]] = None
-    current_init_method: Optional[str] = None
     current_weighted_policy: Dict[str, Any] = field(default_factory=dict)
     history: List[StepRecord] = field(default_factory=list)
     consecutive_flat_steps: int = 0
@@ -147,7 +147,6 @@ class AgentState:
         return {
             "step_count": len(self.history),
             "incumbent_exists": self.incumbent_summary is not None,
-            "current_init_method": self.current_init_method,
             "current_weighted_policy": self.current_weighted_policy,
             "last_action": None if last is None else {
                 "action_type": last.action_type,
@@ -173,6 +172,7 @@ def run_orchestrator(
     total_budget = budget or Budget()
     max_steps = _resolve_positive_int(max_agent_steps) or DEFAULT_MAX_AGENT_STEPS
     solver_calls = _resolve_positive_int(max_solver_calls) or max_steps
+    orchestrator_t0 = time.time()
 
     objective_from_llm = _stage_build_objective(client, user_goal_text, cfg)
     inst_sum = instance_summary(instance=instance)
@@ -220,14 +220,43 @@ def run_orchestrator(
         step_id += 1
 
     if state.incumbent_solution is not None:
-        return state.incumbent_solution
+        return _finalize_run_solution(state.incumbent_solution, state, budget_state, orchestrator_t0)
     warning("No incumbent solution produced by the agent loop. Falling back to a safe initial solution.")
     _log_algorithm_input_source(
         phase="build_initial_solution",
         objective_from_llm=state.objective_from_llm,
         action_from_llm=False,
     )
-    return _safe_build_initial_solution("weighted_insert", instance, cfg, rng_seed)
+    fallback_solution = build_initial_solution(instance=instance, config=cfg, rng_seed=rng_seed)
+    return _finalize_run_solution(fallback_solution, state, budget_state, orchestrator_t0)
+
+
+def _finalize_run_solution(
+    solution: AssignmentSolution,
+    state: AgentState,
+    budget_state: BudgetState,
+    started_at: float,
+) -> AssignmentSolution:
+    run_summary = _build_run_summary(state, budget_state, started_at)
+    solution.run_summary = run_summary
+    json_block("Agent Run Summary", run_summary)
+    return solution
+
+
+def _build_run_summary(state: AgentState, budget_state: BudgetState, started_at: float) -> Dict[str, Any]:
+    solver_records = [record for record in state.history if record.solver_diagnostics]
+    best_update_count = sum(_as_non_negative_int(record.solver_diagnostics.get("best_update_count", 0)) for record in solver_records)
+    return {
+        "orchestrator_elapsed_sec": _round_number(max(0.0, time.time() - started_at)),
+        "total_solver_time_sec": _round_number(budget_state.used.get("time_limit_sec", 0.0)),
+        "total_solver_iters": _as_non_negative_int(budget_state.used.get("max_iters", 0)),
+        "total_solver_calls": _as_non_negative_int(budget_state.used.get("solver_calls", 0)),
+        "agent_steps_executed": len(state.history),
+        "alns_steps_executed": len(solver_records),
+        "best_update_count": best_update_count,
+        "final_action": state.history[-1].action_type if state.history else None,
+        "remaining_budget": _round_dict(budget_state.remaining),
+    }
 
 
 def _stage_build_objective(client: LLMClientProtocol, user_goal_text: str, cfg: Config) -> bool:
@@ -390,11 +419,10 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
             objective_from_llm=state.objective_from_llm,
             action_from_llm=action_from_llm,
         )
-        init_method = _sanitize_init_method(payload.get("init_method"))
-        new_solution = _safe_build_initial_solution(init_method, instance, cfg, rng_seed + step_id)
-        state.current_init_method = init_method
+        payload = {}
+        new_solution = build_initial_solution(instance=instance, config=cfg, rng_seed=rng_seed + step_id)
         state.current_weighted_policy = {}
-        result_summary = f"Built initial incumbent with init_method={init_method}."
+        result_summary = "Built initial incumbent."
     elif action_type == RUN_ALNS_ACTION:
         policy = action.get("_compiled_policy")
         if not isinstance(policy, WeightedALNSPolicy):
@@ -412,15 +440,13 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         init_solution = prev_solution
         prefix = ""
         if init_solution is None:
-            fallback_init = _sanitize_init_method(state.current_init_method or "weighted_insert")
             _log_algorithm_input_source(
                 phase="build_initial_solution",
                 objective_from_llm=state.objective_from_llm,
                 action_from_llm=action_from_llm,
             )
-            init_solution = _safe_build_initial_solution(fallback_init, instance, cfg, rng_seed + step_id)
-            state.current_init_method = fallback_init
-            prefix = f"Built fallback incumbent with init_method={fallback_init} before running weighted ALNS. "
+            init_solution = build_initial_solution(instance=instance, config=cfg, rng_seed=rng_seed + step_id)
+            prefix = "Built initial incumbent before running weighted ALNS. "
         default_budget = {"time_limit_sec": cfg.solver.weighted_alns.default_time_limit_sec, "max_iters": cfg.solver.weighted_alns.default_max_iters}
         requested_budget = dict(budget_request)
         slice_budget, budget_allocated = budget_state.clamp_request(requested_budget, default_budget)
@@ -525,7 +551,7 @@ def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state:
     payload = payload if isinstance(payload, dict) else {}
     compiled_policy: Optional[WeightedALNSPolicy] = None
     if action_type == "build_initial_solution":
-        normalized_payload = {"init_method": _sanitize_init_method(payload.get("init_method"))}
+        normalized_payload = {}
     elif action_type == RUN_ALNS_ACTION:
         compiled = compile_weighted_alns_policy(cfg, payload)
         if bool(compiled.get("ok", False)):
@@ -562,7 +588,7 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
         return {
             "action_type": "build_initial_solution",
             "operator_intent": None,
-            "action_payload": {"init_method": "weighted_insert"},
+            "action_payload": {},
             "budget_request": guarded.get("budget_request", {}),
             "rationale": "Forced build_initial_solution because no incumbent is available yet.",
         }
@@ -573,7 +599,7 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
             return {
                 "action_type": fallback,
                 "operator_intent": None,
-                "action_payload": {"init_method": "weighted_insert"},
+                "action_payload": {},
                 "budget_request": guarded.get("budget_request", {}),
                 "rationale": "Stop was rejected by guardrails, so the controller forced build_initial_solution.",
             }
@@ -592,20 +618,15 @@ def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str
     return guarded
 
 
-def _safe_build_initial_solution(method: str, instance: Instance, cfg: Config, rng_seed: int) -> AssignmentSolution:
-    safe_method = _sanitize_init_method(method)
-    return build_initial_solution(method=safe_method, instance=instance, config=cfg, rng_seed=rng_seed)
-
-
-def _sanitize_init_method(value: Any) -> str:
-    method = str(value or "weighted_insert").strip().lower()
-    if method in {"weighted_insert", "insert", "sweep"}:
-        return "weighted_insert"
-    return "weighted_insert"
-
-
 def _objective_layers_prompt_view(layers: List[Any]) -> List[Dict[str, Any]]:
-    return [{"index": i + 1, "name": str(getattr(layer, "name", f"layer_{i + 1}")), "metric": str(getattr(layer, "metric", "")), "direction": str(getattr(layer, "direction", "min"))} for i, layer in enumerate(layers)]
+    return [
+        {
+            "name": str(layer.name),
+            "metric": str(layer.metric),
+            "direction": str(layer.direction),
+        }
+        for layer in layers
+    ]
 
 
 def _build_incumbent_metrics_summary(summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -641,7 +662,7 @@ def _build_delta_from_prev_incumbent(objective_layers: List[Dict[str, Any]], cur
         delta = round(_oriented_layer_value(layer, current_metrics) - _oriented_layer_value(layer, previous_metrics), 6)
         deltas.append(float(delta))
         if first_advanced is None and delta < 0:
-            first_advanced = int(layer.get("index") or len(deltas))
+            first_advanced = len(deltas)
             advanced = True
             break
         if delta > 0:
@@ -885,24 +906,15 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         return budget_error
 
     if action_type == "build_initial_solution":
-        unknown_payload_fields = sorted(str(key) for key in payload.keys() if str(key) not in {"init_method"})
+        unknown_payload_fields = sorted(str(key) for key in payload.keys())
         if unknown_payload_fields:
             return f"unknown field 'action_payload.{unknown_payload_fields[0]}'"
-        if "init_method" not in payload:
-            return "missing field 'action_payload.init_method'"
-        init_method = payload.get("init_method")
-        if not isinstance(init_method, str):
-            return "field 'action_payload.init_method' must be a string"
-        allowed_init_methods = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("init_method", []) or [])
-        if init_method not in allowed_init_methods:
-            return f"field 'action_payload.init_method' has illegal enum value '{init_method}'"
         return None
 
     if action_type == RUN_ALNS_ACTION:
         allowed_payload_fields = {
             "destroy_generator_priors",
             "repair_task_selector_priors",
-            "repair_position_selector",
             "remove_metric_weights",
             "reinsert_metric_weights",
             "insert_metric_weights",
@@ -919,7 +931,6 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         for field_name in (
             "destroy_generator_priors",
             "repair_task_selector_priors",
-            "repair_position_selector",
             "strength_ratio",
             "acceptance",
             "accept_level",
@@ -954,13 +965,6 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
             )
             if nested_error is not None:
                 return nested_error
-
-        repair_position_selector = payload.get("repair_position_selector")
-        if not isinstance(repair_position_selector, str):
-            return "field 'action_payload.repair_position_selector' must be a string"
-        allowed_repair_position = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("repair_position_selector", []) or [])
-        if repair_position_selector not in allowed_repair_position:
-            return f"field 'action_payload.repair_position_selector' has illegal enum value '{repair_position_selector}'"
 
         acceptance = payload.get("acceptance")
         if not isinstance(acceptance, str):
@@ -1036,7 +1040,6 @@ def _default_weighted_alns_policy(cfg: Config) -> WeightedALNSPolicy:
             str(name): float(weight)
             for name, weight in defaults.repair_task_selector_priors.items()
         },
-        repair_position_selector=str(defaults.repair_position_selector),
         remove_metric_weights=defaults.remove_metric_weights,
         reinsert_metric_weights=defaults.reinsert_metric_weights,
         insert_metric_weights=defaults.insert_metric_weights,

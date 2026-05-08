@@ -150,10 +150,3 @@ class Instance:
         self._tt_cache.clear()
         self._task_index_cache.clear()
         self._agent_index_cache.clear()
-
-    # 旧的 index 构造函数保留，但不再在热路径里调用
-    def _task_index(self) -> Dict[int, Task]:
-        return {t.id: t for t in self.tasks}
-
-    def _agent_index(self) -> Dict[int, Agent]:
-        return {a.id: a for a in self.agents}

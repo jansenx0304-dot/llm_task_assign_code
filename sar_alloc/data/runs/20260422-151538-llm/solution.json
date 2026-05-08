@@ -1,0 +1,3015 @@
+{
+  "routes": {
+    "0": [
+      51,
+      85,
+      54,
+      71,
+      38,
+      6,
+      7,
+      8,
+      43,
+      10,
+      94,
+      77,
+      95,
+      96,
+      97,
+      47,
+      67,
+      29,
+      50,
+      83,
+      32
+    ],
+    "1": [
+      0,
+      18,
+      19,
+      55,
+      5,
+      21,
+      22,
+      23,
+      24,
+      25,
+      98,
+      99,
+      27,
+      28,
+      49,
+      30,
+      33
+    ],
+    "2": [
+      34,
+      20,
+      39,
+      40,
+      41,
+      42,
+      92,
+      93,
+      45,
+      46,
+      65
+    ],
+    "3": [
+      52,
+      53,
+      2,
+      37,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      26,
+      48
+    ],
+    "4": [
+      17,
+      69,
+      70,
+      3,
+      4,
+      73,
+      74,
+      75,
+      76,
+      78,
+      81,
+      82
+    ],
+    "5": [
+      84,
+      68,
+      35,
+      36,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      9,
+      44,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      66,
+      79,
+      80,
+      31
+    ]
+  },
+  "unassigned": [
+    72,
+    1
+  ],
+  "schedule": {
+    "0:51": [
+      355.6734210998373,
+      574.5830050364287
+    ],
+    "0:85": [
+      1699.970400733211,
+      1877.2616448359518
+    ],
+    "0:54": [
+      2589.799384637674,
+      2828.6240246037473
+    ],
+    "0:71": [
+      3211.961132334576,
+      3239.4434864695218
+    ],
+    "0:38": [
+      3829.1664001707986,
+      4139.204122592061
+    ],
+    "0:6": [
+      5174.772537871169,
+      5524.70847726667
+    ],
+    "0:7": [
+      6393.986443862309,
+      6724.80711485597
+    ],
+    "0:8": [
+      7335.225711416987,
+      7599.248630371364
+    ],
+    "0:43": [
+      8260.18699953338,
+      8455.561495194986
+    ],
+    "0:10": [
+      9358.357604689314,
+      9367.887869771841
+    ],
+    "0:94": [
+      9808.30204415559,
+      9962.204644124591
+    ],
+    "0:77": [
+      10258.37461784378,
+      10297.821376524334
+    ],
+    "0:95": [
+      10725.281311659719,
+      10832.97392154993
+    ],
+    "0:96": [
+      10913.415749545415,
+      10932.973591323223
+    ],
+    "0:97": [
+      11140.74288038423,
+      11378.729871817628
+    ],
+    "0:47": [
+      11881.705039363704,
+      12121.05895231105
+    ],
+    "0:67": [
+      13455.15147855146,
+      13747.540341857926
+    ],
+    "0:29": [
+      14348.923338079558,
+      14375.775968248847
+    ],
+    "0:50": [
+      14866.779084421754,
+      14940.15020870754
+    ],
+    "0:83": [
+      16220.518373689501,
+      16521.349546205958
+    ],
+    "0:32": [
+      18978.5474093071,
+      19244.406903576626
+    ],
+    "1:0": [
+      655.3817872470837,
+      886.501701274849
+    ],
+    "1:18": [
+      1469.6495712682229,
+      1674.000810004407
+    ],
+    "1:19": [
+      2083.4267179682624,
+      2418.0152807188365
+    ],
+    "1:55": [
+      3122.5417932988357,
+      3352.0812612831533
+    ],
+    "1:5": [
+      4413.621920453816,
+      4659.6742325653295
+    ],
+    "1:21": [
+      5594.501348771404,
+      5948.720833841435
+    ],
+    "1:22": [
+      6730.92378262174,
+      6930.977846058505
+    ],
+    "1:23": [
+      7534.233564955634,
+      7861.354503501883
+    ],
+    "1:24": [
+      9166.440909730358,
+      9326.618022976543
+    ],
+    "1:25": [
+      10742.486199387695,
+      10790.1116952907
+    ],
+    "1:98": [
+      11861.604607950774,
+      12131.20275759871
+    ],
+    "1:99": [
+      12501.296220860311,
+      12770.564468417013
+    ],
+    "1:27": [
+      13160.807994021114,
+      13450.008173760609
+    ],
+    "1:28": [
+      13704.561374893663,
+      14013.93775887259
+    ],
+    "1:49": [
+      14247.201380010065,
+      14256.140596773968
+    ],
+    "1:30": [
+      16101.550701007767,
+      16448.137986050406
+    ],
+    "1:33": [
+      20597.466424408758,
+      20838.21408407861
+    ],
+    "2:34": [
+      746.9732363799544,
+      945.1347586825343
+    ],
+    "2:20": [
+      3552.498174742652,
+      3630.807418534252
+    ],
+    "2:39": [
+      5359.425290840632,
+      5560.976565104588
+    ],
+    "2:40": [
+      5605.80004307104,
+      5820.971973083092
+    ],
+    "2:41": [
+      6125.9702150498,
+      6324.108373368476
+    ],
+    "2:42": [
+      6667.515974371253,
+      6947.923565420815
+    ],
+    "2:92": [
+      8545.218855079145,
+      8791.303388023422
+    ],
+    "2:93": [
+      9081.791533719212,
+      9248.317772424482
+    ],
+    "2:45": [
+      10085.919581988113,
+      10213.849233344627
+    ],
+    "2:46": [
+      10862.84819991497,
+      11107.980994755118
+    ],
+    "2:65": [
+      12007.99584736222,
+      12185.730420001732
+    ],
+    "3:52": [
+      1139.9613114145436,
+      1474.5029177042932
+    ],
+    "3:53": [
+      1751.0110863631744,
+      1839.9511645954676
+    ],
+    "3:2": [
+      2479.001084975513,
+      2690.282869475541
+    ],
+    "3:37": [
+      3252.399740688261,
+      3280.4722467363367
+    ],
+    "3:56": [
+      4243.181848888948,
+      4574.404970060138
+    ],
+    "3:57": [
+      5030.150470541645,
+      5366.745103085456
+    ],
+    "3:58": [
+      5672.069276895063,
+      5851.031005189563
+    ],
+    "3:59": [
+      6634.084498685328,
+      6951.162928286701
+    ],
+    "3:60": [
+      7446.01393157442,
+      7618.455265235151
+    ],
+    "3:61": [
+      8292.222102982887,
+      8502.419002531875
+    ],
+    "3:62": [
+      9248.688894943025,
+      9360.459925845906
+    ],
+    "3:63": [
+      9930.540645791365,
+      10010.006346867905
+    ],
+    "3:64": [
+      11072.260915415485,
+      11327.731533300035
+    ],
+    "3:26": [
+      11898.486068961178,
+      12249.119723065327
+    ],
+    "3:48": [
+      13166.813568432706,
+      13289.638764643152
+    ],
+    "4:17": [
+      588.6270558304483,
+      633.5464636235188
+    ],
+    "4:69": [
+      2189.940816696422,
+      2410.188683280179
+    ],
+    "4:70": [
+      2658.1309381023575,
+      2716.169614431001
+    ],
+    "4:3": [
+      3226.4610879202455,
+      3499.0311003173238
+    ],
+    "4:4": [
+      3934.80882345902,
+      4073.4285280283602
+    ],
+    "4:73": [
+      5696.927719160241,
+      5866.721592519108
+    ],
+    "4:74": [
+      7085.683860351792,
+      7242.350122121348
+    ],
+    "4:75": [
+      8314.250609834427,
+      8656.6320972891
+    ],
+    "4:76": [
+      9438.495244340866,
+      9598.813371123299
+    ],
+    "4:78": [
+      11601.426624481057,
+      11766.254299760476
+    ],
+    "4:81": [
+      14931.920010866143,
+      15151.896067681486
+    ],
+    "4:82": [
+      15370.447658703197,
+      15699.27655520053
+    ],
+    "5:84": [
+      651.2569337979742,
+      678.2489422970048
+    ],
+    "5:68": [
+      753.4505211583295,
+      942.5314887349475
+    ],
+    "5:35": [
+      1778.2741728878516,
+      2022.1487223699073
+    ],
+    "5:36": [
+      2067.2383198972784,
+      2338.1457731368605
+    ],
+    "5:86": [
+      3591.2249928206056,
+      3730.3285567374032
+    ],
+    "5:87": [
+      4674.755534327227,
+      4814.971727718998
+    ],
+    "5:88": [
+      5483.607857760816,
+      5649.188108422594
+    ],
+    "5:89": [
+      6342.527627792644,
+      6649.665826283233
+    ],
+    "5:90": [
+      6953.348035602208,
+      7149.031768147971
+    ],
+    "5:91": [
+      7794.619353218811,
+      7856.177946867873
+    ],
+    "5:9": [
+      8442.692456812249,
+      8637.760456595295
+    ],
+    "5:44": [
+      9185.628516129489,
+      9336.475691938418
+    ],
+    "5:11": [
+      9939.71129904656,
+      10041.406159545868
+    ],
+    "5:12": [
+      10245.719122250066,
+      10414.913953407196
+    ],
+    "5:13": [
+      10674.017081393453,
+      10775.736243184218
+    ],
+    "5:14": [
+      11169.409848843732,
+      11441.186299282776
+    ],
+    "5:15": [
+      11587.935290602378,
+      11921.628760936619
+    ],
+    "5:16": [
+      11999.968546831757,
+      12023.791357420349
+    ],
+    "5:66": [
+      12568.077955696106,
+      12906.978723339087
+    ],
+    "5:79": [
+      13191.559203027162,
+      13429.001621388123
+    ],
+    "5:80": [
+      13689.208039973113,
+      13963.284651882957
+    ],
+    "5:31": [
+      17596.18438878143,
+      17736.08435391884
+    ]
+  },
+  "eval": {
+    "is_feasible": true,
+    "violations": {},
+    "metrics": {
+      "violation_total": 0.0,
+      "violation_capability": 0.0,
+      "violation_time_window": 0.0,
+      "violation_energy": 0.0,
+      "missed_priority": 2.0,
+      "unassigned_count": 2.0,
+      "energy_total": 66380.15271563719,
+      "total_distance": 59920.12108629559,
+      "makespan": 22007.377762869848
+    },
+    "lex_key": [
+      0.0,
+      2.0,
+      2.0,
+      66380.15271563719
+    ]
+  },
+  "solver_diagnostics": {
+    "algorithm": "weighted_alns",
+    "policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.8,
+        "random_subset": 1.0,
+        "route_segment": 1.6,
+        "route_tail": 1.7,
+        "single_route": 1.5
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.0,
+        "regret2_order": 1.0
+      },
+      "remove_metric_weights": {
+        "priority": 0.1,
+        "tw_tightness": 0.3,
+        "violation_risk": 0.0,
+        "energy_pressure": 0.1,
+        "detour_cost": 1.0,
+        "service_burden": 4.0,
+        "feasibility_scarcity": 0.2,
+        "route_instability": 0.2
+      },
+      "reinsert_metric_weights": {
+        "priority": 4.5,
+        "tw_tightness": 3.0,
+        "violation_risk": 0.5,
+        "energy_pressure": 0.2,
+        "detour_cost": 0.3,
+        "service_burden": 0.2,
+        "feasibility_scarcity": 1.2,
+        "route_instability": 0.1
+      },
+      "insert_metric_weights": {
+        "priority": 0.5,
+        "tw_tightness": 0.8,
+        "violation_risk": 0.7,
+        "energy_pressure": 0.4,
+        "detour_cost": 2.0,
+        "service_burden": 0.4,
+        "feasibility_scarcity": 4.0,
+        "route_instability": 0.1
+      },
+      "strength_ratio": 0.25,
+      "acceptance": "sa",
+      "accept_level": 0.5,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.3
+    },
+    "total_iters": 334,
+    "actual_iters_used": 334,
+    "actual_time_used_sec": 30.00901879099547,
+    "best_update_count": 9,
+    "best_update_iters": [
+      29,
+      38,
+      55,
+      58,
+      82,
+      88,
+      122,
+      132,
+      143
+    ],
+    "best_update_lex_keys": [
+      [
+        0.0,
+        4.0,
+        6.0,
+        66150.97237193564
+      ],
+      [
+        0.0,
+        3.0,
+        5.0,
+        68576.2341801726
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        69277.32612302432
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        69274.96747965712
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        68742.52340611148
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        68740.16476274429
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        67628.76475395855
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        67442.91970522127
+      ],
+      [
+        0.0,
+        2.0,
+        2.0,
+        66380.15271563719
+      ]
+    ],
+    "first_best_iter": 29,
+    "last_best_iter": 143,
+    "plateau_iters_after_last_update": 191,
+    "initial_solution_feasible": true,
+    "returned_solution_source": "best_feasible",
+    "returned_solution_feasible": true,
+    "last_acceptance_decision": {
+      "compare_result": 1,
+      "accepted": false,
+      "accept_mode": "sa",
+      "delta_soft": 0.017638121162704544,
+      "temperature": 0.007541997021902566
+    },
+    "operator_weights": {
+      "destroy_candidate_generators": {
+        "adaptive": {
+          "global_assigned": 0.6169637426900586,
+          "random_subset": 0.6005538461538463,
+          "route_segment": 0.6812000000000002,
+          "route_tail": 0.5918753246753248,
+          "single_route": 0.6429866666666668
+        },
+        "llm_prior": {
+          "global_assigned": 1.8,
+          "random_subset": 1.0,
+          "route_segment": 1.6,
+          "route_tail": 1.7,
+          "single_route": 1.5
+        },
+        "fused_final": {
+          "global_assigned": 0.8506746699314524,
+          "random_subset": 0.699820027314866,
+          "route_segment": 0.8800923424949381,
+          "route_tail": 0.8122614472904298,
+          "single_route": 0.8290271522793645
+        }
+      },
+      "repair_task_selectors": {
+        "adaptive": {
+          "weighted_priority_order": 0.6248888888888889,
+          "regret2_order": 0.6257314009661836
+        },
+        "llm_prior": {
+          "weighted_priority_order": 4.0,
+          "regret2_order": 1.0
+        },
+        "fused_final": {
+          "weighted_priority_order": 1.0906363272331558,
+          "regret2_order": 0.7202305929007697
+        }
+      }
+    },
+    "regret2_repair": {
+      "calls": 143,
+      "total_repair_rounds": 3516,
+      "total_tasks_analyzed": 51963,
+      "total_positions_checked": 61388,
+      "last_call": {
+        "round_count": 25,
+        "tasks_inserted": 24,
+        "total_tasks_analyzed": 350,
+        "avg_tasks_analyzed_per_round": 14.0,
+        "total_positions_checked": 444,
+        "avg_positions_checked_per_task": 1.2686,
+        "rounds": [
+          {
+            "remaining_unassigned": 26,
+            "task_count": 26,
+            "selected_tid": 38,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 38,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 47,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 42,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 93,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 54,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 25,
+            "task_count": 25,
+            "selected_tid": 47,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 47,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 42,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 54,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 93,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 24,
+            "task_count": 24,
+            "selected_tid": 42,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 42,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 54,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 93,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 23,
+            "task_count": 23,
+            "selected_tid": 54,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 54,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 93,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 22,
+            "task_count": 22,
+            "selected_tid": 93,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 93,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 21,
+            "task_count": 21,
+            "selected_tid": 7,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 7,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 20,
+            "task_count": 20,
+            "selected_tid": 41,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 41,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 19,
+            "task_count": 19,
+            "selected_tid": 85,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 85,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 18,
+            "task_count": 18,
+            "selected_tid": 40,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 40,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 17,
+            "task_count": 17,
+            "selected_tid": 51,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 51,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 16,
+            "task_count": 16,
+            "selected_tid": 34,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 34,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 15,
+            "task_count": 15,
+            "selected_tid": 61,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 61,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 14,
+            "task_count": 14,
+            "selected_tid": 94,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 94,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 13,
+            "task_count": 13,
+            "selected_tid": 8,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 12,
+            "task_count": 12,
+            "selected_tid": 6,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 11,
+            "task_count": 11,
+            "selected_tid": 92,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 92,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 10,
+            "task_count": 10,
+            "selected_tid": 46,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 46,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 9,
+            "task_count": 9,
+            "selected_tid": 26,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 26,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 8,
+            "task_count": 8,
+            "selected_tid": 39,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 39,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 7,
+            "task_count": 7,
+            "selected_tid": 97,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 6,
+            "task_count": 6,
+            "selected_tid": 32,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 32,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 5,
+            "task_count": 5,
+            "selected_tid": 31,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 31,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 4,
+            "task_count": 4,
+            "selected_tid": 67,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 67,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 3,
+            "task_count": 3,
+            "selected_tid": 83,
+            "task_scans": [
+              {
+                "tid": 83,
+                "ranked_position_count": 3,
+                "positions_checked": 3,
+                "feasible_position_count": 3
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 2,
+            "task_count": 2,
+            "selected_tid": null,
+            "task_scans": [
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          }
+        ]
+      },
+      "avg_tasks_analyzed_per_round": 14.779,
+      "avg_positions_checked_per_task": 1.1814
+    }
+  },
+  "run_summary": {
+    "orchestrator_elapsed_sec": 529.7311,
+    "total_solver_time_sec": 343.086,
+    "total_solver_iters": 4327,
+    "total_solver_calls": 9,
+    "agent_steps_executed": 10,
+    "alns_steps_executed": 9,
+    "best_update_count": 40,
+    "final_action": "run_alns",
+    "remaining_budget": {
+      "time_limit_sec": 156.914,
+      "max_iters": 5673.0,
+      "solver_calls": 1.0
+    }
+  }
+}

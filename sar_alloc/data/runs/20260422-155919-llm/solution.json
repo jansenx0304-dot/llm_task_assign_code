@@ -1,0 +1,2029 @@
+{
+  "routes": {
+    "0": [
+      34,
+      18,
+      69,
+      86,
+      87,
+      39,
+      40,
+      89,
+      90,
+      61,
+      10,
+      77,
+      95,
+      96,
+      47,
+      67,
+      29,
+      50,
+      83,
+      32
+    ],
+    "1": [
+      0,
+      19,
+      38,
+      6,
+      22,
+      23,
+      24,
+      25,
+      98,
+      99,
+      27,
+      28,
+      49,
+      30,
+      33
+    ],
+    "2": [
+      84,
+      35,
+      36,
+      55,
+      5,
+      21,
+      60,
+      92,
+      93,
+      45,
+      46,
+      65
+    ],
+    "3": [
+      52,
+      53,
+      2,
+      37,
+      56,
+      57,
+      58,
+      59,
+      43,
+      62,
+      94,
+      64,
+      26,
+      48,
+      31
+    ],
+    "4": [
+      17,
+      68,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      78,
+      81,
+      82
+    ],
+    "5": [
+      51,
+      85,
+      54,
+      3,
+      4,
+      88,
+      41,
+      42,
+      91,
+      9,
+      44,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      66,
+      79,
+      80
+    ]
+  },
+  "unassigned": [
+    1,
+    97,
+    20,
+    7,
+    8,
+    63
+  ],
+  "schedule": {
+    "0:34": [
+      746.9732363799544,
+      945.1347586825343
+    ],
+    "0:18": [
+      1475.63309300946,
+      1679.984331745644
+    ],
+    "0:69": [
+      2189.940816696422,
+      2410.188683280179
+    ],
+    "0:86": [
+      3501.3889561166334,
+      3640.492520033431
+    ],
+    "0:87": [
+      4587.353724330949,
+      4727.569917722721
+    ],
+    "0:39": [
+      5359.425290840632,
+      5560.976565104588
+    ],
+    "0:40": [
+      5605.80004307104,
+      5820.971973083092
+    ],
+    "0:89": [
+      6259.258966933841,
+      6566.397165424431
+    ],
+    "0:90": [
+      6871.543217199576,
+      7067.226949745339
+    ],
+    "0:61": [
+      8274.588527963224,
+      8484.785427512212
+    ],
+    "0:10": [
+      9358.357604689314,
+      9367.887869771841
+    ],
+    "0:77": [
+      10247.016341119572,
+      10286.463099800127
+    ],
+    "0:95": [
+      10718.7434947172,
+      10826.436104607412
+    ],
+    "0:96": [
+      10912.440560790654,
+      10931.998402568463
+    ],
+    "0:47": [
+      11881.705039363704,
+      12121.05895231105
+    ],
+    "0:67": [
+      13455.15147855146,
+      13747.540341857926
+    ],
+    "0:29": [
+      14348.923338079558,
+      14375.775968248847
+    ],
+    "0:50": [
+      14866.779084421754,
+      14940.15020870754
+    ],
+    "0:83": [
+      16220.518373689501,
+      16521.349546205958
+    ],
+    "0:32": [
+      18978.5474093071,
+      19244.406903576626
+    ],
+    "1:0": [
+      655.3817872470837,
+      886.501701274849
+    ],
+    "1:19": [
+      2083.4267179682624,
+      2418.0152807188365
+    ],
+    "1:38": [
+      3792.424742841841,
+      4102.462465263104
+    ],
+    "1:6": [
+      5174.772537871169,
+      5524.70847726667
+    ],
+    "1:22": [
+      6730.92378262174,
+      6930.977846058505
+    ],
+    "1:23": [
+      7534.233564955634,
+      7861.354503501883
+    ],
+    "1:24": [
+      9166.440909730358,
+      9326.618022976543
+    ],
+    "1:25": [
+      10742.486199387695,
+      10790.1116952907
+    ],
+    "1:98": [
+      11861.604607950774,
+      12131.20275759871
+    ],
+    "1:99": [
+      12501.296220860311,
+      12770.564468417013
+    ],
+    "1:27": [
+      13160.807994021114,
+      13450.008173760609
+    ],
+    "1:28": [
+      13704.561374893663,
+      14013.93775887259
+    ],
+    "1:49": [
+      14247.201380010065,
+      14256.140596773968
+    ],
+    "1:30": [
+      16101.550701007767,
+      16448.137986050406
+    ],
+    "1:33": [
+      20597.466424408758,
+      20838.21408407861
+    ],
+    "2:84": [
+      739.3522435973296,
+      766.3442520963602
+    ],
+    "2:35": [
+      1778.2741728878516,
+      2022.1487223699073
+    ],
+    "2:36": [
+      2067.2383198972784,
+      2338.1457731368605
+    ],
+    "2:55": [
+      3094.6956885768295,
+      3324.235156561147
+    ],
+    "2:5": [
+      4413.621920453816,
+      4659.6742325653295
+    ],
+    "2:21": [
+      5594.501348771404,
+      5948.720833841435
+    ],
+    "2:60": [
+      7427.461738464366,
+      7599.903072125097
+    ],
+    "2:92": [
+      8545.218855079145,
+      8791.303388023422
+    ],
+    "2:93": [
+      9081.791533719212,
+      9248.317772424482
+    ],
+    "2:45": [
+      10085.919581988113,
+      10213.849233344627
+    ],
+    "2:46": [
+      10862.84819991497,
+      11107.980994755118
+    ],
+    "2:65": [
+      12007.99584736222,
+      12185.730420001732
+    ],
+    "3:52": [
+      1139.9613114145436,
+      1474.5029177042932
+    ],
+    "3:53": [
+      1751.0110863631744,
+      1839.9511645954676
+    ],
+    "3:2": [
+      2479.001084975513,
+      2690.282869475541
+    ],
+    "3:37": [
+      3252.399740688261,
+      3280.4722467363367
+    ],
+    "3:56": [
+      4243.181848888948,
+      4574.404970060138
+    ],
+    "3:57": [
+      5030.150470541645,
+      5366.745103085456
+    ],
+    "3:58": [
+      5672.069276895063,
+      5851.031005189563
+    ],
+    "3:59": [
+      6634.084498685328,
+      6951.162928286701
+    ],
+    "3:43": [
+      8260.18699953338,
+      8455.561495194986
+    ],
+    "3:62": [
+      9232.416555711921,
+      9344.187586614802
+    ],
+    "3:94": [
+      9816.057448861096,
+      9969.960048830098
+    ],
+    "3:64": [
+      11057.450828478039,
+      11312.921446362589
+    ],
+    "3:26": [
+      11898.486068961178,
+      12249.119723065327
+    ],
+    "3:48": [
+      13166.813568432706,
+      13289.638764643152
+    ],
+    "3:31": [
+      17596.18438878143,
+      17736.08435391884
+    ],
+    "4:17": [
+      588.6270558304483,
+      633.5464636235188
+    ],
+    "4:68": [
+      829.7263457441582,
+      1018.8073133207761
+    ],
+    "4:70": [
+      2658.1309381023575,
+      2716.169614431001
+    ],
+    "4:71": [
+      3211.961132334576,
+      3239.4434864695218
+    ],
+    "4:72": [
+      3958.08429680924,
+      4256.018251963961
+    ],
+    "4:73": [
+      5696.927719160241,
+      5866.721592519108
+    ],
+    "4:74": [
+      7085.683860351792,
+      7242.350122121348
+    ],
+    "4:75": [
+      8314.250609834427,
+      8656.6320972891
+    ],
+    "4:76": [
+      9438.495244340866,
+      9598.813371123299
+    ],
+    "4:78": [
+      11601.426624481057,
+      11766.254299760476
+    ],
+    "4:81": [
+      14931.920010866143,
+      15151.896067681486
+    ],
+    "4:82": [
+      15370.447658703197,
+      15699.27655520053
+    ],
+    "5:51": [
+      355.6734210998373,
+      574.5830050364287
+    ],
+    "5:85": [
+      1699.970400733211,
+      1877.2616448359518
+    ],
+    "5:54": [
+      2589.799384637674,
+      2828.6240246037473
+    ],
+    "5:3": [
+      3236.949888663412,
+      3509.51990106049
+    ],
+    "5:4": [
+      3872.3390237951235,
+      4010.9587283644637
+    ],
+    "5:88": [
+      5397.783901024961,
+      5563.364151686739
+    ],
+    "5:41": [
+      6125.9702150498,
+      6324.108373368476
+    ],
+    "5:42": [
+      6667.515974371253,
+      6947.923565420815
+    ],
+    "5:91": [
+      7713.116056537147,
+      7774.67465018621
+    ],
+    "5:9": [
+      8442.692456812249,
+      8637.760456595295
+    ],
+    "5:44": [
+      9185.628516129489,
+      9336.475691938418
+    ],
+    "5:11": [
+      9939.71129904656,
+      10041.406159545868
+    ],
+    "5:12": [
+      10245.719122250066,
+      10414.913953407196
+    ],
+    "5:13": [
+      10674.017081393453,
+      10775.736243184218
+    ],
+    "5:14": [
+      11169.409848843732,
+      11441.186299282776
+    ],
+    "5:15": [
+      11587.935290602378,
+      11921.628760936619
+    ],
+    "5:16": [
+      11999.968546831757,
+      12023.791357420349
+    ],
+    "5:66": [
+      12568.077955696106,
+      12906.978723339087
+    ],
+    "5:79": [
+      13191.559203027162,
+      13429.001621388123
+    ],
+    "5:80": [
+      13689.208039973113,
+      13963.284651882957
+    ]
+  },
+  "eval": {
+    "is_feasible": true,
+    "violations": {},
+    "metrics": {
+      "violation_total": 0.0,
+      "violation_capability": 0.0,
+      "violation_time_window": 0.0,
+      "violation_energy": 0.0,
+      "missed_priority": 7.0,
+      "unassigned_count": 6.0,
+      "energy_total": 59315.927855007154,
+      "total_distance": 52278.88049918484,
+      "makespan": 22007.377762869848
+    },
+    "lex_key": [
+      0.0,
+      7.0,
+      59315.927855007154
+    ]
+  },
+  "solver_diagnostics": {
+    "algorithm": "weighted_alns",
+    "policy": {
+      "destroy_generator_priors": {
+        "global_assigned": 1.0,
+        "random_subset": 1.0,
+        "route_segment": 1.0,
+        "route_tail": 1.0,
+        "single_route": 1.0
+      },
+      "repair_task_selector_priors": {
+        "weighted_priority_order": 4.0,
+        "regret2_order": 1.0
+      },
+      "remove_metric_weights": {
+        "priority": 4.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 5.0,
+        "energy_pressure": 2.0,
+        "detour_cost": 3.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 1.0,
+        "route_instability": 1.0
+      },
+      "reinsert_metric_weights": {
+        "priority": 5.0,
+        "tw_tightness": 2.0,
+        "violation_risk": 3.0,
+        "energy_pressure": 1.0,
+        "detour_cost": 1.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 1.0,
+        "route_instability": 1.0
+      },
+      "insert_metric_weights": {
+        "priority": 1.0,
+        "tw_tightness": 1.0,
+        "violation_risk": 2.0,
+        "energy_pressure": 4.0,
+        "detour_cost": 4.0,
+        "service_burden": 1.0,
+        "feasibility_scarcity": 1.0,
+        "route_instability": 1.0
+      },
+      "strength_ratio": 0.15,
+      "acceptance": "threshold",
+      "accept_level": 0.05,
+      "reaction_factor": 0.2,
+      "prior_mix_lambda": 0.25
+    },
+    "total_iters": 9000,
+    "actual_iters_used": 9000,
+    "actual_time_used_sec": 423.4451326249982,
+    "best_update_count": 1,
+    "best_update_iters": [
+      428
+    ],
+    "best_update_lex_keys": [
+      [
+        0.0,
+        7.0,
+        59315.927855007154
+      ]
+    ],
+    "first_best_iter": 428,
+    "last_best_iter": 428,
+    "plateau_iters_after_last_update": 8572,
+    "initial_solution_feasible": true,
+    "returned_solution_source": "best_feasible",
+    "returned_solution_feasible": true,
+    "last_acceptance_decision": {
+      "compare_result": -1,
+      "accepted": true,
+      "accept_mode": "threshold"
+    },
+    "operator_weights": {
+      "destroy_candidate_generators": {
+        "adaptive": {
+          "global_assigned": 0.200005830694702,
+          "random_subset": 0.1593743138003551,
+          "route_segment": 0.17487803671089142,
+          "route_tail": 0.1687538261640802,
+          "single_route": 0.16815412340922875
+        },
+        "llm_prior": {
+          "global_assigned": 1.0,
+          "random_subset": 1.0,
+          "route_segment": 1.0,
+          "route_tail": 1.0,
+          "single_route": 1.0
+        },
+        "fused_final": {
+          "global_assigned": 0.29907629541207664,
+          "random_subset": 0.25223987697286965,
+          "route_segment": 0.27042787264086343,
+          "route_tail": 0.26329355068731536,
+          "single_route": 0.2625914861068604
+        }
+      },
+      "repair_task_selectors": {
+        "adaptive": {
+          "weighted_priority_order": 0.1841442994856274,
+          "regret2_order": 0.1622046665027378
+        },
+        "llm_prior": {
+          "weighted_priority_order": 4.0,
+          "regret2_order": 1.0
+        },
+        "fused_final": {
+          "weighted_priority_order": 0.3975426305334737,
+          "regret2_order": 0.25559214827599447
+        }
+      }
+    },
+    "regret2_repair": {
+      "calls": 3681,
+      "total_repair_rounds": 55521,
+      "total_tasks_analyzed": 715102,
+      "total_positions_checked": 551769,
+      "last_call": {
+        "round_count": 15,
+        "tasks_inserted": 14,
+        "total_tasks_analyzed": 210,
+        "avg_tasks_analyzed_per_round": 14.0,
+        "total_positions_checked": 140,
+        "avg_positions_checked_per_task": 0.6667,
+        "rounds": [
+          {
+            "remaining_unassigned": 21,
+            "task_count": 21,
+            "selected_tid": 24,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 24,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 75,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 15,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 99,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 20,
+            "task_count": 20,
+            "selected_tid": 75,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 75,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 15,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 99,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 19,
+            "task_count": 19,
+            "selected_tid": 15,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 15,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 99,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 18,
+            "task_count": 18,
+            "selected_tid": 6,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 6,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 99,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 17,
+            "task_count": 17,
+            "selected_tid": 99,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 99,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 16,
+            "task_count": 16,
+            "selected_tid": 80,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 80,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 15,
+            "task_count": 15,
+            "selected_tid": 78,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 78,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 14,
+            "task_count": 14,
+            "selected_tid": 84,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 84,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 13,
+            "task_count": 13,
+            "selected_tid": 74,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 74,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 12,
+            "task_count": 12,
+            "selected_tid": 59,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 59,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 11,
+            "task_count": 11,
+            "selected_tid": 97,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 97,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 10,
+            "task_count": 10,
+            "selected_tid": 13,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 13,
+                "ranked_position_count": 1,
+                "positions_checked": 1,
+                "feasible_position_count": 1
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 9,
+            "task_count": 9,
+            "selected_tid": 49,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 49,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 8,
+            "task_count": 8,
+            "selected_tid": 60,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 60,
+                "ranked_position_count": 2,
+                "positions_checked": 2,
+                "feasible_position_count": 2
+              }
+            ]
+          },
+          {
+            "remaining_unassigned": 7,
+            "task_count": 7,
+            "selected_tid": null,
+            "task_scans": [
+              {
+                "tid": 7,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 1,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 72,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 8,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 70,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 71,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              },
+              {
+                "tid": 63,
+                "ranked_position_count": 0,
+                "positions_checked": 0,
+                "feasible_position_count": 0
+              }
+            ]
+          }
+        ]
+      },
+      "avg_tasks_analyzed_per_round": 12.8798,
+      "avg_positions_checked_per_task": 0.7716
+    }
+  },
+  "run_summary": {
+    "orchestrator_elapsed_sec": 494.0944,
+    "total_solver_time_sec": 469.2256,
+    "total_solver_iters": 10000,
+    "total_solver_calls": 2,
+    "agent_steps_executed": 3,
+    "alns_steps_executed": 2,
+    "best_update_count": 36,
+    "final_action": "run_alns",
+    "remaining_budget": {
+      "time_limit_sec": 30.7744,
+      "max_iters": 0.0,
+      "solver_calls": 8.0
+    }
+  }
+}

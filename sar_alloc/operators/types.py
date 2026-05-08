@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-"""Typed objects for the unified weighted-operator ALNS architecture.
-
-Repair is explicitly split into task selectors and one position selector. The
-external selector name `filtered_best_position` is stable, but its semantics are
-insert-score ranking plus ranked strict feasibility checks over all candidates.
-"""
+"""Typed objects for the unified weighted-operator ALNS architecture."""
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Tuple
@@ -34,8 +29,6 @@ REPAIR_TASK_SELECTORS: Tuple[str, ...] = (
     "weighted_priority_order",
     "regret2_order",
 )
-
-REPAIR_POSITION_SELECTORS: Tuple[str, ...] = ("filtered_best_position",)
 
 ACCEPTANCE_MODES: Tuple[str, ...] = (
     "greedy",
@@ -140,7 +133,6 @@ class InsertPosition:
 class WeightedALNSPolicy:
     destroy_generator_priors: Dict[str, float]
     repair_task_selector_priors: Dict[str, float]
-    repair_position_selector: str
     remove_metric_weights: MetricWeights
     reinsert_metric_weights: MetricWeights
     insert_metric_weights: MetricWeights
@@ -160,7 +152,6 @@ class WeightedALNSPolicy:
                 str(name): float(weight)
                 for name, weight in self.repair_task_selector_priors.items()
             },
-            "repair_position_selector": str(self.repair_position_selector),
             "remove_metric_weights": self.remove_metric_weights.as_dict(),
             "reinsert_metric_weights": self.reinsert_metric_weights.as_dict(),
             "insert_metric_weights": self.insert_metric_weights.as_dict(),
