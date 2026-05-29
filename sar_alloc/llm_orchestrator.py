@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Budget, Config
-from .console import info, json_block, kv, section, stop, text_block, warning
+from .console import stop, warning
+from .demo_policy import (
+    demo_build_initial_action,
+    demo_objective_plan,
+    demo_run_alns_action,
+    demo_stop_action,
+)
 from .models import Instance
-from .operators import WeightedALNSPolicy
+from .operators.destroy import build_destroy_landscape
+from .operators.repair import build_repair_landscape
 from .prompts import get_next_action_prompt, get_objective_layer_prompt, get_system_prompt
 from .schemas import NEXT_ACTION_SCHEMA, OBJECTIVE_LAYER_SCHEMA, SCHEMA_CONSTRAINTS
 from .solution import AssignmentSolution
@@ -31,8 +38,6 @@ from .tools.llm_utils import (
 
 DEFAULT_MAX_STAGNATION_STEPS = 3
 DEFAULT_MAX_AGENT_STEPS = 6
-MEANINGFUL_MIN_TIME_SEC = 0.25
-MEANINGFUL_MIN_ITERS = 10
 CANONICAL_METRIC_KEYS = (
     "violation_total",
     "missed_priority",
@@ -47,6 +52,33 @@ RUN_ALNS_ACTION = "run_alns"
 class LLMClientProtocol:
     def chat(self, messages: List[Dict[str, str]], **kwargs: Any) -> str:  # pragma: no cover
         raise NotImplementedError
+
+
+class OrchestratorError(RuntimeError):
+    """Raised when the LLM-driven orchestration cannot proceed safely."""
+
+
+class LLMOutputError(ValueError):
+    """Raised when an LLM response is not strict JSON or fails schema checks."""
+
+
+@dataclass
+class OrchestratorRuntime:
+    allow_llm_fallback: bool = False
+    artifact_dir: Optional[Path] = None
+    llm_fallback_used: bool = False
+    llm_fallback_reasons: List[str] = field(default_factory=list)
+    objective_prompt: str = ""
+    objective_raw_text: str = ""
+    objective_plan: Dict[str, Any] = field(default_factory=dict)
+    objective_from_llm: bool = False
+
+    def use_fallback(self, stage: str, reason: str) -> None:
+        self.llm_fallback_used = True
+        detail = f"{stage}: {reason}"
+        self.llm_fallback_reasons.append(detail)
+        warning("LLM fallback has been used.")
+        warning(f"LLM fallback reason: {detail}")
 
 
 @dataclass
@@ -74,17 +106,28 @@ class BudgetState:
                 return False
         return True
 
-    def clamp_request(self, budget_request: Dict[str, Any], default_request: Dict[str, Any]) -> Tuple[Budget, Dict[str, Any]]:
-        request = _sanitize_budget_request(budget_request)
-        defaults = _sanitize_budget_request(default_request)
+    def clamp_request(self, budget_request: Dict[str, Any]) -> Tuple[Budget, Dict[str, Any]]:
         allocated: Dict[str, Any] = {}
-        for key in ("time_limit_sec", "max_iters"):
-            value = request.get(key, defaults.get(key, 1.0 if key == "time_limit_sec" else 60))
-            remaining = self.remaining.get(key)
-            if remaining is not None:
-                value = min(float(value), float(remaining))
-            allocated[key] = int(max(1, round(value))) if key == "max_iters" else float(max(1e-6, float(value)))
-        return Budget(time_limit_sec=float(allocated["time_limit_sec"]), max_iters=int(allocated["max_iters"])), allocated
+        time_value = float(budget_request["time_limit_sec"])
+        remaining_time = self.remaining.get("time_limit_sec")
+        if remaining_time is not None:
+            time_value = min(time_value, float(remaining_time))
+        allocated["time_limit_sec"] = float(max(1e-6, time_value))
+
+        max_iters: Optional[int] = None
+        if "max_iters" in budget_request:
+            max_iters = int(budget_request["max_iters"])
+        elif self.remaining.get("max_iters") is not None:
+            max_iters = int(max(1, round(float(self.remaining["max_iters"] or 0.0))))
+        if max_iters is not None:
+            remaining_iters = self.remaining.get("max_iters")
+            if remaining_iters is not None:
+                max_iters = min(max_iters, int(max(1, round(float(remaining_iters)))))
+            allocated["max_iters"] = int(max(1, max_iters))
+        else:
+            allocated["max_iters"] = None
+
+        return Budget(time_limit_sec=allocated["time_limit_sec"], max_iters=max_iters), allocated
 
     def consume_solver_usage(self, actual_iters_used: int, actual_time_used_sec: float, solver_calls: int = 1) -> None:
         usage_deltas = {
@@ -116,6 +159,10 @@ class StepRecord:
     step_id: int
     action_type: str
     action_from_llm: bool
+    llm_prompt: str
+    llm_raw_text: str
+    strict_action_plan: Dict[str, Any]
+    compiled_policy: Dict[str, Any]
     operator_intent: Optional[Dict[str, str]]
     action_payload: Dict[str, Any]
     budget_request: Dict[str, Any]
@@ -128,6 +175,9 @@ class StepRecord:
     result_summary: str
     candidate_summary: Optional[Dict[str, Any]] = None
     incumbent_summary_after: Optional[Dict[str, Any]] = None
+    decision_context: Dict[str, Any] = field(default_factory=dict)
+    solver_request_summary: Dict[str, Any] = field(default_factory=dict)
+    solver_result_summary: Dict[str, Any] = field(default_factory=dict)
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -167,31 +217,35 @@ def run_orchestrator(
     max_agent_steps: Optional[int] = None,
     max_solver_calls: Optional[int] = None,
     max_stagnation_steps: int = DEFAULT_MAX_STAGNATION_STEPS,
+    allow_llm_fallback: bool = False,
+    artifact_dir: Optional[Path] = None,
 ) -> AssignmentSolution:
+    """Run the LLM-controlled optimization loop.
+
+    The orchestrator asks the LLM for an objective plan, then for one action per
+    step. In real mode, malformed or incomplete LLM output raises immediately
+    unless `allow_llm_fallback` is explicitly enabled by the caller.
+    """
     cfg = config or Config()
     total_budget = budget or Budget()
     max_steps = _resolve_positive_int(max_agent_steps) or DEFAULT_MAX_AGENT_STEPS
     solver_calls = _resolve_positive_int(max_solver_calls) or max_steps
+    runtime = OrchestratorRuntime(
+        allow_llm_fallback=bool(allow_llm_fallback),
+        artifact_dir=artifact_dir,
+    )
     orchestrator_t0 = time.time()
 
-    objective_from_llm = _stage_build_objective(client, user_goal_text, cfg)
+    objective_from_llm = _stage_build_objective(client, user_goal_text, cfg, runtime)
     inst_sum = instance_summary(instance=instance)
     budget_state = BudgetState.from_budget(total_budget, max_solver_calls=solver_calls)
     state = AgentState(
         objective_layers=_objective_layers_prompt_view(cfg.eval.objective_policy.layers),
         objective_from_llm=objective_from_llm,
     )
-    section("Agent Search Setup")
-    kv("max_agent_steps", max_steps)
-    kv("max_solver_calls", solver_calls)
-    kv("max_stagnation_steps", max_stagnation_steps)
-    json_block("Search Budget", budget_state.to_prompt_dict())
-    json_block(
-        "Active Objective",
-        {
-            "objective_from_llm": bool(state.objective_from_llm),
-            "layers": state.objective_layers,
-        },
+    print(
+        f"[AGENT] max_steps={max_steps} solver_calls={solver_calls} "
+        f"max_stagnation={max_stagnation_steps}"
     )
 
     step_id = 0
@@ -201,12 +255,10 @@ def run_orchestrator(
             break
 
         allowed_actions = _allowed_actions(state, budget_state)
-        section(f"Agent Step {step_id}")
-
-        action = _stage_decide_next_action(client, user_goal_text, inst_sum, state, budget_state, allowed_actions, cfg)
-        record = _execute_action(action, state, budget_state, instance, cfg, rng_seed, step_id)
+        action = _stage_decide_next_action(client, user_goal_text, inst_sum, state, budget_state, allowed_actions, instance, cfg, runtime, step_id)
+        _log_step_action(step_id, action)
+        record = _execute_action(action, state, budget_state, instance, cfg, rng_seed, step_id, runtime)
         state.history.append(record)
-        json_block("Step Result", _step_result_log_view(record, budget_state))
 
         if record.advanced_incumbent:
             state.consecutive_flat_steps = 0
@@ -220,15 +272,11 @@ def run_orchestrator(
         step_id += 1
 
     if state.incumbent_solution is not None:
-        return _finalize_run_solution(state.incumbent_solution, state, budget_state, orchestrator_t0)
-    warning("No incumbent solution produced by the agent loop. Falling back to a safe initial solution.")
-    _log_algorithm_input_source(
-        phase="build_initial_solution",
-        objective_from_llm=state.objective_from_llm,
-        action_from_llm=False,
+        return _finalize_run_solution(state.incumbent_solution, state, budget_state, orchestrator_t0, runtime)
+    raise OrchestratorError(
+        "No incumbent solution was produced. The LLM action sequence stopped "
+        "before a solution-building action completed."
     )
-    fallback_solution = build_initial_solution(instance=instance, config=cfg, rng_seed=rng_seed)
-    return _finalize_run_solution(fallback_solution, state, budget_state, orchestrator_t0)
 
 
 def _finalize_run_solution(
@@ -236,14 +284,15 @@ def _finalize_run_solution(
     state: AgentState,
     budget_state: BudgetState,
     started_at: float,
+    runtime: OrchestratorRuntime,
 ) -> AssignmentSolution:
-    run_summary = _build_run_summary(state, budget_state, started_at)
+    run_summary = _build_run_summary(state, budget_state, started_at, runtime)
     solution.run_summary = run_summary
-    json_block("Agent Run Summary", run_summary)
+    solution.run_artifact = _build_run_artifact_core(state, budget_state, runtime, run_summary)
     return solution
 
 
-def _build_run_summary(state: AgentState, budget_state: BudgetState, started_at: float) -> Dict[str, Any]:
+def _build_run_summary(state: AgentState, budget_state: BudgetState, started_at: float, runtime: OrchestratorRuntime) -> Dict[str, Any]:
     solver_records = [record for record in state.history if record.solver_diagnostics]
     best_update_count = sum(_as_non_negative_int(record.solver_diagnostics.get("best_update_count", 0)) for record in solver_records)
     return {
@@ -256,54 +305,156 @@ def _build_run_summary(state: AgentState, budget_state: BudgetState, started_at:
         "best_update_count": best_update_count,
         "final_action": state.history[-1].action_type if state.history else None,
         "remaining_budget": _round_dict(budget_state.remaining),
+        "objective_tiers": list(state.objective_layers),
+        "llm_fallback_used": bool(runtime.llm_fallback_used),
+        "llm_fallback_reasons": list(runtime.llm_fallback_reasons),
     }
 
 
-def _stage_build_objective(client: LLMClientProtocol, user_goal_text: str, cfg: Config) -> bool:
-    section("Objective Planning")
-    kv("user_goal", user_goal_text)
+def _build_run_artifact_core(
+    state: AgentState,
+    budget_state: BudgetState,
+    runtime: OrchestratorRuntime,
+    run_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    solver_records = [record for record in state.history if record.solver_diagnostics]
+    last_solver = solver_records[-1].solver_diagnostics if solver_records else {}
+    return {
+        "objective": {
+            "llm_prompt": runtime.objective_prompt,
+            "llm_raw_text": runtime.objective_raw_text,
+            "strict_objective_plan": dict(runtime.objective_plan),
+            "from_llm": bool(runtime.objective_from_llm),
+        },
+        "llm_steps": [_llm_step_artifact(record) for record in state.history],
+        "iteration_trace": _collect_iteration_trace(solver_records),
+        "operator_statistics": {
+            "destroy_operator_summary": dict(last_solver.get("destroy_operator_summary", {}) or {}),
+            "repair_operator_summary": dict(last_solver.get("repair_operator_summary", {}) or {}),
+            "operator_weights": dict(last_solver.get("operator_weights", {}) or {}),
+        },
+        "diagnostics": {
+            "run_summary": dict(run_summary),
+            "budget": budget_state.to_prompt_dict(),
+            "llm_fallback_used": bool(runtime.llm_fallback_used),
+            "llm_fallback_reasons": list(runtime.llm_fallback_reasons),
+            "last_solver": _condense_solver_diagnostics(last_solver),
+        },
+    }
+
+
+def _llm_step_artifact(record: StepRecord) -> Dict[str, Any]:
+    return {
+        "step": int(record.step_id),
+        "action_type": record.action_type,
+        "llm_prompt": record.llm_prompt,
+        "llm_raw_text": record.llm_raw_text,
+        "strict_action_plan": dict(record.strict_action_plan),
+        "compiled_policy": dict(record.compiled_policy),
+        "decision_context": dict(record.decision_context),
+        "solver_request_summary": dict(record.solver_request_summary),
+        "solver_result_summary": dict(record.solver_result_summary),
+    }
+
+
+def _collect_iteration_trace(records: List[StepRecord]) -> List[Dict[str, Any]]:
+    trace: List[Dict[str, Any]] = []
+    for record in records:
+        for item in list(record.solver_diagnostics.get("iteration_trace", []) or []):
+            if isinstance(item, dict):
+                current = dict(item)
+                current["agent_step"] = int(record.step_id)
+                trace.append(current)
+    return trace
+
+
+def _stage_build_objective(
+    client: LLMClientProtocol,
+    user_goal_text: str,
+    cfg: Config,
+    runtime: OrchestratorRuntime,
+) -> bool:
     prompt = get_objective_layer_prompt(user_goal_text, format_available_metrics(available_metrics()), OBJECTIVE_LAYER_SCHEMA)
-    text_block("Objective Prompt", prompt)
-    raw = _call_llm(client, get_system_prompt(), prompt)
-    text_block("Objective LLM Output", raw)
-    parsed, parse_error = _parse_json_obj_with_reason(raw)
-    if parse_error is not None:
-        _log_llm_fallback("objective", "parse", parse_error)
-        _log_active_objective(cfg, objective_from_llm=False)
+    runtime.objective_prompt = prompt
+    try:
+        raw = _call_llm(client, get_system_prompt(), prompt)
+    except Exception as exc:
+        if not runtime.allow_llm_fallback:
+            raise
+        runtime.use_fallback("objective_call", str(exc))
+        runtime.objective_raw_text = f"LLM call failed: {exc}"
+        parsed = demo_objective_plan()
+        objective_from_llm = False
+        runtime.objective_plan = dict(parsed)
+        runtime.objective_from_llm = False
+        result = apply_objective(cfg, parsed)
+        if not bool(result.get("ok", False)):
+            raise LLMOutputError(str(result.get("error", "invalid objective payload")))
+        _log_active_objective(cfg, objective_from_llm=False, rationale=_sanitize_rationale(parsed.get("rationale")))
         return False
-    validation_error = _validate_objective_spec(parsed)
-    if validation_error is not None:
-        _log_llm_fallback("objective", "validation", validation_error)
-        _log_active_objective(cfg, objective_from_llm=False)
-        return False
+    runtime.objective_raw_text = raw
+    try:
+        parsed = parse_objective_plan(raw)
+        objective_from_llm = True
+    except LLMOutputError as exc:
+        if not runtime.allow_llm_fallback:
+            raise
+        runtime.use_fallback("objective", str(exc))
+        parsed = demo_objective_plan()
+        objective_from_llm = False
+
     result = apply_objective(cfg, parsed)
     if not bool(result.get("ok", False)):
-        _log_llm_fallback("objective", "validation", str(result.get("error", "invalid objective payload")))
-        _log_active_objective(cfg, objective_from_llm=False)
-        return False
-    json_block("LLM Objective Proposal", parsed)
+        raise LLMOutputError(str(result.get("error", "invalid objective payload")))
+    runtime.objective_plan = dict(parsed)
+    runtime.objective_from_llm = bool(objective_from_llm)
     _log_active_objective(
         cfg,
-        objective_from_llm=True,
-        rationale=_sanitize_rationale(parsed.get("rationale"), fallback="No rationale provided."),
+        objective_from_llm=objective_from_llm,
+        rationale=_sanitize_rationale(parsed.get("rationale")),
     )
-    return True
+    return objective_from_llm
 
 
-def _stage_decide_next_action(client: LLMClientProtocol, user_goal_text: str, inst_sum: Dict[str, Any], state: AgentState, budget_state: BudgetState, allowed_actions: List[str], cfg: Config) -> Dict[str, Any]:
+def _stage_decide_next_action(
+    client: LLMClientProtocol,
+    user_goal_text: str,
+    inst_sum: Dict[str, Any],
+    state: AgentState,
+    budget_state: BudgetState,
+    allowed_actions: List[str],
+    instance: Instance,
+    cfg: Config,
+    runtime: OrchestratorRuntime,
+    step_id: int,
+) -> Dict[str, Any]:
     current_summary = _build_incumbent_metrics_summary(state.incumbent_summary)
     delta_summary = _build_delta_from_prev_incumbent(state.objective_layers, state.incumbent_summary, state.previous_incumbent_summary)
     progress_summary = _build_search_progress_summary(state)
-    json_block(
-        "Decision Context",
-        _decision_context_log_view(
-            state=state,
-            allowed_actions=allowed_actions,
-            current_summary=current_summary,
-            delta_summary=delta_summary,
-            progress_summary=progress_summary,
-            budget_state=budget_state,
-        ),
+    last_destroy_summary = _last_destroy_operator_summary(state)
+    recent_repair_summary = _last_repair_summary(state)
+    destroy_landscape = build_destroy_landscape(
+        state.incumbent_solution,
+        instance,
+        cfg,
+        strength_ratio=_current_strength_ratio(state),
+        recent_destroy_summary=last_destroy_summary,
+    )
+    repair_landscape = build_repair_landscape(
+        state.incumbent_solution,
+        instance,
+        cfg,
+        recent_repair_summary=recent_repair_summary,
+    )
+    decision_context = _decision_context_log_view(
+        state=state,
+        allowed_actions=allowed_actions,
+        current_summary=current_summary,
+        delta_summary=delta_summary,
+        progress_summary=progress_summary,
+        destroy_landscape=destroy_landscape,
+        repair_landscape=repair_landscape,
+        budget_state=budget_state,
     )
     prompt = get_next_action_prompt(
         user_goal_text=user_goal_text,
@@ -313,41 +464,127 @@ def _stage_decide_next_action(client: LLMClientProtocol, user_goal_text: str, in
         current_incumbent_metrics=current_summary,
         delta_from_prev_incumbent=delta_summary,
         search_progress=progress_summary,
+        destroy_landscape=destroy_landscape,
         remaining_budget=budget_state.to_compact_prompt_dict(),
         allowed_actions=allowed_actions,
         json_schema=NEXT_ACTION_SCHEMA,
+        repair_landscape=repair_landscape,
     )
-    text_block("Next Action Prompt", prompt)
-    raw = _call_llm(client, get_system_prompt(), prompt)
-    text_block("Next Action Output", raw)
-    parsed, parse_error = _parse_json_obj_with_reason(raw)
-    if parse_error is not None:
-        _log_llm_fallback("action", "parse", parse_error)
-        parsed = {}
+    try:
+        raw = _call_llm(client, get_system_prompt(), prompt)
+    except Exception as exc:
+        if not runtime.allow_llm_fallback:
+            raise
+        runtime.use_fallback("action_call", str(exc))
+        action = _demo_action_for_state(state, budget_state, allowed_actions)
+        action = _prepare_action_plan(action, allowed_actions)
+        action["_action_from_llm"] = False
+        action["_llm_prompt"] = prompt
+        action["_llm_raw_text"] = f"LLM call failed: {exc}"
+        action["_decision_context"] = decision_context
+        return action
+    try:
+        action = parse_action_plan(raw, allowed_actions)
+        action_from_llm = True
+    except LLMOutputError as exc:
+        if not runtime.allow_llm_fallback:
+            raise
+        runtime.use_fallback("action", str(exc))
+        action = _demo_action_for_state(state, budget_state, allowed_actions)
+        action = _prepare_action_plan(action, allowed_actions)
         action_from_llm = False
-    else:
-        json_block("LLM Parsed Action", _action_log_view(parsed))
-        validation_error = _validate_action_spec(parsed, allowed_actions)
-        action_from_llm = validation_error is None
-        if validation_error is not None:
-            _log_llm_fallback("action", "validation", validation_error)
-            parsed = {}
-    normalized = _normalize_action(parsed, allowed_actions, state, budget_state, cfg)
-    normalized["_action_from_llm"] = action_from_llm
-    selected_action = _action_log_view(normalized)
-    selected_action["action_from_llm"] = bool(action_from_llm)
-    json_block("Selected Action", selected_action)
-    return normalized
+
+    action["_action_from_llm"] = action_from_llm
+    action["_llm_prompt"] = prompt
+    action["_llm_raw_text"] = raw
+    action["_decision_context"] = decision_context
+    return action
 
 
 def _log_active_objective(cfg: Config, *, objective_from_llm: bool, rationale: str = "") -> None:
-    payload: Dict[str, Any] = {
-        "objective_from_llm": bool(objective_from_llm),
-        "layers": _objective_layers_prompt_view(cfg.eval.objective_policy.layers),
+    del rationale
+    print(
+        f"[OBJ] from_llm={_bool_text(objective_from_llm)} "
+        f"layers={_format_objective_layers(_objective_layers_prompt_view(cfg.eval.objective_policy.layers))}"
+    )
+
+
+def parse_objective_plan(raw_text: str) -> Dict[str, Any]:
+    """Parse and validate the LLM objective-plan JSON.
+
+    Args:
+        raw_text: Raw text returned by the LLM.
+
+    Returns:
+        A validated objective plan dictionary using the current project schema.
+
+    Raises:
+        LLMOutputError: If the text is not strict JSON, is not an object, has
+            missing/unknown fields, or references illegal metrics/directions.
+    """
+    parsed = _parse_strict_json_object(raw_text, "objective")
+    validation_error = _validate_objective_spec(parsed)
+    if validation_error is not None:
+        raise LLMOutputError(f"Invalid objective plan: {validation_error}")
+    return parsed
+
+
+def parse_action_plan(raw_text: str, allowed_actions: List[str]) -> Dict[str, Any]:
+    """Parse, validate, and compile an LLM action-plan JSON object.
+
+    Args:
+        raw_text: Raw text returned by the LLM.
+        allowed_actions: Action names allowed in the current orchestrator state.
+
+    Returns:
+        A normalized action dictionary. `run_alns` actions include the compiled
+        `WeightedALNSPolicy` under `_compiled_policy`.
+
+    Raises:
+        LLMOutputError: If JSON parsing, schema validation, or policy
+            compilation fails.
+    """
+    parsed = _parse_strict_json_object(raw_text, "action")
+    return _prepare_action_plan(parsed, allowed_actions)
+
+
+def _prepare_action_plan(parsed: Dict[str, Any], allowed_actions: List[str]) -> Dict[str, Any]:
+    validation_error = _validate_action_spec(parsed, allowed_actions)
+    if validation_error is not None:
+        raise LLMOutputError(f"Invalid action plan: {validation_error}")
+
+    action_type = str(parsed["action_type"]).strip()
+    payload = dict(parsed["action_payload"])
+    budget_request = dict(parsed["budget_request"])
+    operator_intent = _parse_operator_intent_from_action(parsed)
+    if operator_intent is None:
+        raise LLMOutputError("Invalid action plan: operator_intent failed validation")
+    strict_action_plan = {
+        "rationale": _sanitize_rationale(parsed.get("rationale")),
+        "operator_intent": dict(parsed.get("operator_intent", {}) or {}),
+        "action_type": action_type,
+        "action_payload": dict(payload),
+        "budget_request": dict(budget_request),
     }
-    if rationale:
-        payload["rationale"] = rationale
-    json_block("Active Objective", payload)
+
+    normalized: Dict[str, Any] = {
+        "action_type": action_type,
+        "operator_intent": operator_intent,
+        "action_payload": dict(payload),
+        "budget_request": budget_request,
+        "rationale": _sanitize_rationale(parsed.get("rationale")),
+        "_strict_action_plan": strict_action_plan,
+    }
+
+    if action_type == RUN_ALNS_ACTION:
+        compiled = compile_weighted_alns_policy(payload)
+        if not bool(compiled.get("ok", False)):
+            raise LLMOutputError(
+                f"Invalid action plan: {compiled.get('error', 'invalid run_alns policy')}"
+            )
+        normalized["_compiled_policy"] = compiled["policy"]
+        normalized["_compiled_policy_dict"] = dict(compiled["applied"])
+    return normalized
 
 
 def _decision_context_log_view(
@@ -357,6 +594,8 @@ def _decision_context_log_view(
     current_summary: Dict[str, Any],
     delta_summary: Dict[str, Any],
     progress_summary: Dict[str, Any],
+    destroy_landscape: Dict[str, Any],
+    repair_landscape: Dict[str, Any],
     budget_state: BudgetState,
 ) -> Dict[str, Any]:
     return {
@@ -366,6 +605,8 @@ def _decision_context_log_view(
         "current_incumbent_metrics": current_summary,
         "delta_from_prev_incumbent": delta_summary,
         "search_progress": progress_summary,
+        "destroy_landscape": destroy_landscape,
+        "repair_landscape": repair_landscape,
         "remaining_budget": budget_state.to_compact_prompt_dict(),
     }
 
@@ -375,11 +616,16 @@ def _step_result_log_view(record: StepRecord, budget_state: BudgetState) -> Dict
         "step_id": int(record.step_id),
         "action_type": record.action_type,
         "action_from_llm": bool(record.action_from_llm),
+        "llm_raw_text": record.llm_raw_text,
+        "strict_action_plan": dict(record.strict_action_plan),
+        "compiled_policy": dict(record.compiled_policy),
         "operator_intent": record.operator_intent,
         "rationale": record.rationale,
         "action_payload": record.action_payload,
         "budget_request": record.budget_request,
         "budget_allocated": record.budget_allocated,
+        "solver_request_summary": dict(record.solver_request_summary),
+        "solver_result_summary": dict(record.solver_result_summary),
         "compare_vs_incumbent": record.compare_vs_incumbent,
         "advanced_incumbent": bool(record.advanced_incumbent),
         "lex_key_changed": bool(record.lex_key_changed),
@@ -392,20 +638,36 @@ def _step_result_log_view(record: StepRecord, budget_state: BudgetState) -> Dict
     }
 
 
-def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: BudgetState, instance: Instance, cfg: Config, rng_seed: int, step_id: int) -> StepRecord:
+def _execute_action(
+    action: Dict[str, Any],
+    state: AgentState,
+    budget_state: BudgetState,
+    instance: Instance,
+    cfg: Config,
+    rng_seed: int,
+    step_id: int,
+    runtime: OrchestratorRuntime,
+) -> StepRecord:
     prev_solution = state.incumbent_solution
     prev_eval = getattr(prev_solution, "eval", None)
     action_type = str(action["action_type"]).strip()
     action_from_llm = bool(action.get("_action_from_llm", False))
+    llm_prompt = str(action.get("_llm_prompt", "") or "")
+    llm_raw_text = str(action.get("_llm_raw_text", "") or "")
+    strict_action_plan = dict(action.get("_strict_action_plan", {}) or {})
+    compiled_policy = dict(action.get("_compiled_policy_dict", {}) or {})
+    decision_context = dict(action.get("_decision_context", {}) or {})
     operator_intent = _parse_operator_intent_from_action(action)
     payload = dict(action.get("action_payload", {}))
     budget_request = dict(action.get("budget_request", {}))
-    rationale = _sanitize_rationale(action.get("rationale"), fallback=_default_action_rationale(action_type))
+    rationale = _sanitize_rationale(action.get("rationale"))
     should_stop = False
     result_summary = "No action executed."
     budget_allocated: Dict[str, Any] = {}
     solver_diagnostics: Dict[str, Any] = {}
     actual_usage: Dict[str, Any] = {}
+    solver_request_summary: Dict[str, Any] = {}
+    solver_result_summary: Dict[str, Any] = {}
     new_solution: Optional[AssignmentSolution] = None
     candidate_summary: Optional[Dict[str, Any]] = None
     incumbent_summary_after = state.incumbent_summary
@@ -424,45 +686,26 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         state.current_weighted_policy = {}
         result_summary = "Built initial incumbent."
     elif action_type == RUN_ALNS_ACTION:
-        policy = action.get("_compiled_policy")
-        if not isinstance(policy, WeightedALNSPolicy):
-            compiled = compile_weighted_alns_policy(cfg, payload)
-            if bool(compiled.get("ok", False)):
-                policy = compiled["policy"]
-                payload = dict(compiled["applied"])
-            else:
-                warning(
-                    "Invalid weighted ALNS payload reached execution; "
-                    f"fallback to default policy. reason={compiled.get('error', 'unknown error')}"
-                )
-                policy = _default_weighted_alns_policy(cfg)
-                payload = policy.as_dict()
+        policy = action["_compiled_policy"]
         init_solution = prev_solution
         prefix = ""
-        if init_solution is None:
-            _log_algorithm_input_source(
-                phase="build_initial_solution",
-                objective_from_llm=state.objective_from_llm,
-                action_from_llm=action_from_llm,
-            )
-            init_solution = build_initial_solution(instance=instance, config=cfg, rng_seed=rng_seed + step_id)
-            prefix = "Built initial incumbent before running weighted ALNS. "
-        default_budget = {"time_limit_sec": cfg.solver.weighted_alns.default_time_limit_sec, "max_iters": cfg.solver.weighted_alns.default_max_iters}
         requested_budget = dict(budget_request)
-        slice_budget, budget_allocated = budget_state.clamp_request(requested_budget, default_budget)
+        slice_budget, budget_allocated = budget_state.clamp_request(requested_budget)
         _log_algorithm_input_source(
             phase=RUN_ALNS_ACTION,
             objective_from_llm=state.objective_from_llm,
             action_from_llm=action_from_llm,
         )
-        json_block(
-            "Solver Request",
-            {
-                "operator_intent": operator_intent,
-                "policy": payload,
-                "requested_budget": dict(requested_budget),
-                "granted_budget": dict(budget_allocated),
-            },
+        solver_request = {
+            "operator_intent": operator_intent,
+            "policy": payload,
+            "requested_budget": dict(requested_budget),
+            "granted_budget": dict(budget_allocated),
+        }
+        solver_request_summary = dict(solver_request)
+        _log_solver_request(
+            requested_budget=dict(requested_budget),
+            granted_budget=dict(budget_allocated),
         )
         new_solution = solve_assignment(instance=instance, init_solution=init_solution, config=cfg, budget=slice_budget, policy=policy, rng_seed=rng_seed + step_id)
         solver_diagnostics = dict(getattr(new_solution, "solver_diagnostics", {}) or {})
@@ -472,6 +715,10 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
             "actual_time_used_sec": _round_number(actual_time_used_sec),
             "actual_iters_used": int(actual_iters_used),
             "solver_calls": 1,
+        }
+        solver_result_summary = {
+            "actual_usage": dict(actual_usage),
+            "diagnostics": _condense_solver_diagnostics(solver_diagnostics),
         }
         _log_solver_budget(requested_budget, budget_allocated, actual_usage, budget_state)
         state.current_weighted_policy = policy.as_dict()
@@ -507,6 +754,10 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         )
         if not advanced and prev_eval is not None:
             result_summary = f"{result_summary}, incumbent_kept=true"
+        if not solver_result_summary:
+            solver_result_summary = {
+                "candidate_summary": _compact_solution_summary(candidate_summary),
+            }
     else:
         incumbent_summary_after = state.incumbent_summary
 
@@ -514,6 +765,10 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         step_id=step_id,
         action_type=action_type,
         action_from_llm=action_from_llm,
+        llm_prompt=llm_prompt,
+        llm_raw_text=llm_raw_text,
+        strict_action_plan=strict_action_plan,
+        compiled_policy=compiled_policy,
         operator_intent=operator_intent,
         action_payload=payload,
         budget_request=budget_request,
@@ -526,6 +781,9 @@ def _execute_action(action: Dict[str, Any], state: AgentState, budget_state: Bud
         result_summary=result_summary,
         candidate_summary=candidate_summary,
         incumbent_summary_after=incumbent_summary_after,
+        decision_context=decision_context,
+        solver_request_summary=solver_request_summary,
+        solver_result_summary=solver_result_summary,
         solver_diagnostics=solver_diagnostics,
     )
 
@@ -536,86 +794,20 @@ def _allowed_actions(state: AgentState, budget_state: BudgetState) -> List[str]:
     return ["build_initial_solution", "stop"] if state.incumbent_solution is None else [RUN_ALNS_ACTION, "stop"]
 
 
-def _normalize_action(parsed: Dict[str, Any], allowed_actions: List[str], state: AgentState, budget_state: BudgetState, cfg: Config) -> Dict[str, Any]:
-    fallback = "build_initial_solution" if state.incumbent_solution is None else (RUN_ALNS_ACTION if RUN_ALNS_ACTION in allowed_actions else "stop")
-    raw_rationale = _sanitize_rationale(parsed.get("rationale") if isinstance(parsed, dict) else None)
-    action_type = str(parsed.get("action_type", "")).strip() if isinstance(parsed, dict) else ""
-    operator_intent: Optional[Dict[str, str]] = None
-    if action_type not in allowed_actions:
-        warning(f"Illegal or missing action '{action_type}', fallback to '{fallback}'.")
-        action_type = fallback
-        raw_rationale = f"Fallback to '{fallback}' because the LLM response did not choose an allowed action."
-    elif isinstance(parsed, dict):
-        operator_intent = _parse_operator_intent_from_action(parsed)
-    payload = parsed.get("action_payload", {}) if isinstance(parsed, dict) else {}
-    payload = payload if isinstance(payload, dict) else {}
-    compiled_policy: Optional[WeightedALNSPolicy] = None
-    if action_type == "build_initial_solution":
-        normalized_payload = {}
-    elif action_type == RUN_ALNS_ACTION:
-        compiled = compile_weighted_alns_policy(cfg, payload)
-        if bool(compiled.get("ok", False)):
-            normalized_payload = dict(compiled["applied"])
-            compiled_policy = compiled["policy"]
-        else:
-            warning(
-                "Invalid weighted ALNS payload after normalization; "
-                f"fallback to default policy. reason={compiled.get('error', 'unknown error')}"
-            )
-            compiled_policy = _default_weighted_alns_policy(cfg)
-            normalized_payload = compiled_policy.as_dict()
-    else:
-        normalized_payload = {}
-    budget_request = _sanitize_budget_request(parsed.get("budget_request", {}) if isinstance(parsed, dict) else {})
-    if action_type == RUN_ALNS_ACTION:
-        budget_request = _ensure_run_alns_budget_request(budget_request, cfg)
-    out = {
-        "action_type": action_type,
-        "operator_intent": operator_intent,
-        "action_payload": normalized_payload,
-        "budget_request": budget_request,
-        "rationale": raw_rationale or _default_action_rationale(action_type),
-    }
-    if compiled_policy is not None:
-        out["_compiled_policy"] = compiled_policy
-    return _enforce_action_guardrails(out, allowed_actions, state, budget_state, cfg)
-
-
-def _enforce_action_guardrails(action: Dict[str, Any], allowed_actions: List[str], state: AgentState, budget_state: BudgetState, cfg: Config) -> Dict[str, Any]:
-    guarded = dict(action)
-    if state.incumbent_solution is None and "build_initial_solution" in allowed_actions and guarded.get("action_type") != "build_initial_solution":
-        warning("No incumbent is available; forcing action_type='build_initial_solution'.")
-        return {
-            "action_type": "build_initial_solution",
-            "operator_intent": None,
-            "action_payload": {},
-            "budget_request": guarded.get("budget_request", {}),
-            "rationale": "Forced build_initial_solution because no incumbent is available yet.",
-        }
-    if guarded.get("action_type") == "stop" and not _should_allow_stop(state, budget_state):
-        fallback = "build_initial_solution" if state.incumbent_solution is None else RUN_ALNS_ACTION
-        warning(f"Stop rejected by guardrails; forcing action_type='{fallback}'.")
-        if fallback == "build_initial_solution":
-            return {
-                "action_type": fallback,
-                "operator_intent": None,
-                "action_payload": {},
-                "budget_request": guarded.get("budget_request", {}),
-                "rationale": "Stop was rejected by guardrails, so the controller forced build_initial_solution.",
-            }
-        policy = _default_weighted_alns_policy(cfg)
-        return {
-            "action_type": fallback,
-            "operator_intent": None,
-            "action_payload": policy.as_dict(),
-            "budget_request": _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg),
-            "rationale": "Stop was rejected by guardrails, so the controller forced run_alns.",
-            "_compiled_policy": policy,
-        }
-    if guarded.get("action_type") == RUN_ALNS_ACTION:
-        guarded["budget_request"] = _ensure_run_alns_budget_request(guarded.get("budget_request", {}), cfg)
-    guarded["rationale"] = _sanitize_rationale(guarded.get("rationale"), fallback=_default_action_rationale(str(guarded.get("action_type", ""))))
-    return guarded
+def _demo_action_for_state(
+    state: AgentState,
+    budget_state: BudgetState,
+    allowed_actions: List[str],
+) -> Dict[str, Any]:
+    if state.incumbent_solution is None and "build_initial_solution" in allowed_actions:
+        return demo_build_initial_action()
+    if RUN_ALNS_ACTION in allowed_actions and budget_state.can_run_solver():
+        remaining_time = budget_state.remaining.get("time_limit_sec")
+        remaining_iters = budget_state.remaining.get("max_iters")
+        time_limit = 1.0 if remaining_time is None else max(1e-6, min(1.0, float(remaining_time)))
+        max_iters = None if remaining_iters is None else max(1, min(60, int(remaining_iters)))
+        return demo_run_alns_action(time_limit_sec=time_limit, max_iters=max_iters)
+    return demo_stop_action()
 
 
 def _objective_layers_prompt_view(layers: List[Any]) -> List[Dict[str, Any]]:
@@ -692,6 +884,31 @@ def _build_search_progress_summary(state: AgentState) -> Dict[str, Any]:
     }
 
 
+def _current_strength_ratio(state: AgentState) -> float:
+    policy = dict(state.current_weighted_policy or {})
+    try:
+        value = float(policy.get("strength_ratio", 0.15))
+    except Exception:
+        return 0.15
+    return value if value > 0 else 0.15
+
+
+def _last_destroy_operator_summary(state: AgentState) -> Dict[str, Any]:
+    last_solver = next((record for record in reversed(state.history) if record.solver_diagnostics), None)
+    if last_solver is None:
+        return {}
+    summary = last_solver.solver_diagnostics.get("destroy_operator_summary", {})
+    return dict(summary) if isinstance(summary, dict) else {}
+
+
+def _last_repair_summary(state: AgentState) -> Dict[str, Any]:
+    last_solver = next((record for record in reversed(state.history) if record.solver_diagnostics), None)
+    if last_solver is None:
+        return {}
+    summary = last_solver.solver_diagnostics.get("last_repair", {})
+    return dict(summary) if isinstance(summary, dict) else {}
+
+
 def _count_recent_same_action_repeat(history: List[StepRecord]) -> int:
     if not history:
         return 0
@@ -710,8 +927,8 @@ def _action_signature(record: StepRecord) -> str:
     payload = record.action_payload if isinstance(record.action_payload, dict) else {}
     return (
         f"{RUN_ALNS_ACTION}:"
-        f"{_top_weight_name(payload.get('destroy_generator_priors', {}))}:"
-        f"{_top_weight_name(payload.get('repair_task_selector_priors', {}))}"
+        f"{_top_weight_name(payload.get('destroy_operator_scores', {}))}:"
+        f"{_top_weight_name(payload.get('repair_operator_scores', {}))}"
     )
 
 
@@ -728,6 +945,10 @@ def _condense_solver_diagnostics(diagnostics: Dict[str, Any]) -> Dict[str, Any]:
         "plateau_iters_after_last_update": diagnostics.get("plateau_iters_after_last_update"),
         "update_iters_preview": update_iters[:8],
         "last_acceptance_decision": dict(diagnostics.get("last_acceptance_decision", {}) or {}),
+        "last_destroy_move": dict(diagnostics.get("last_destroy_move", {}) or {}),
+        "last_repair": dict(diagnostics.get("last_repair", {}) or {}),
+        "destroy_operator_summary": dict(diagnostics.get("destroy_operator_summary", {}) or {}),
+        "repair_operator_summary": dict(diagnostics.get("repair_operator_summary", {}) or {}),
     }
 
 
@@ -747,56 +968,37 @@ def _oriented_layer_value(layer: Dict[str, Any], metrics: Dict[str, Any]) -> flo
     return -value if str(layer.get("direction", "min")) == "max" else value
 
 
-def _should_allow_stop(state: AgentState, budget_state: BudgetState) -> bool:
-    if not budget_state.can_run_solver():
-        return True
-    if (budget_state.remaining.get("time_limit_sec") or 0.0) < MEANINGFUL_MIN_TIME_SEC:
-        return True
-    if (budget_state.remaining.get("max_iters") or 0.0) < MEANINGFUL_MIN_ITERS:
-        return True
-    if state.consecutive_flat_steps >= DEFAULT_MAX_STAGNATION_STEPS:
-        return True
-    return False
-
-
-def _sanitize_budget_request(value: Any) -> Dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    out: Dict[str, Any] = {}
-    for key in ("time_limit_sec", "max_iters"):
-        if key not in value:
-            continue
-        try:
-            numeric = float(value[key])
-        except Exception:
-            continue
-        if numeric <= 0:
-            continue
-        out[key] = int(max(1, round(numeric))) if key == "max_iters" else float(numeric)
-    return out
-
-
-def _ensure_run_alns_budget_request(budget_request: Dict[str, Any], cfg: Config) -> Dict[str, Any]:
-    normalized = _sanitize_budget_request(budget_request)
-    if "time_limit_sec" not in normalized:
-        normalized["time_limit_sec"] = float(cfg.solver.weighted_alns.default_time_limit_sec)
-    return normalized
-
-
 def _call_llm(client: LLMClientProtocol, system_prompt: str, user_prompt: str) -> str:
     return client.chat([{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
 
 
-def _log_llm_fallback(kind: str, failure_type: str, reason: str) -> None:
-    detail = str(reason).strip() or "unknown error"
-    warning(f"llm_fallback stage={kind} failure_type={failure_type} detail={detail}")
-
-
 def _log_algorithm_input_source(phase: str, objective_from_llm: bool, action_from_llm: bool) -> None:
-    info(
-        f"algorithm_input_source phase={phase} "
-        f"objective_from_llm={str(bool(objective_from_llm)).lower()} "
-        f"action_from_llm={str(bool(action_from_llm)).lower()}"
+    del phase, objective_from_llm, action_from_llm
+
+
+def _log_step_action(step_id: int, action: Dict[str, Any]) -> None:
+    action_type = str(action.get("action_type", "")).strip()
+    parts = [
+        f"[STEP {int(step_id)}]",
+        f"action={action_type}",
+        f"from_llm={_bool_text(action.get('_action_from_llm', False))}",
+    ]
+    budget_request = dict(action.get("budget_request", {}) or {})
+    if action_type == RUN_ALNS_ACTION:
+        if "time_limit_sec" in budget_request:
+            parts.append(f"time={_round_number(float(budget_request['time_limit_sec']))}")
+        if "max_iters" in budget_request:
+            parts.append(f"iters={int(budget_request['max_iters'])}")
+    print(" ".join(parts))
+
+
+def _log_solver_request(requested_budget: Dict[str, Any], granted_budget: Dict[str, Any]) -> None:
+    print(
+        "[SOLVER] "
+        f"requested_time={_round_number(_as_optional_float(requested_budget.get('time_limit_sec')))} "
+        f"granted_time={_round_number(_as_optional_float(granted_budget.get('time_limit_sec')))} "
+        f"requested_iters={_format_optional_int(requested_budget.get('max_iters'))} "
+        f"granted_iters={_format_optional_int(granted_budget.get('max_iters'))}"
     )
 
 
@@ -806,14 +1008,14 @@ def _log_solver_budget(
     actual_usage: Dict[str, Any],
     budget_state: BudgetState,
 ) -> None:
-    json_block(
-        "Solver Budget",
-        {
-            "requested": dict(requested_budget),
-            "granted": dict(granted_budget),
-            "actual": dict(actual_usage),
-            "remaining_budget": _round_dict(budget_state.remaining),
-        },
+    del requested_budget, granted_budget
+    print(
+        "[BUDGET] "
+        f"actual_time={actual_usage.get('actual_time_used_sec')} "
+        f"actual_iters={actual_usage.get('actual_iters_used')} "
+        f"remaining_time={_round_number(budget_state.remaining.get('time_limit_sec'))} "
+        f"remaining_iters={_round_number(budget_state.remaining.get('max_iters'))} "
+        f"remaining_solver_calls={_round_number(budget_state.remaining.get('solver_calls'))}"
     )
 
 
@@ -827,6 +1029,10 @@ def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
     unknown_top_level = sorted(str(key) for key in parsed.keys() if str(key) not in {"rationale", "layers"})
     if unknown_top_level:
         return f"unknown field '{unknown_top_level[0]}'"
+    if "rationale" not in parsed:
+        return "missing field 'rationale'"
+    if not isinstance(parsed.get("rationale"), str) or not str(parsed.get("rationale")).strip():
+        return "field 'rationale' must be a non-empty string"
     if "layers" not in parsed:
         return "missing field 'layers'"
     layers = parsed.get("layers")
@@ -834,6 +1040,8 @@ def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
         return "field 'layers' must be a list"
     if not layers:
         return "field 'layers' must be a non-empty list"
+    if len(layers) > 6:
+        return "field 'layers' must contain at most 6 layers"
 
     allowed_metrics = {
         str(item.get("name", "")).strip()
@@ -861,6 +1069,9 @@ def _validate_objective_spec(parsed: Dict[str, Any]) -> Optional[str]:
             return f"field '{prefix}.direction' must be a string"
         if direction not in ("min", "max"):
             return f"field '{prefix}.direction' has illegal enum value '{direction}'"
+    first = layers[0]
+    if first.get("metric") != "violation_total" or first.get("direction") != "min":
+        return "first objective layer must be violation_total with direction min"
     return None
 
 
@@ -872,6 +1083,10 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
     )
     if unknown_top_level:
         return f"unknown field '{unknown_top_level[0]}'"
+    if "rationale" not in parsed:
+        return "missing field 'rationale'"
+    if not isinstance(parsed.get("rationale"), str) or not str(parsed.get("rationale")).strip():
+        return "field 'rationale' must be a non-empty string"
     operator_intent_error = _validate_required_short_phrase_map(
         parsed=parsed,
         field_name="operator_intent",
@@ -898,8 +1113,10 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
     if not isinstance(payload, dict):
         return "field 'action_payload' must be an object"
 
-    budget_request = parsed.get("budget_request", {})
-    if "budget_request" in parsed and not isinstance(budget_request, dict):
+    if "budget_request" not in parsed:
+        return "missing field 'budget_request'"
+    budget_request = parsed.get("budget_request")
+    if not isinstance(budget_request, dict):
         return "field 'budget_request' must be an object"
     budget_error = _validate_budget_request_spec(budget_request, require_time_limit_sec=(action_type == RUN_ALNS_ACTION))
     if budget_error is not None:
@@ -913,12 +1130,15 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
 
     if action_type == RUN_ALNS_ACTION:
         allowed_payload_fields = {
-            "destroy_generator_priors",
-            "repair_task_selector_priors",
-            "remove_metric_weights",
-            "reinsert_metric_weights",
-            "insert_metric_weights",
-            "strength_ratio",
+            "search_diagnosis_scores",
+            "destroy_operator_scores",
+            "repair_operator_scores",
+            "destroy_metric_preferences",
+            "repair_task_metric_preferences",
+            "repair_position_metric_preferences",
+            "destroy_strength_score",
+            "candidate_budget_score",
+            "exploration_score",
             "acceptance",
             "accept_level",
             "reaction_factor",
@@ -927,11 +1147,16 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         unknown_payload_fields = sorted(str(key) for key in payload.keys() if str(key) not in allowed_payload_fields)
         if unknown_payload_fields:
             return f"unknown field 'action_payload.{unknown_payload_fields[0]}'"
-        metric_weight_maps = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_weight_maps", []) or [])
         for field_name in (
-            "destroy_generator_priors",
-            "repair_task_selector_priors",
-            "strength_ratio",
+            "search_diagnosis_scores",
+            "destroy_operator_scores",
+            "repair_operator_scores",
+            "destroy_metric_preferences",
+            "repair_task_metric_preferences",
+            "repair_position_metric_preferences",
+            "destroy_strength_score",
+            "candidate_budget_score",
+            "exploration_score",
             "acceptance",
             "accept_level",
             "reaction_factor",
@@ -939,29 +1164,37 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         ):
             if field_name not in payload:
                 return f"missing field 'action_payload.{field_name}'"
-        for field_name in metric_weight_maps:
-            if field_name not in payload:
-                return f"missing field 'action_payload.{field_name}'"
 
-        nested_error = _validate_required_number_map(
+        nested_error = _validate_required_int_score_map(
             payload=payload,
-            field_name="destroy_generator_priors",
-            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("destroy_generator_priors", []),
+            field_name="search_diagnosis_scores",
+            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("search_diagnosis_scores", []),
         )
         if nested_error is not None:
             return nested_error
-        nested_error = _validate_required_number_map(
+        nested_error = _validate_required_int_score_map(
             payload=payload,
-            field_name="repair_task_selector_priors",
-            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("repair_task_selector_priors", []),
+            field_name="destroy_operator_scores",
+            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("destroy_operator_scores", []),
         )
         if nested_error is not None:
             return nested_error
-        for field_name in metric_weight_maps:
-            nested_error = _validate_required_number_map(
+        nested_error = _validate_required_int_score_map(
+            payload=payload,
+            field_name="repair_operator_scores",
+            required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("repair_operator_scores", []),
+        )
+        if nested_error is not None:
+            return nested_error
+        for field_name, metric_key in (
+            ("destroy_metric_preferences", "landscape_metric_fields"),
+            ("repair_task_metric_preferences", "landscape_metric_fields"),
+            ("repair_position_metric_preferences", "repair_position_metric_fields"),
+        ):
+            nested_error = _validate_metric_preferences(
                 payload=payload,
                 field_name=field_name,
-                required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_fields", []),
+                required_keys=SCHEMA_CONSTRAINTS.get("next_action", {}).get(metric_key, []),
             )
             if nested_error is not None:
                 return nested_error
@@ -973,7 +1206,12 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
         if acceptance not in allowed_acceptance:
             return f"field 'action_payload.acceptance' has illegal enum value '{acceptance}'"
 
-        for field_name in ("strength_ratio", "accept_level", "reaction_factor", "prior_mix_lambda"):
+        for field_name in ("destroy_strength_score", "candidate_budget_score", "exploration_score"):
+            if not _is_plain_int(payload.get(field_name)):
+                return f"field 'action_payload.{field_name}' must be an integer"
+            if int(payload.get(field_name)) < 0 or int(payload.get(field_name)) > 10:
+                return f"field 'action_payload.{field_name}' must be in [0, 10]"
+        for field_name in ("accept_level", "reaction_factor", "prior_mix_lambda"):
             if not _is_plain_number(payload.get(field_name)):
                 return f"field 'action_payload.{field_name}' must be numeric"
         return None
@@ -983,7 +1221,7 @@ def _validate_action_spec(parsed: Dict[str, Any], allowed_actions: List[str]) ->
     return None
 
 
-def _validate_required_number_map(payload: Dict[str, Any], field_name: str, required_keys: List[str]) -> Optional[str]:
+def _validate_required_int_score_map(payload: Dict[str, Any], field_name: str, required_keys: List[str]) -> Optional[str]:
     raw = payload.get(field_name)
     if not isinstance(raw, dict):
         return f"field 'action_payload.{field_name}' must be an object"
@@ -994,8 +1232,43 @@ def _validate_required_number_map(payload: Dict[str, Any], field_name: str, requ
     for key in required_keys:
         if key not in raw:
             return f"missing field 'action_payload.{field_name}.{key}'"
-        if not _is_plain_number(raw.get(key)):
-            return f"field 'action_payload.{field_name}.{key}' must be numeric"
+        if not _is_plain_int(raw.get(key)):
+            return f"field 'action_payload.{field_name}.{key}' must be an integer"
+        if int(raw.get(key)) < 0 or int(raw.get(key)) > 10:
+            return f"field 'action_payload.{field_name}.{key}' must be in [0, 10]"
+    return None
+
+
+def _validate_metric_preferences(payload: Dict[str, Any], field_name: str, required_keys: List[str]) -> Optional[str]:
+    raw = payload.get(field_name)
+    if not isinstance(raw, dict):
+        return f"field 'action_payload.{field_name}' must be an object"
+    allowed_keys = {str(key) for key in required_keys}
+    unknown_keys = sorted(str(key) for key in raw.keys() if str(key) not in allowed_keys)
+    if unknown_keys:
+        return f"unknown field 'action_payload.{field_name}.{unknown_keys[0]}'"
+    directions = tuple(SCHEMA_CONSTRAINTS.get("next_action", {}).get("metric_directions", []) or [])
+    for key in required_keys:
+        if key not in raw:
+            return f"missing field 'action_payload.{field_name}.{key}'"
+        item = raw.get(key)
+        if not isinstance(item, dict):
+            return f"field 'action_payload.{field_name}.{key}' must be an object"
+        unknown_item = sorted(str(name) for name in item.keys() if str(name) not in {"score", "direction"})
+        if unknown_item:
+            return f"unknown field 'action_payload.{field_name}.{key}.{unknown_item[0]}'"
+        for child in ("score", "direction"):
+            if child not in item:
+                return f"missing field 'action_payload.{field_name}.{key}.{child}'"
+        if not _is_plain_int(item.get("score")):
+            return f"field 'action_payload.{field_name}.{key}.score' must be an integer"
+        if int(item.get("score")) < 0 or int(item.get("score")) > 10:
+            return f"field 'action_payload.{field_name}.{key}.score' must be in [0, 10]"
+        direction = item.get("direction")
+        if not isinstance(direction, str):
+            return f"field 'action_payload.{field_name}.{key}.direction' must be a string"
+        if direction not in directions:
+            return f"field 'action_payload.{field_name}.{key}.direction' has illegal enum value '{direction}'"
     return None
 
 
@@ -1029,28 +1302,6 @@ def _validate_required_short_phrase_map(
     return None
 
 
-def _default_weighted_alns_policy(cfg: Config) -> WeightedALNSPolicy:
-    defaults = cfg.solver.weighted_alns
-    return WeightedALNSPolicy(
-        destroy_generator_priors={
-            str(name): float(weight)
-            for name, weight in defaults.destroy_generator_priors.items()
-        },
-        repair_task_selector_priors={
-            str(name): float(weight)
-            for name, weight in defaults.repair_task_selector_priors.items()
-        },
-        remove_metric_weights=defaults.remove_metric_weights,
-        reinsert_metric_weights=defaults.reinsert_metric_weights,
-        insert_metric_weights=defaults.insert_metric_weights,
-        strength_ratio=float(defaults.strength_ratio),
-        acceptance=str(defaults.acceptance),
-        accept_level=float(defaults.accept_level),
-        reaction_factor=float(defaults.reaction_factor),
-        prior_mix_lambda=float(defaults.prior_mix_lambda),
-    )
-
-
 def _validate_budget_request_spec(budget_request: Dict[str, Any], require_time_limit_sec: bool = False) -> Optional[str]:
     unknown_fields = sorted(str(key) for key in budget_request.keys() if str(key) not in {"time_limit_sec", "max_iters"})
     if unknown_fields:
@@ -1069,41 +1320,27 @@ def _validate_budget_request_spec(budget_request: Dict[str, Any], require_time_l
 
 
 def _is_plain_number(value: Any) -> bool:
-    if value is None or isinstance(value, bool):
-        return False
-    try:
-        float(value)
-    except Exception:
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
     return True
 
 
-def _parse_json_obj(text: str, default: Dict[str, Any]) -> Dict[str, Any]:
-    parsed, error = _parse_json_obj_with_reason(text)
-    return parsed if error is None else default
+def _is_plain_int(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int)
 
 
-def _parse_json_obj_with_reason(text: str) -> Tuple[Dict[str, Any], Optional[str]]:
-    if not text:
-        return {}, "empty response"
-    primary_error: Optional[str] = None
+def _parse_strict_json_object(text: str, kind: str) -> Dict[str, Any]:
+    if not isinstance(text, str) or not text.strip():
+        raise LLMOutputError(f"{kind} response is empty")
     try:
         obj = json.loads(text.strip())
-        if isinstance(obj, dict):
-            return obj, None
-        primary_error = f"top-level JSON must be an object, got {type(obj).__name__}"
-    except Exception as exc:
-        primary_error = f"{type(exc).__name__}: {exc}"
-    match = re.search(r"\{.*\}", str(text), flags=re.DOTALL)
-    if not match:
-        return {}, primary_error or "no JSON object found"
-    try:
-        obj = json.loads(match.group(0))
-    except Exception as exc:
-        return {}, primary_error or f"{type(exc).__name__}: {exc}"
+    except json.JSONDecodeError as exc:
+        raise LLMOutputError(f"{kind} response is not valid JSON: {exc}") from exc
     if not isinstance(obj, dict):
-        return {}, f"top-level JSON must be an object, got {type(obj).__name__}"
-    return obj, None
+        raise LLMOutputError(
+            f"{kind} response must be a JSON object, got {type(obj).__name__}"
+        )
+    return obj
 
 
 def _round_number(value: Optional[float]) -> Optional[float]:
@@ -1116,6 +1353,20 @@ def _round_number(value: Optional[float]) -> Optional[float]:
 
 def _round_dict(data: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
     return {key: _round_number(value) for key, value in data.items()}
+
+
+def _bool_text(value: Any) -> str:
+    return str(bool(value)).lower()
+
+
+def _format_optional_int(value: Any) -> str:
+    if value is None:
+        return "None"
+    return str(_as_non_negative_int(value))
+
+
+def _format_objective_layers(layers: List[Dict[str, Any]]) -> str:
+    return " > ".join(str(layer.get("metric", "")) for layer in layers)
 
 
 def _action_log_view(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -1157,17 +1408,6 @@ def _sanitize_rationale(value: Any, fallback: str = "") -> str:
         if normalized:
             return normalized
     return fallback
-
-
-def _default_action_rationale(action_type: str) -> str:
-    normalized = str(action_type).strip()
-    if normalized == "build_initial_solution":
-        return "Build an initial incumbent because no incumbent is available yet."
-    if normalized == RUN_ALNS_ACTION:
-        return "Run weighted ALNS to improve the incumbent under the remaining budget."
-    if normalized == "stop":
-        return "Stop because the remaining budget or recent progress is not enough for a meaningful next step."
-    return "No rationale provided."
 
 
 def _as_optional_float(value: Any) -> Optional[float]:

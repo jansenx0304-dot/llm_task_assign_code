@@ -79,6 +79,7 @@ class AssignmentSolution:
     eval: Optional[EvalResult] = None
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
     run_summary: Dict[str, Any] = field(default_factory=dict)
+    run_artifact: Dict[str, Any] = field(default_factory=dict)
 
     def clone(self, deep: bool = True) -> "AssignmentSolution":
         if not deep:
@@ -89,6 +90,7 @@ class AssignmentSolution:
                 eval=self.eval,
                 solver_diagnostics=self.solver_diagnostics,
                 run_summary=self.run_summary,
+                run_artifact=self.run_artifact,
             )
         return AssignmentSolution(
             routes={aid: list(seq) for aid, seq in self.routes.items()},
@@ -97,6 +99,7 @@ class AssignmentSolution:
             eval=self.eval,  # 通常结构改变后 eval 需要置空；此处由调用方决定
             solver_diagnostics=deepcopy(self.solver_diagnostics),
             run_summary=deepcopy(self.run_summary),
+            run_artifact=deepcopy(self.run_artifact),
         )
 
     @staticmethod

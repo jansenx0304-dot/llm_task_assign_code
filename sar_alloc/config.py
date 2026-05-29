@@ -3,12 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional
 
-from .operators.types import (
-    DESTROY_CANDIDATE_GENERATORS,
-    MetricWeights,
-    REPAIR_TASK_SELECTORS,
-)
-
 
 Direction = Literal["min", "max"]
 
@@ -22,24 +16,15 @@ class ObjectiveLayer:
 
 @dataclass(slots=True)
 class ObjectivePolicy:
+    """Objective selected by the LLM for the current run."""
+
     layers: List[ObjectiveLayer] = field(default_factory=list)
     max_layers: int = 6
 
 
-def default_objective_policy() -> ObjectivePolicy:
-    return ObjectivePolicy(
-        layers=[
-            ObjectiveLayer(name="feasibility", metric="violation_total", direction="min"),
-            ObjectiveLayer(name="rescue_priority", metric="missed_priority", direction="min"),
-            ObjectiveLayer(name="efficiency", metric="energy_total", direction="min"),
-        ],
-        max_layers=6,
-    )
-
-
 @dataclass(slots=True)
 class EvaluationConfig:
-    objective_policy: ObjectivePolicy = field(default_factory=default_objective_policy)
+    objective_policy: ObjectivePolicy = field(default_factory=ObjectivePolicy)
     include_depot_legs: bool = True
     time_unit: str = "minute"
     energy_unit: str = "unit"
@@ -52,38 +37,13 @@ class Budget:
 
 
 @dataclass(slots=True)
-class WeightedALNSConfig:
-    """Static weighted-ALNS settings shared across runs.
-
-    Task selectors decide repair order. Insertion positions are ranked by
-    insert-score features and then strict-evaluated until a feasible insertion
-    is found or all candidates are exhausted.
-    """
-    destroy_generator_priors: Dict[str, float] = field(
-        default_factory=lambda: {
-            name: 1.0 for name in DESTROY_CANDIDATE_GENERATORS
-        }
-    )
-    repair_task_selector_priors: Dict[str, float] = field(
-        default_factory=lambda: {
-            name: 1.0 for name in REPAIR_TASK_SELECTORS
-        }
-    )
-    remove_metric_weights: MetricWeights = field(default_factory=MetricWeights)
-    reinsert_metric_weights: MetricWeights = field(default_factory=MetricWeights)
-    insert_metric_weights: MetricWeights = field(default_factory=MetricWeights)
-    strength_ratio: float = 0.18
-    acceptance: Literal["greedy", "threshold", "sa"] = "sa"
-    accept_level: float = 0.25
-    reaction_factor: float = 0.20
-    prior_mix_lambda: float = 0.25
-    default_time_limit_sec: float = 1.0
-    default_max_iters: int = 60
-
-
-@dataclass(slots=True)
 class SolverConfig:
-    weighted_alns: WeightedALNSConfig = field(default_factory=WeightedALNSConfig)
+    """Placeholder for non-strategy solver settings.
+
+    Weighted ALNS operator weights, metric weights, acceptance, and budget
+    requests are intentionally absent. They must come from the LLM action plan
+    or from the explicitly labeled demo policy in dummy/fallback mode.
+    """
 
 
 @dataclass(slots=True)

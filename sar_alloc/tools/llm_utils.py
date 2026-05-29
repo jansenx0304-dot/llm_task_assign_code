@@ -12,13 +12,18 @@ from ..models import Agent, Instance, Task
 from ..operators import (
     ACCEPTANCE_MODES,
     DESTROY_CANDIDATE_GENERATORS,
-    METRIC_FIELDS,
-    METRIC_WEIGHT_BOUNDS,
-    OPERATOR_PRIOR_BOUNDS,
+    LANDSCAPE_METRIC_FIELDS,
+    METRIC_DIRECTIONS,
     POLICY_BOUNDS,
+    REPAIR_POSITION_METRIC_FIELDS,
     REPAIR_TASK_SELECTORS,
-    MetricWeights,
+    SEARCH_DIAGNOSIS_FIELDS,
+    LandscapeMetricPreferences,
+    MetricPreference,
+    PositionMetricPreferences,
     WeightedALNSPolicy,
+    operator_score_to_prior,
+    score_to_range,
 )
 from ..schemas import SCHEMA_CONSTRAINTS
 from ..solution import AssignmentSolution
@@ -219,129 +224,151 @@ def llm_apply_objective(config: Config, objective_spec: Dict[str, Any]) -> Dict[
     }
 
 
-def llm_compile_weighted_alns_policy(config: Config, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate and compile a strict weighted-ALNS action payload."""
-    defaults = config.solver.weighted_alns
-    raw = dict(payload or {}) if isinstance(payload, dict) else {}
-    dropped: List[Dict[str, Any]] = []
-    validation_errors: List[str] = []
+def llm_compile_weighted_alns_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Strictly validate and compile an LLM-provided run_alns policy.
+
+    The compiler never fills missing operator weights, never clamps illegal
+    numeric values, and never supplies acceptance defaults. Callers should
+    surface the returned error directly.
+    """
+    if not isinstance(payload, dict):
+        return _policy_error("action_payload must be an object")
 
     allowed_fields = {
-        "destroy_generator_priors",
-        "repair_task_selector_priors",
-        "remove_metric_weights",
-        "reinsert_metric_weights",
-        "insert_metric_weights",
-        "strength_ratio",
+        "search_diagnosis_scores",
+        "destroy_operator_scores",
+        "repair_operator_scores",
+        "destroy_metric_preferences",
+        "repair_task_metric_preferences",
+        "repair_position_metric_preferences",
+        "destroy_strength_score",
+        "candidate_budget_score",
+        "exploration_score",
         "acceptance",
         "accept_level",
         "reaction_factor",
         "prior_mix_lambda",
     }
-    for key in raw.keys():
+    for key in sorted(str(key) for key in payload.keys()):
         if key not in allowed_fields:
-            dropped.append({"field": key, "reason": "unknown field"})
-            validation_errors.append(f"unknown field '{key}'")
+            return _policy_error(f"unknown field 'action_payload.{key}'")
+    for key in sorted(allowed_fields):
+        if key not in payload:
+            return _policy_error(f"missing field 'action_payload.{key}'")
 
-    destroy_generator_priors = _compile_operator_prior_map(
-        raw_value=raw.get("destroy_generator_priors"),
-        defaults=defaults.destroy_generator_priors,
+    search_diagnosis_scores = _compile_required_int_score_map(
+        raw_value=payload["search_diagnosis_scores"],
+        allowed=SEARCH_DIAGNOSIS_FIELDS,
+        field_name="search_diagnosis_scores",
+    )
+    if isinstance(search_diagnosis_scores, str):
+        return _policy_error(search_diagnosis_scores)
+
+    destroy_operator_scores = _compile_required_int_score_map(
+        raw_value=payload["destroy_operator_scores"],
         allowed=DESTROY_CANDIDATE_GENERATORS,
-        field_name="destroy_generator_priors",
-        dropped=dropped,
+        field_name="destroy_operator_scores",
     )
-    repair_task_selector_priors = _compile_operator_prior_map(
-        raw_value=raw.get("repair_task_selector_priors"),
-        defaults=defaults.repair_task_selector_priors,
+    if isinstance(destroy_operator_scores, str):
+        return _policy_error(destroy_operator_scores)
+
+    repair_operator_scores = _compile_required_int_score_map(
+        raw_value=payload["repair_operator_scores"],
         allowed=REPAIR_TASK_SELECTORS,
-        field_name="repair_task_selector_priors",
-        dropped=dropped,
+        field_name="repair_operator_scores",
     )
-    acceptance = _pick_enum(
-        raw_value=raw.get("acceptance"),
-        default=defaults.acceptance,
-        allowed=ACCEPTANCE_MODES,
-        field_name="acceptance",
-        dropped=dropped,
+    if isinstance(repair_operator_scores, str):
+        return _policy_error(repair_operator_scores)
+
+    destroy_metric_preferences = _compile_metric_preferences(
+        raw_value=payload["destroy_metric_preferences"],
+        metric_fields=LANDSCAPE_METRIC_FIELDS,
+        field_name="destroy_metric_preferences",
+        preferences_cls=LandscapeMetricPreferences,
     )
-    remove_metric_weights = _compile_metric_weight_map(
-        raw_value=raw.get("remove_metric_weights"),
-        field_name="remove_metric_weights",
-        dropped=dropped,
-        validation_errors=validation_errors,
+    if isinstance(destroy_metric_preferences, str):
+        return _policy_error(destroy_metric_preferences)
+    repair_task_metric_preferences = _compile_metric_preferences(
+        raw_value=payload["repair_task_metric_preferences"],
+        metric_fields=LANDSCAPE_METRIC_FIELDS,
+        field_name="repair_task_metric_preferences",
+        preferences_cls=LandscapeMetricPreferences,
     )
-    reinsert_metric_weights = _compile_metric_weight_map(
-        raw_value=raw.get("reinsert_metric_weights"),
-        field_name="reinsert_metric_weights",
-        dropped=dropped,
-        validation_errors=validation_errors,
+    if isinstance(repair_task_metric_preferences, str):
+        return _policy_error(repair_task_metric_preferences)
+    repair_position_metric_preferences = _compile_metric_preferences(
+        raw_value=payload["repair_position_metric_preferences"],
+        metric_fields=REPAIR_POSITION_METRIC_FIELDS,
+        field_name="repair_position_metric_preferences",
+        preferences_cls=PositionMetricPreferences,
     )
-    insert_metric_weights = _compile_metric_weight_map(
-        raw_value=raw.get("insert_metric_weights"),
-        field_name="insert_metric_weights",
-        dropped=dropped,
-        validation_errors=validation_errors,
+    if isinstance(repair_position_metric_preferences, str):
+        return _policy_error(repair_position_metric_preferences)
+
+    acceptance = payload["acceptance"]
+    if not isinstance(acceptance, str):
+        return _policy_error("field 'action_payload.acceptance' must be a string")
+    if acceptance not in ACCEPTANCE_MODES:
+        return _policy_error(
+            f"field 'action_payload.acceptance' has illegal enum value '{acceptance}'"
+        )
+
+    scalars: Dict[str, float] = {}
+    for field_name in ("accept_level", "reaction_factor", "prior_mix_lambda"):
+        lower, upper = POLICY_BOUNDS[field_name]
+        value = _strict_number(
+            value=payload[field_name],
+            field_name=f"action_payload.{field_name}",
+            lower=lower,
+            upper=upper,
+        )
+        if isinstance(value, str):
+            return _policy_error(value)
+        scalars[field_name] = value
+
+    int_scores: Dict[str, int] = {}
+    for field_name in ("destroy_strength_score", "candidate_budget_score", "exploration_score"):
+        value = _strict_int_score(payload[field_name], f"action_payload.{field_name}")
+        if isinstance(value, str):
+            return _policy_error(value)
+        int_scores[field_name] = value
+
+    destroy_operator_priors = {
+        name: operator_score_to_prior(score)
+        for name, score in destroy_operator_scores.items()
+    }
+    repair_operator_priors = {
+        name: operator_score_to_prior(score)
+        for name, score in repair_operator_scores.items()
+    }
+    strength_ratio = score_to_range(
+        int_scores["destroy_strength_score"],
+        POLICY_BOUNDS["strength_ratio"][0],
+        POLICY_BOUNDS["strength_ratio"][1],
     )
-    if (
-        remove_metric_weights is None
-        or reinsert_metric_weights is None
-        or insert_metric_weights is None
-        or validation_errors
-    ):
-        return {
-            "ok": False,
-            "error": validation_errors[0] if validation_errors else "invalid metric weight maps",
-            "applied": {},
-            "dropped": dropped,
-        }
+    exploration_rate = score_to_range(int_scores["exploration_score"], 0.02, 0.30)
 
     policy = WeightedALNSPolicy(
-        destroy_generator_priors=destroy_generator_priors,
-        repair_task_selector_priors=repair_task_selector_priors,
-        remove_metric_weights=remove_metric_weights,
-        reinsert_metric_weights=reinsert_metric_weights,
-        insert_metric_weights=insert_metric_weights,
-        strength_ratio=_clamp_number(
-            raw_value=raw.get("strength_ratio", defaults.strength_ratio),
-            default=defaults.strength_ratio,
-            lower=POLICY_BOUNDS["strength_ratio"][0],
-            upper=POLICY_BOUNDS["strength_ratio"][1],
-            field_name="strength_ratio",
-            dropped=dropped,
-        ),
+        search_diagnosis_scores=search_diagnosis_scores,
+        destroy_operator_scores=destroy_operator_scores,
+        repair_operator_scores=repair_operator_scores,
+        destroy_metric_preferences=destroy_metric_preferences,
+        repair_task_metric_preferences=repair_task_metric_preferences,
+        repair_position_metric_preferences=repair_position_metric_preferences,
+        destroy_strength_score=int_scores["destroy_strength_score"],
+        candidate_budget_score=int_scores["candidate_budget_score"],
+        exploration_score=int_scores["exploration_score"],
+        destroy_operator_priors=destroy_operator_priors,
+        repair_operator_priors=repair_operator_priors,
+        strength_ratio=strength_ratio,
+        exploration_rate=exploration_rate,
         acceptance=acceptance,
-        accept_level=_clamp_number(
-            raw_value=raw.get("accept_level", defaults.accept_level),
-            default=defaults.accept_level,
-            lower=POLICY_BOUNDS["accept_level"][0],
-            upper=POLICY_BOUNDS["accept_level"][1],
-            field_name="accept_level",
-            dropped=dropped,
-        ),
-        reaction_factor=_clamp_number(
-            raw_value=raw.get("reaction_factor", defaults.reaction_factor),
-            default=defaults.reaction_factor,
-            lower=POLICY_BOUNDS["reaction_factor"][0],
-            upper=POLICY_BOUNDS["reaction_factor"][1],
-            field_name="reaction_factor",
-            dropped=dropped,
-        ),
-        prior_mix_lambda=_clamp_number(
-            raw_value=raw.get("prior_mix_lambda", defaults.prior_mix_lambda),
-            default=defaults.prior_mix_lambda,
-            lower=POLICY_BOUNDS["prior_mix_lambda"][0],
-            upper=POLICY_BOUNDS["prior_mix_lambda"][1],
-            field_name="prior_mix_lambda",
-            dropped=dropped,
-        ),
+        accept_level=scalars["accept_level"],
+        reaction_factor=scalars["reaction_factor"],
+        prior_mix_lambda=scalars["prior_mix_lambda"],
     )
 
-    return {
-        "ok": True,
-        "policy": policy,
-        "applied": policy.as_dict(),
-        "dropped": dropped,
-    }
+    return {"ok": True, "policy": policy, "applied": policy.as_dict()}
 
 
 def llm_parse_operator_intent(raw: Any) -> Dict[str, Any]:
@@ -451,124 +478,99 @@ def format_solution_summary(summary: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _pick_enum(
+def _policy_error(message: str) -> Dict[str, Any]:
+    return {"ok": False, "error": message, "applied": {}}
+
+
+def _compile_required_int_score_map(
     *,
     raw_value: Any,
-    default: str,
     allowed: Tuple[str, ...],
     field_name: str,
-    dropped: List[Dict[str, Any]],
-) -> str:
-    value = str(raw_value or default).strip()
-    if value in allowed:
-        return value
-    dropped.append({"field": field_name, "reason": f"must be one of {list(allowed)}", "value": str(raw_value)})
-    return str(default)
+) -> Dict[str, int] | str:
+    if not isinstance(raw_value, dict):
+        return f"field 'action_payload.{field_name}' must be an object"
 
+    allowed_set = {str(name) for name in allowed}
+    for key in sorted(str(key) for key in raw_value.keys()):
+        if key not in allowed_set:
+            return f"unknown field 'action_payload.{field_name}.{key}'"
+    for key in allowed:
+        if key not in raw_value:
+            return f"missing field 'action_payload.{field_name}.{key}'"
 
-def _compile_operator_prior_map(
-    *,
-    raw_value: Any,
-    defaults: Dict[str, float],
-    allowed: Tuple[str, ...],
-    field_name: str,
-    dropped: List[Dict[str, Any]],
-) -> Dict[str, float]:
-    lo, hi = OPERATOR_PRIOR_BOUNDS
-    prior_raw = raw_value
-    if prior_raw is None:
-        prior_raw = {}
-    if not isinstance(prior_raw, dict):
-        dropped.append({"field": field_name, "reason": "must be an object"})
-        prior_raw = {}
-
-    compiled: Dict[str, float] = {}
-    for name in allowed:
-        compiled[str(name)] = _clamp_number(
-            raw_value=prior_raw.get(name, defaults.get(name, 1.0)),
-            default=defaults.get(name, 1.0),
-            lower=lo,
-            upper=hi,
-            field_name=f"{field_name}.{name}",
-            dropped=dropped,
-        )
-
-    for name in prior_raw.keys():
-        if str(name) not in allowed:
-            dropped.append({"field": f"{field_name}.{name}", "reason": "unknown field"})
+    compiled: Dict[str, int] = {}
+    for key in allowed:
+        value = _strict_int_score(raw_value[key], f"action_payload.{field_name}.{key}")
+        if isinstance(value, str):
+            return value
+        compiled[str(key)] = int(value)
     return compiled
 
 
-def _compile_metric_weight_map(
+def _compile_metric_preferences(
     *,
     raw_value: Any,
+    metric_fields: Tuple[str, ...],
     field_name: str,
-    dropped: List[Dict[str, Any]],
-    validation_errors: List[str],
-) -> Optional[MetricWeights]:
+    preferences_cls: type[LandscapeMetricPreferences] | type[PositionMetricPreferences],
+) -> LandscapeMetricPreferences | PositionMetricPreferences | str:
     if not isinstance(raw_value, dict):
-        dropped.append({"field": field_name, "reason": "must be an object"})
-        validation_errors.append(f"field '{field_name}' must be an object")
-        return None
+        return f"field 'action_payload.{field_name}' must be an object"
 
-    compiled: Dict[str, float] = {}
-    metric_fields = set(METRIC_FIELDS)
-    for name in raw_value.keys():
-        normalized = str(name)
-        if normalized not in metric_fields:
-            dropped.append({"field": f"{field_name}.{normalized}", "reason": "unknown field"})
-            validation_errors.append(f"unknown field '{field_name}.{normalized}'")
-
-    for name in METRIC_FIELDS:
+    compiled: Dict[str, MetricPreference] = {}
+    allowed_fields = set(metric_fields)
+    for key in sorted(str(key) for key in raw_value.keys()):
+        if key not in allowed_fields:
+            return f"unknown field 'action_payload.{field_name}.{key}'"
+    for name in metric_fields:
         if name not in raw_value:
-            dropped.append({"field": f"{field_name}.{name}", "reason": "missing field"})
-            validation_errors.append(f"missing field '{field_name}.{name}'")
-            continue
-        raw_metric_value = raw_value.get(name)
-        if raw_metric_value is None or isinstance(raw_metric_value, bool):
-            dropped.append({"field": f"{field_name}.{name}", "reason": "must be numeric", "value": repr(raw_metric_value)})
-            validation_errors.append(f"field '{field_name}.{name}' must be numeric")
-            continue
-        try:
-            numeric_value = float(raw_metric_value)
-        except Exception:
-            dropped.append({"field": f"{field_name}.{name}", "reason": "must be numeric", "value": repr(raw_metric_value)})
-            validation_errors.append(f"field '{field_name}.{name}' must be numeric")
-            continue
-
-        lower, upper = METRIC_WEIGHT_BOUNDS[name]
-        if numeric_value < lower or numeric_value > upper:
-            dropped.append(
-                {
-                    "field": f"{field_name}.{name}",
-                    "reason": f"clamped to [{lower}, {upper}]",
-                    "value": numeric_value,
-                }
-            )
-        compiled[name] = max(float(lower), min(float(upper), numeric_value))
-
-    if len(compiled) != len(METRIC_FIELDS) or validation_errors:
-        return None
-    return MetricWeights(**compiled)
+            return f"missing field 'action_payload.{field_name}.{name}'"
+        item = raw_value[name]
+        if not isinstance(item, dict):
+            return f"field 'action_payload.{field_name}.{name}' must be an object"
+        item_keys = sorted(str(key) for key in item.keys())
+        if item_keys != ["direction", "score"]:
+            extra = [key for key in item_keys if key not in {"score", "direction"}]
+            if extra:
+                return f"unknown field 'action_payload.{field_name}.{name}.{extra[0]}'"
+            missing = [key for key in ("score", "direction") if key not in item]
+            return f"missing field 'action_payload.{field_name}.{name}.{missing[0]}'"
+        score = _strict_int_score(item["score"], f"action_payload.{field_name}.{name}.score")
+        if isinstance(score, str):
+            return score
+        direction = item["direction"]
+        if not isinstance(direction, str):
+            return f"field 'action_payload.{field_name}.{name}.direction' must be a string"
+        if direction not in METRIC_DIRECTIONS:
+            return f"field 'action_payload.{field_name}.{name}.direction' has illegal enum value '{direction}'"
+        compiled[str(name)] = MetricPreference(score=int(score), direction=str(direction))
+    return preferences_cls(**compiled)
 
 
-def _clamp_number(
+def _strict_int_score(value: Any, field_name: str) -> int | str:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return f"field '{field_name}' must be an integer"
+    if int(value) < 0 or int(value) > 10:
+        return f"field '{field_name}' must be in [0, 10]"
+    return int(value)
+
+
+def _strict_number(
     *,
-    raw_value: Any,
-    default: float,
+    value: Any,
     lower: float,
     upper: float,
     field_name: str,
-    dropped: List[Dict[str, Any]],
-) -> float:
-    try:
-        value = float(raw_value)
-    except Exception:
-        dropped.append({"field": field_name, "reason": "must be numeric", "value": repr(raw_value)})
-        return float(default)
-    if value < lower or value > upper:
-        dropped.append({"field": field_name, "reason": f"clamped to [{lower}, {upper}]", "value": value})
-    return max(float(lower), min(float(upper), value))
+) -> float | str:
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"field '{field_name}' must be numeric"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"field '{field_name}' must be finite"
+    if numeric < float(lower) or numeric > float(upper):
+        return f"field '{field_name}' must be in [{lower}, {upper}]"
+    return numeric
 
 
 def _quantile(values: List[float], q: float) -> float:

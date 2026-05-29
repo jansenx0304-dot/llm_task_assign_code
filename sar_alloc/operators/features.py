@@ -8,25 +8,15 @@ filtered position ranking before ranked strict feasibility checks.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple, TypeVar
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..config import Config
 from ..models import Agent, Instance, Location, Task
 from ..solution import AssignmentSolution
-from .types import (
-    InsertCandidateFeatures,
-    InsertPosition,
-    METRIC_FIELDS,
-    RemoveFeatures,
-    ReinsertTaskFeatures,
-)
+from .types import InsertPosition
 
 
 _EPS = 1e-9
-_BIG_M = 1e6
-_T = TypeVar("_T")
-
-
 @dataclass(frozen=True, slots=True)
 class _RouteStop:
     start_time: float
@@ -42,203 +32,6 @@ class _InsertionLowerBound:
     detour_delta: float
     energy_delta: float
     affected_suffix_ratio: float
-
-
-def compute_task_remove_features(
-    sol: AssignmentSolution,
-    tid: int,
-    instance: Instance,
-    config: Config,
-    *,
-    candidate_tids: Optional[Sequence[int]] = None,
-) -> RemoveFeatures:
-    """Compute normalized removal features for one assigned task.
-
-    Normalization uses current-candidate-set min-max scaling. When `candidate_tids`
-    is omitted, the singleton set maps to zeros because no cross-candidate spread
-    exists.
-    """
-    return compute_task_remove_features_batch(
-        sol=sol,
-        tids=candidate_tids or [tid],
-        instance=instance,
-        config=config,
-    )[int(tid)]
-
-
-def compute_reinsert_task_features(
-    sol: AssignmentSolution,
-    tid: int,
-    instance: Instance,
-    config: Config,
-    *,
-    candidate_tids: Optional[Sequence[int]] = None,
-) -> ReinsertTaskFeatures:
-    """Compute normalized task-level reinsertion priority features only."""
-    return compute_reinsert_task_features_batch(
-        sol=sol,
-        tids=candidate_tids or [tid],
-        instance=instance,
-        config=config,
-    )[int(tid)]
-
-
-def compute_insert_candidate_features(
-    sol: AssignmentSolution,
-    tid: int,
-    aid: int,
-    pos: int,
-    instance: Instance,
-    config: Config,
-    *,
-    candidate_positions: Optional[Sequence[InsertPosition]] = None,
-) -> InsertCandidateFeatures:
-    """Compute normalized features for ranking one insertion move `(aid, tid, pos)`."""
-    key = InsertPosition(agent_id=int(aid), position=int(pos))
-    positions = [key] if candidate_positions is None else list(candidate_positions)
-    if not positions:
-        raise KeyError(key)
-    return compute_insert_candidate_features_batch(
-        sol=sol,
-        tid=tid,
-        positions=positions,
-        instance=instance,
-        config=config,
-    )[key]
-
-
-def compute_task_remove_features_batch(
-    sol: AssignmentSolution,
-    tids: Sequence[int],
-    instance: Instance,
-    config: Config,
-) -> Dict[int, RemoveFeatures]:
-    raw_by_tid: Dict[int, Dict[str, float]] = {}
-    assignment = _task_assignment_index(sol)
-    route_timing_cache = _build_route_timing_cache(sol, instance)
-
-    for tid in dict.fromkeys(int(x) for x in tids):
-        aid, pos = assignment[int(tid)]
-        route = sol.routes.get(aid, [])
-        task = instance.task_by_id(int(tid))
-        stop = route_timing_cache[aid][pos]
-        raw_by_tid[int(tid)] = {
-            "priority": float(task.priority),
-            "tw_tightness": -_window_width(task),
-            # Local time-window pressure for assigned tasks: low slack or current
-            # tardiness means the route segment is fragile around this task.
-            "violation_risk": _risk_from_slack(stop.slack, stop.tardiness),
-            "energy_pressure": _remove_energy_release(instance, config, aid, route, pos),
-            "detour_cost": _remove_distance_release(instance, config, route, pos),
-            "service_burden": float(task.service_time),
-            "feasibility_scarcity": -float(_count_basic_feasible_agents(instance, task, config)),
-            "route_instability": (float(pos) + 1.0) / max(1.0, float(len(route))),
-        }
-
-    normalized = _normalize_rows(raw_by_tid)
-    return {
-        tid: RemoveFeatures(**normalized[tid])  # type: ignore[arg-type]
-        for tid in normalized
-    }
-
-
-def compute_reinsert_task_features_batch(
-    sol: AssignmentSolution,
-    tids: Sequence[int],
-    instance: Instance,
-    config: Config,
-) -> Dict[int, ReinsertTaskFeatures]:
-    raw_by_tid: Dict[int, Dict[str, float]] = {}
-
-    for tid in dict.fromkeys(int(x) for x in tids):
-        task = instance.task_by_id(int(tid))
-        lower_bounds = _insertion_lower_bounds_for_task(sol, int(tid), instance, config)
-        if lower_bounds:
-            best_slack = max(lb.slack_lb for lb in lower_bounds)
-            best_energy = min(lb.energy_delta for lb in lower_bounds)
-            best_detour = min(lb.detour_delta for lb in lower_bounds)
-            best_instability = min(lb.affected_suffix_ratio for lb in lower_bounds)
-        else:
-            best_slack = -_BIG_M
-            best_energy = _BIG_M
-            best_detour = _BIG_M
-            best_instability = 1.0
-
-        tardiness_lb = max(0.0, -best_slack)
-        raw_by_tid[int(tid)] = {
-            "priority": float(task.priority),
-            "tw_tightness": -_window_width(task),
-            # Local feasibility pressure for an unassigned task: best reachable
-            # lower-bound slack shrinks as it becomes harder to insert soon.
-            "violation_risk": _risk_from_slack(best_slack, tardiness_lb),
-            "energy_pressure": float(best_energy),
-            "detour_cost": float(best_detour),
-            "service_burden": float(task.service_time),
-            "feasibility_scarcity": -float(_count_basic_feasible_agents(instance, task, config)),
-            # Best-case affected suffix ratio; tasks with no gentle insertion spot
-            # remain more disruptive and therefore score higher after normalization.
-            "route_instability": float(best_instability),
-        }
-
-    normalized = _normalize_rows(raw_by_tid)
-    return {
-        tid: ReinsertTaskFeatures(**normalized[tid])  # type: ignore[arg-type]
-        for tid in normalized
-    }
-
-
-def compute_insert_candidate_features_batch(
-    sol: AssignmentSolution,
-    tid: int,
-    positions: Sequence[InsertPosition],
-    instance: Instance,
-    config: Config,
-) -> Dict[InsertPosition, InsertCandidateFeatures]:
-    task = instance.task_by_id(int(tid))
-    raw_by_position: Dict[InsertPosition, Dict[str, float]] = {}
-
-    for position in dict.fromkeys(positions):
-        route = list(sol.routes.get(int(position.agent_id), []))
-        new_route = list(route)
-        new_route.insert(int(position.position), int(tid))
-        route_states = _simulate_route(instance, int(position.agent_id), new_route)
-
-        affected = route_states[int(position.position):]
-        min_slack = min((state.slack for state in affected), default=task.tw_end - task.tw_start)
-        tardiness_total = sum(state.tardiness for state in affected)
-
-        raw_by_position[position] = {
-            "priority": float(task.priority),
-            "tw_tightness": -_window_width(task),
-            # Candidate-action feasibility pressure is measured on the impacted
-            # suffix after insertion, using minimum slack plus realized tardiness.
-            "violation_risk": _risk_from_slack(min_slack, tardiness_total),
-            "energy_pressure": _insert_energy_delta(
-                instance=instance,
-                config=config,
-                aid=int(position.agent_id),
-                route=route,
-                insert_pos=int(position.position),
-                task=task,
-            ),
-            "detour_cost": _insert_distance_delta(
-                instance=instance,
-                config=config,
-                aid=int(position.agent_id),
-                route=route,
-                insert_pos=int(position.position),
-                task=task,
-            ),
-            "service_burden": float(task.service_time),
-            "feasibility_scarcity": -float(_count_basic_feasible_agents(instance, task, config)),
-            "route_instability": _affected_suffix_ratio(route, int(position.position)),
-        }
-
-    normalized = _normalize_rows(raw_by_position)
-    return {
-        key: InsertCandidateFeatures(**normalized[key])  # type: ignore[arg-type]
-        for key in normalized
-    }
 
 
 def basic_insertion_feasibility_filter(
@@ -493,23 +286,6 @@ def _route_timewindow_bounds(
     return earliest, latest, feasible
 
 
-def _insertion_lower_bounds_for_task(
-    sol: AssignmentSolution,
-    tid: int,
-    instance: Instance,
-    config: Config,
-) -> List[_InsertionLowerBound]:
-    return list(
-        _lower_bounds_by_position(
-            sol=sol,
-            tid=tid,
-            positions=enumerate_filtered_insert_positions(sol, tid, instance, config),
-            instance=instance,
-            config=config,
-        ).values()
-    )
-
-
 def _lower_bounds_by_position(
     sol: AssignmentSolution,
     tid: int,
@@ -581,46 +357,6 @@ def _agent_basic_reach(instance: Instance, agent: Agent, task: Task) -> bool:
     return earliest_start <= float(task.tw_end) + _EPS
 
 
-def _count_basic_feasible_agents(instance: Instance, task: Task, config: Config) -> int:
-    count = 0
-    for agent in instance.agents:
-        if not _agent_can_do_task(agent, task):
-            continue
-        if not _agent_basic_reach(instance, agent, task):
-            continue
-        count += 1
-    return count
-
-
-def _risk_from_slack(slack: float, tardiness: float) -> float:
-    """Convert slack/tardiness into a monotone local feasibility-pressure signal."""
-    safe_slack = max(0.0, float(slack))
-    return float(tardiness) + (1.0 / (1.0 + safe_slack))
-
-
-def _window_width(task: Task) -> float:
-    return max(0.0, float(task.tw_end) - float(task.tw_start))
-
-
-def _remove_distance_release(instance: Instance, config: Config, route: Sequence[int], position: int) -> float:
-    task = instance.task_by_id(int(route[int(position)]))
-    prev_loc, next_loc = _removal_neighbor_locs(instance, config, route, int(position))
-    kept = 0.0 if next_loc is None else float(instance.distance(prev_loc, next_loc))
-    removed = float(instance.distance(prev_loc, task.loc)) + (0.0 if next_loc is None else float(instance.distance(task.loc, next_loc)))
-    return removed - kept
-
-
-def _remove_energy_release(instance: Instance, config: Config, aid: int, route: Sequence[int], position: int) -> float:
-    agent = instance.agent_by_id(int(aid))
-    task = instance.task_by_id(int(route[int(position)]))
-    prev_loc, next_loc = _removal_neighbor_locs(instance, config, route, int(position))
-    kept = 0.0 if next_loc is None else _travel_energy(config, instance, agent, prev_loc, next_loc)
-    removed = _travel_energy(config, instance, agent, prev_loc, task.loc) + (
-        0.0 if next_loc is None else _travel_energy(config, instance, agent, task.loc, next_loc)
-    )
-    return removed - kept
-
-
 def _insert_distance_delta(
     instance: Instance,
     config: Config,
@@ -671,22 +407,6 @@ def _insertion_neighbor_locs(
     return prev_loc, next_loc
 
 
-def _removal_neighbor_locs(
-    instance: Instance,
-    config: Config,
-    route: Sequence[int],
-    position: int,
-) -> Tuple[Location, Optional[Location]]:
-    prev_loc = instance.depot.loc if int(position) <= 0 else instance.task_by_id(int(route[int(position) - 1])).loc
-    if int(position) + 1 < len(route):
-        next_loc: Optional[Location] = instance.task_by_id(int(route[int(position) + 1])).loc
-    elif bool(config.eval.include_depot_legs):
-        next_loc = instance.depot.loc
-    else:
-        next_loc = None
-    return prev_loc, next_loc
-
-
 def _affected_suffix_ratio(route: Sequence[int], insert_pos: int) -> float:
     return float(len(route) - int(insert_pos) + 1) / max(1.0, float(len(route) + 1))
 
@@ -703,32 +423,3 @@ def _service_energy(agent: Agent, task: Task) -> float:
         total += float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0))
     return total
 
-
-def _normalize_rows(rows: Mapping[_T, Mapping[str, float]]) -> Dict[_T, Dict[str, float]]:
-    """Min-max normalize each metric on the current candidate set.
-
-    This keeps the weighted sum dimensionless and avoids mixing raw distances,
-    energies, times, and counts directly.
-    """
-    if not rows:
-        return {}
-
-    mins: Dict[str, float] = {}
-    maxs: Dict[str, float] = {}
-    for name in METRIC_FIELDS:
-        values = [float(row[name]) for row in rows.values()]
-        mins[name] = min(values)
-        maxs[name] = max(values)
-
-    normalized: Dict[_T, Dict[str, float]] = {}
-    for key, row in rows.items():
-        current: Dict[str, float] = {}
-        for name in METRIC_FIELDS:
-            lo = mins[name]
-            hi = maxs[name]
-            if hi - lo <= _EPS:
-                current[name] = 0.0
-            else:
-                current[name] = max(0.0, min(1.0, (float(row[name]) - lo) / (hi - lo)))
-        normalized[key] = current
-    return normalized

@@ -1,3 +1,10 @@
 
 # macOS system files
 .DS_Store
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+runs/
+sar_alloc/data/runs/

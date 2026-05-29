@@ -1,99 +1,81 @@
-"""JSON schema snippets used in prompts and action validation."""
+"""Prompt schema text and validation constants for LLM outputs."""
 
 from __future__ import annotations
 
 from .operators import (
     ACCEPTANCE_MODES,
     DESTROY_CANDIDATE_GENERATORS,
-    METRIC_FIELDS,
-    METRIC_WEIGHT_BOUNDS,
+    LANDSCAPE_METRIC_FIELDS,
+    METRIC_DIRECTIONS,
     OPERATOR_PRIOR_BOUNDS,
     POLICY_BOUNDS,
+    REPAIR_POSITION_METRIC_FIELDS,
     REPAIR_TASK_SELECTORS,
+    SEARCH_DIAGNOSIS_FIELDS,
 )
 
 
+def _csv(values: object) -> str:
+    return ", ".join(f"`{value}`" for value in values)
+
+
+def _range(name: str) -> str:
+    lower, upper = POLICY_BOUNDS[name]
+    return f"[{lower}, {upper}]"
+
+
+def _metric_preference_schema(fields: object) -> str:
+    lines = []
+    for name in fields:
+        lines.append(f'  "{name}": {{"score": 0-10 integer, "direction": one of {_csv(METRIC_DIRECTIONS)}}}')
+    return "{\n" + ",\n".join(lines) + "\n}"
+
+
 OBJECTIVE_LAYER_SCHEMA = """{
-  "rationale": "short string explaining why these layers match the user goal",
+  "rationale": "short string",
   "layers": [
-    {
-      "name": "feasibility",
-      "metric": "...",
-      "direction": "min|max"
-    }
+    {"name": "feasibility", "metric": "violation_total", "direction": "min"}
   ]
-}"""
+}
+Constraints: no extra fields; direction is "min" or "max"; first metric must be violation_total."""
 
 
-NEXT_ACTION_SCHEMA = """{
-  "rationale": "short string explaining why this is the best next action now",
-  "// operator_intent semantics": "required for every action_type; split remove / reinsert / insert before setting numeric controls",
-  "operator_intent": {
-    "remove": "short phrase, under 12 words: what assigned tasks are most useful to remove now",
-    "reinsert": "short phrase, under 12 words: what unassigned tasks should be reconsidered earlier now",
-    "insert": "short phrase, under 12 words: what insertion positions are most promising to try first now"
-  },
-  "action_type": "build_initial_solution|run_alns|stop",
-  "action_payload": {},
-  "// build_initial_solution payload": {},
-  "// run_alns payload": {
-    "destroy_generator_priors": {
-      "global_assigned": "number in [0.10, 5.0]",
-      "random_subset": "number in [0.10, 5.0]",
-      "route_segment": "number in [0.10, 5.0]",
-      "route_tail": "number in [0.10, 5.0]",
-      "single_route": "number in [0.10, 5.0]"
-    },
-    "// repair task semantics": "task score only decides which task to repair next",
-    "repair_task_selector_priors": {
-      "weighted_priority_order": "number in [0.10, 5.0]",
-      "regret2_order": "number in [0.10, 5.0]"
-    },
-    "// remove_metric_weights": "ranks destroy removal candidates",
-    "remove_metric_weights": {
-      "priority": "number in [0, 5]",
-      "tw_tightness": "number in [0, 5]",
-      "violation_risk": "number in [0, 8]",
-      "energy_pressure": "number in [0, 5]",
-      "detour_cost": "number in [0, 5]",
-      "service_burden": "number in [0, 5]",
-      "feasibility_scarcity": "number in [0, 5]",
-      "route_instability": "number in [0, 3]"
-    },
-    "// reinsert_metric_weights": "ranks unassigned tasks for repair order",
-    "reinsert_metric_weights": {
-      "priority": "number in [0, 5]",
-      "tw_tightness": "number in [0, 5]",
-      "violation_risk": "number in [0, 8]",
-      "energy_pressure": "number in [0, 5]",
-      "detour_cost": "number in [0, 5]",
-      "service_burden": "number in [0, 5]",
-      "feasibility_scarcity": "number in [0, 5]",
-      "route_instability": "number in [0, 3]"
-    },
-    "// insert_metric_weights": "ranks candidate insertion positions for a chosen task",
-    "insert_metric_weights": {
-      "priority": "number in [0, 5]",
-      "tw_tightness": "number in [0, 5]",
-      "violation_risk": "number in [0, 8]",
-      "energy_pressure": "number in [0, 5]",
-      "detour_cost": "number in [0, 5]",
-      "service_burden": "number in [0, 5]",
-      "feasibility_scarcity": "number in [0, 5]",
-      "route_instability": "number in [0, 3]"
-    },
-    "strength_ratio": "number in [0.02, 0.40]",
-    "acceptance": "greedy|threshold|sa",
-    "accept_level": "number in [0, 1]",
-    "reaction_factor": "number in [0.05, 0.40]",
-    "prior_mix_lambda": "number in [0.20, 0.35]"
-  },
-  "// stop payload": {},
-  "budget_request": {
-    "time_limit_sec": "required positive number for run_alns",
-    "max_iters": "optional positive integer"
-  }
-}"""
+NEXT_ACTION_SCHEMA = f"""Return only JSON. Required top-level fields:
+- rationale: short string
+- operator_intent: {{"remove": "<=12 words", "reinsert": "<=12 words", "insert": "<=12 words"}}
+- action_type: one of {_csv(("build_initial_solution", "run_alns", "stop"))}
+- action_payload: object
+- budget_request: object
+
+For build_initial_solution or stop:
+- action_payload must be {{}}
+
+For run_alns, action_payload must contain exactly:
+- search_diagnosis_scores: keys {_csv(SEARCH_DIAGNOSIS_FIELDS)}, each a 0-10 integer
+- destroy_operator_scores: keys {_csv(DESTROY_CANDIDATE_GENERATORS)}, each a 0-10 integer
+- repair_operator_scores: keys {_csv(REPAIR_TASK_SELECTORS)}, each a 0-10 integer
+- destroy_metric_preferences: all landscape metrics with bound preference objects:
+{_metric_preference_schema(LANDSCAPE_METRIC_FIELDS)}
+- repair_task_metric_preferences: all landscape metrics with bound preference objects:
+{_metric_preference_schema(LANDSCAPE_METRIC_FIELDS)}
+- repair_position_metric_preferences: all position metrics with bound preference objects:
+{_metric_preference_schema(REPAIR_POSITION_METRIC_FIELDS)}
+- destroy_strength_score: 0-10 integer
+- candidate_budget_score: 0-10 integer
+- exploration_score: 0-10 integer
+- acceptance: one of {_csv(ACCEPTANCE_MODES)}
+- accept_level: number in {_range("accept_level")}
+- reaction_factor: number in {_range("reaction_factor")}
+- prior_mix_lambda: number in {_range("prior_mix_lambda")}
+
+Rules:
+- Do not output raw continuous metric weights.
+- Metric preferences must bind score and direction inside each metric object.
+- Operator score maps must cover every candidate operator exactly.
+- Metric preference maps must cover every metric exactly.
+- Old ALNS policy fields are invalid.
+- For run_alns, budget_request.time_limit_sec is required and positive; budget_request.max_iters is optional positive integer.
+- No extra fields."""
 
 
 SCHEMA_CONSTRAINTS = {
@@ -105,17 +87,15 @@ SCHEMA_CONSTRAINTS = {
         ],
         "operator_intent_fields": ["remove", "reinsert", "insert"],
         "operator_intent_max_words": 12,
-        "destroy_generator_priors": list(DESTROY_CANDIDATE_GENERATORS),
-        "repair_task_selector_priors": list(REPAIR_TASK_SELECTORS),
+        "search_diagnosis_scores": list(SEARCH_DIAGNOSIS_FIELDS),
+        "destroy_operator_scores": list(DESTROY_CANDIDATE_GENERATORS),
+        "repair_operator_scores": list(REPAIR_TASK_SELECTORS),
+        "landscape_metric_fields": list(LANDSCAPE_METRIC_FIELDS),
+        "repair_position_metric_fields": list(REPAIR_POSITION_METRIC_FIELDS),
+        "metric_directions": list(METRIC_DIRECTIONS),
+        "score_bounds": {"lower": 0, "upper": 10},
         "acceptance": list(ACCEPTANCE_MODES),
-        "metric_weight_maps": [
-            "remove_metric_weights",
-            "reinsert_metric_weights",
-            "insert_metric_weights",
-        ],
-        "metric_fields": list(METRIC_FIELDS),
     },
-    "metric_weight_bounds": dict(METRIC_WEIGHT_BOUNDS),
     "operator_prior_bounds": {
         "lower": OPERATOR_PRIOR_BOUNDS[0],
         "upper": OPERATOR_PRIOR_BOUNDS[1],

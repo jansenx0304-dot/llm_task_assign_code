@@ -1,4 +1,4 @@
-"""Prompt templates for the LLM orchestrator."""
+"""Compact prompt templates for the LLM orchestrator."""
 
 from __future__ import annotations
 
@@ -6,12 +6,15 @@ import json
 from typing import Iterable
 
 
+SYSTEM_PROMPT = (
+    "You control a multi-agent task-assignment optimizer. "
+    "Return exactly one JSON object matching the requested schema. "
+    "No markdown, no prose outside JSON, no extra fields."
+)
+
+
 def get_system_prompt() -> str:
-    return (
-        "You are an optimization expert for multi-agent task assignment. "
-        "Return strict JSON only and never emit fields outside the requested schema. "
-        "Always include the requested `rationale` field as a concise string."
-    )
+    return SYSTEM_PROMPT
 
 
 def get_objective_layer_prompt(
@@ -19,25 +22,25 @@ def get_objective_layer_prompt(
     available_metrics: str,
     json_schema: str,
 ) -> str:
+    payload = {
+        "user_goal": user_goal_text,
+        "available_metrics": available_metrics,
+    }
+
     return f"""
-You are defining the locked lexicographic objective for a closed-loop optimization controller.
+TASK: choose a locked lexicographic objective.
 
-Inputs:
-- User goal: {user_goal_text}
-- Available metrics:
-{available_metrics}
-- Output schema:
+RULES:
+- First layer must be violation_total with direction=min.
+- Use only available metric names.
+- At most 5 layers; avoid redundant layers.
+- Earlier layers strictly dominate later layers.
+
+INPUT:
+{_json(payload)}
+
+OUTPUT SCHEMA:
 {json_schema}
-
-Rules:
-- Feasibility must be the first layer and use `violation_total`.
-- Use only provided metric names exactly as written.
-- Use at most 5 layers.
-- Prefer a minimal, non-redundant objective.
-- Earlier layers must strictly dominate later layers.
-- Include `rationale` as a concise explanation of why these layers match the user goal.
-
-Return JSON only.
 """.strip()
 
 
@@ -49,93 +52,72 @@ def get_next_action_prompt(
     current_incumbent_metrics: object,
     delta_from_prev_incumbent: object,
     search_progress: object,
+    destroy_landscape: object,
     remaining_budget: object,
     allowed_actions: Iterable[str],
     json_schema: str,
+    repair_landscape: dict | None = None,
 ) -> str:
-    allowed = list(str(x) for x in allowed_actions)
+    context = {
+        "user_goal": user_goal_text,
+        "locked_objective_layers": objective_layers,
+        "instance_summary": instance_summary,
+        "current_search_state": current_search_state,
+        "current_incumbent_metrics": current_incumbent_metrics,
+        "delta_from_previous_incumbent": delta_from_prev_incumbent,
+        "search_progress": search_progress,
+        "destroy_landscape": destroy_landscape,
+        "repair_landscape": repair_landscape or {},
+        "remaining_budget": remaining_budget,
+        "allowed_actions": list(str(x) for x in allowed_actions),
+    }
+
     return f"""
-You are the controller of a closed-loop optimization process for multi-agent task assignment.
+TASK: choose the next controller action.
 
-The lexicographic objective is already locked.
-Earlier objective layers strictly dominate later layers.
+DECISION RULES:
+- Choose exactly one action_type from allowed_actions.
+- Do not change or reinterpret locked_objective_layers.
+- Lexicographic rule: never trade a worse earlier layer for a better later layer.
+- If no incumbent exists, choose build_initial_solution.
+- Choose stop only when progress is exhausted or remaining budget is too small.
+- For run_alns, give a complete policy and a positive budget_request.time_limit_sec not exceeding remaining_budget.
 
-Inputs:
-- User goal:
-{_render_block(user_goal_text)}
+ALNS POLICY ROLES:
+- operator_intent.remove: assigned tasks worth removing.
+- operator_intent.reinsert: unassigned tasks to reconsider earlier.
+- operator_intent.insert: insertion positions worth trying first.
+- Each intent phrase must be short and different.
+- Use integer scores from 0 to 10.
+- Do not output raw continuous metric weights.
+- For metric preferences, bind score and direction inside each metric object.
+- prefer_high means candidates with larger metric values are preferred.
+- prefer_low means candidates with smaller metric values are preferred.
+- avoid_high means high values are risky and should be actively avoided.
+- neutral means the metric should have no strong effect.
+- destroy_operator_scores bias the sampling of destroy operators.
+- destroy_metric_preferences rank complete destroy moves after a destroy operator has generated structurally valid moves.
+- critical_block_removal always removes a continuous route block.
+- route_rebalance_removal always removes a whole route within the destroy strength range.
+- repair_operator_scores bias sampling among five repair operators:
+  feasible_greedy_repair fast low-cost feasible repair;
+  scarcity_first_repair prioritizes tasks with few feasible positions;
+  regret_k_repair prioritizes high opportunity-loss tasks;
+  bottleneck_targeted_repair targets the strongest non-neutral repair task metric;
+  diversified_random_repair increases diversity when progress stagnates.
+- repair_task_metric_preferences rank which removed task should be repaired first.
+- repair_position_metric_preferences rank insertion positions.
+- Use score variation: avoid assigning the same score to every operator.
+- The solver compares feasible complete solutions; do not reason about infeasible repair.
+- Use scores to bias operator sampling; do not select one deterministic operator.
 
-- Locked objective layers:
-{_render_block(objective_layers)}
+CONTEXT:
+{_json(context)}
 
-- Instance summary:
-{_render_block(instance_summary)}
-
-- Current search state:
-{_render_block(current_search_state)}
-
-- Current incumbent metrics:
-{_render_block(current_incumbent_metrics)}
-
-- Delta from previous incumbent:
-{_render_block(delta_from_prev_incumbent)}
-
-- Search progress summary:
-{_render_block(search_progress)}
-
-- Remaining budget:
-{_render_block(remaining_budget)}
-
-- Allowed actions:
-{_render_block(allowed)}
-
-ALNS control semantics:
-- Before setting numeric controls, first decide three operator intents: `remove`, `reinsert`, `insert`.
-- `operator_intent.remove` describes what kind of already-assigned tasks are most useful to remove now.
-- `operator_intent.reinsert` describes what kind of unassigned tasks should be reconsidered earlier now.
-- `operator_intent.insert` describes what kind of insertion positions are most promising to try first now.
-- Each intent must be a very short phrase.
-- Each phrase must be under 12 words.
-- Do not make the three intents say the same thing.
-- Do not provide long explanations.
-- Destroy operators are sampled from the full destroy pool using positive prior weights; do not choose a single destroy operator.
-- Repair task selectors are sampled from the full repair-task pool using positive prior weights; do not choose a single repair task selector.
-- These are three separate metric profiles for three operator-level decisions, not one global preference.
-- `remove_metric_weights` rank removal candidates only.
-- `reinsert_metric_weights` rank unassigned tasks only.
-- `insert_metric_weights` rank insertion positions only.
-- Weak answers have poor operator-role separation.
-- Avoid answers where `remove` / `reinsert` / `insert` mean nearly the same thing.
-- Avoid making all three metric profiles nearly identical.
-- Avoid uniformly high weights everywhere.
-- Use only these metric names exactly as provided:
-  `priority`, `tw_tightness`, `violation_risk`, `energy_pressure`,
-  `detour_cost`, `service_burden`, `feasibility_scarcity`, `route_instability`.
-- Do not invent metrics, operators, enums, or extra fields.
-
-Decision rules:
-1. Choose exactly one action from `allowed_actions`.
-2. Never rewrite or reinterpret the locked objective.
-3. Never accept a worse unresolved higher-priority layer in exchange for a better lower-priority layer.
-4. Base the decision mainly on current incumbent metrics, recent deltas, progress signals, and remaining budget.
-5. Request budget only for the next action and never exceed `remaining_budget`.
-6. If `action_type` is `run_alns`, `budget_request.time_limit_sec` is required and must be positive. `budget_request.max_iters` is optional.
-7. Prefer `stop` only when progress is clearly exhausted or the remaining budget is too small for a meaningful next step.
-8. If no incumbent exists, prefer `build_initial_solution`.
-9. When selecting `run_alns`, use the policy fields to express a search bias, not a hard deterministic choice.
-
-Output requirements:
-- Output exactly one JSON object.
-- No prose outside the JSON.
-- Always include `rationale` as a concise explanation of why this is the best next action now.
-- `operator_intent` is required.
-- Always include top-level `operator_intent`.
-- Keep `rationale` grounded in the incumbent metrics, recent progress, and remaining budget.
-- Follow this schema exactly:
+OUTPUT SCHEMA:
 {json_schema}
 """.strip()
 
 
-def _render_block(value: object) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    return json.dumps(value, ensure_ascii=True, indent=2)
+def _json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)

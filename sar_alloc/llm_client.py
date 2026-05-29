@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from .demo_policy import (
+    demo_build_initial_action,
+    demo_objective_plan,
+    demo_run_alns_action,
+    demo_stop_action,
+)
+
+
+class LLMClientError(RuntimeError):
+    """Raised when an LLM client cannot be configured or called."""
 
 
 class BaseLLMClient:
-    """Minimal client contract used by the orchestrator."""
+    """Minimal chat interface used by the orchestrator."""
 
     def chat(
         self,
@@ -23,132 +31,182 @@ class BaseLLMClient:
         raise NotImplementedError
 
 
+def _env(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
 @dataclass(slots=True)
 class OpenAICompatClient(BaseLLMClient):
-    """
-    Minimal OpenAI-compatible Chat Completions client.
-    - base_url may point to either the API root or the /v1 prefix
-    - api_key is sent as a bearer token
-    - model is passed through verbatim
-    """
-
     base_url: str
     api_key: str
     model: str
 
-    def _endpoint(self) -> str:
-        url = self.base_url.rstrip("/")
-        if not url.endswith("/v1"):
-            url += "/v1"
-        return url + "/chat/completions"
+    def __post_init__(self) -> None:
+        if not self.base_url:
+            raise ValueError("Missing LLM_BASE_URL.")
+        if not self.api_key:
+            raise ValueError("Missing LLM_API_KEY.")
+        if not self.model:
+            raise ValueError("Missing LLM_MODEL.")
+
+        try:
+            from openai import OpenAI  # type: ignore
+        except ImportError as exc:
+            raise LLMClientError(
+                "The 'openai' package is required for real LLM calls."
+            ) from exc
+
+        # The caller owns the exact endpoint. This client does not append /v1,
+        # rewrite URLs, or fall back to any other provider.
+        self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def chat(
         self,
         messages: List[Dict[str, str]],
         *,
         temperature: float = 0.2,
-        max_tokens: int = 1024,
-        timeout_sec: float = 60.0,
+        max_tokens: int = 4096,
+        timeout_sec: float = 30.0,
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
-        payload: Dict[str, Any] = {
+        """Call an OpenAI-compatible chat-completions endpoint.
+
+        Args:
+            messages: Chat messages with string `role` and `content` fields.
+            temperature: Sampling temperature passed through to the provider.
+            max_tokens: Maximum generated tokens.
+            timeout_sec: Request timeout in seconds.
+            extra: Optional provider-specific request fields.
+
+        Returns:
+            The model response text.
+
+        Raises:
+            LLMClientError: If the provider call fails or returns non-text
+                content. The error includes the configured model and base URL.
+        """
+        for index, message in enumerate(messages):
+            if not isinstance(message.get("content"), str):
+                raise LLMClientError(
+                    f"LLM request message[{index}].content must be a string."
+                )
+
+        kwargs: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": float(temperature),
-            "max_tokens": int(max_tokens),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout": timeout_sec,
         }
-        if extra:
-            payload.update(extra)
-
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            self._endpoint(),
-            data=data,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-        )
+        if extra is not None:
+            kwargs.update(extra)
 
         try:
-            with urllib.request.urlopen(req, timeout=float(timeout_sec)) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-            obj = json.loads(raw)
+            response = self._client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            raise LLMClientError(
+                f"LLM request failed. model={self.model}, "
+                f"base_url={self.base_url}, error={exc}"
+            ) from exc
 
-            choices = obj.get("choices", [])
-            if choices:
-                msg = choices[0].get("message", {})
-                content = msg.get("content", "")
-                if content:
-                    return str(content)
+        if not response.choices:
+            raise LLMClientError(
+                f"LLM response has no choices. model={self.model}, "
+                f"base_url={self.base_url}"
+            )
 
-                text = choices[0].get("text", "")
-                if text:
-                    return str(text)
-
-            return ""
-
-        except urllib.error.HTTPError as e:
-            body = ""
-            try:
-                body = e.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
-            raise RuntimeError(f"LLM HTTPError {e.code}: {body}") from e
-
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"LLM URLError: {e}") from e
-
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"LLM JSONDecodeError: {e}") from e
+        content = response.choices[0].message.content
+        if not isinstance(content, str):
+            raise LLMClientError(
+                f"LLM response content is not a string. model={self.model}, "
+                f"base_url={self.base_url}, content_type={type(content).__name__}"
+            )
+        return content
 
 
 @dataclass(slots=True)
 class DummyLLMClient(BaseLLMClient):
-    """
-    Minimal dummy client for local debugging.
-    - echo returns the last user message
-    - fixed returns a constant string
-    """
+    """Deterministic local client that emits demo policy JSON only."""
 
-    mode: str = "echo"
+    _action_calls: int = field(default=0, init=False)
 
     def chat(
         self,
         messages: List[Dict[str, str]],
         *,
         temperature: float = 0.0,
-        max_tokens: int = 256,
+        max_tokens: int = 4096,
         timeout_sec: float = 1.0,
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
-        last_user = ""
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                last_user = m.get("content", "") or ""
-                break
-        if self.mode == "fixed":
-            return "OK"
-        return last_user
+        """Return a fixed demo objective/action for smoke testing.
+
+        Dummy mode never reads real LLM configuration and never imports the
+        OpenAI SDK. It is intentionally labeled as a demo policy source in
+        runner/orchestrator logs.
+        """
+        if not messages:
+            raise LLMClientError("DummyLLMClient requires at least one message.")
+        prompt = messages[-1].get("content")
+        if not isinstance(prompt, str):
+            raise LLMClientError("DummyLLMClient requires string message content.")
+
+        import json
+
+        if "choose a locked lexicographic objective" in prompt:
+            return json.dumps(demo_objective_plan(), ensure_ascii=True)
+
+        if self._action_calls == 0:
+            self._action_calls += 1
+            return json.dumps(demo_build_initial_action(), ensure_ascii=True)
+        if self._action_calls == 1:
+            self._action_calls += 1
+            return json.dumps(demo_run_alns_action(), ensure_ascii=True)
+        self._action_calls += 1
+        return json.dumps(demo_stop_action(), ensure_ascii=True)
 
 
 def build_llm_client(
     *,
     dummy: bool = False,
-    dummy_mode: str = "echo",
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> BaseLLMClient:
+    """Build the LLM client used by the command-line runner.
+
+    Args:
+        dummy: When true, return `DummyLLMClient` without reading real LLM
+            environment variables and without importing `openai`.
+        base_url: Explicit endpoint override. If omitted, `LLM_BASE_URL` is
+            read from the environment.
+        api_key: Explicit API key override. If omitted, `LLM_API_KEY` is read.
+        model: Explicit model override. If omitted, `LLM_MODEL` is read.
+
+    Returns:
+        A dummy or OpenAI-compatible client.
+
+    Raises:
+        ValueError: If real mode is selected and any required connection field
+            is missing.
+        LLMClientError: If the OpenAI SDK is unavailable in real mode.
+    """
     if dummy:
-        return DummyLLMClient(mode=dummy_mode)
+        return DummyLLMClient()
 
-    b = (base_url or os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")).strip()
-    k = (api_key or os.getenv("LLM_API_KEY", "sk-bbbf4830a5c54c6cac916c666c24027d")).strip()
-    m = (model or os.getenv("LLM_MODEL", "deepseek-chat")).strip()
+    final_base_url = base_url.strip() if isinstance(base_url, str) else _env("LLM_BASE_URL")
+    final_api_key = api_key.strip() if isinstance(api_key, str) else _env("LLM_API_KEY")
+    final_model = model.strip() if isinstance(model, str) else _env("LLM_MODEL")
 
-    if not (b and k and m):
-        raise ValueError("Missing LLM config: need base_url/api_key/model (or env LLM_BASE_URL/LLM_API_KEY/LLM_MODEL).")
+    if not final_base_url:
+        raise ValueError("Missing LLM_BASE_URL.")
+    if not final_api_key:
+        raise ValueError("Missing LLM_API_KEY.")
+    if not final_model:
+        raise ValueError("Missing LLM_MODEL.")
 
-    return OpenAICompatClient(base_url=b, api_key=k, model=m)
+    return OpenAICompatClient(
+        base_url=final_base_url,
+        api_key=final_api_key,
+        model=final_model,
+    )

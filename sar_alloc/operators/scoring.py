@@ -1,63 +1,46 @@
 from __future__ import annotations
 
-"""Centralized scoring functions for weighted ALNS operators.
+"""Shared score conversions for LLM-guided ALNS metrics and operators."""
 
-Destroy removal, repair task ordering, and insertion-position ranking each use
-their own metric profile, but the metric definitions stay aligned.
-"""
+from typing import Mapping
 
-from .types import InsertCandidateFeatures, MetricWeights, ReinsertTaskFeatures, RemoveFeatures
+from .types import OPERATOR_PRIOR_BOUNDS, MetricPreference
 
 
-def score_remove_features(features: RemoveFeatures, weights: MetricWeights) -> float:
-    """Higher is better for removal priority.
+def direction_sign(direction: str) -> float:
+    if direction == "prefer_high":
+        return 1.0
+    if direction == "prefer_low":
+        return -1.0
+    if direction == "avoid_high":
+        return -1.0
+    if direction == "neutral":
+        return 0.0
+    raise ValueError(f"illegal metric direction: {direction}")
 
-    `priority` is inverted here so low-priority assigned tasks are easier to tear down.
-    Every other feature is aligned so that larger normalized values mean higher
-    removal pressure.
-    """
-    return (
-        float(weights.priority) * (1.0 - float(features.priority))
-        + float(weights.tw_tightness) * float(features.tw_tightness)
-        + float(weights.violation_risk) * float(features.violation_risk)
-        + float(weights.energy_pressure) * float(features.energy_pressure)
-        + float(weights.detour_cost) * float(features.detour_cost)
-        + float(weights.service_burden) * float(features.service_burden)
-        + float(weights.feasibility_scarcity) * float(features.feasibility_scarcity)
-        + float(weights.route_instability) * float(features.route_instability)
+
+def score_metric_preferences(
+    features: Mapping[str, float],
+    preferences: Mapping[str, MetricPreference],
+) -> float:
+    denom = sum(
+        abs(int(pref.score))
+        for pref in preferences.values()
+        if str(pref.direction) != "neutral"
     )
+    if denom <= 0:
+        return 0.0
+    total = 0.0
+    for name, pref in preferences.items():
+        sign = direction_sign(str(pref.direction))
+        total += sign * float(pref.score) / float(denom) * float(features[name])
+    return float(total)
 
 
-def score_reinsert_task_features(features: ReinsertTaskFeatures, weights: MetricWeights) -> float:
-    """Higher is better for choosing which unassigned task to reinsert next.
-
-    This score never chooses the final insertion position.
-    """
-    return (
-        float(weights.priority) * float(features.priority)
-        + float(weights.tw_tightness) * float(features.tw_tightness)
-        + float(weights.violation_risk) * float(features.violation_risk)
-        + float(weights.energy_pressure) * float(features.energy_pressure)
-        + float(weights.detour_cost) * float(features.detour_cost)
-        + float(weights.service_burden) * float(features.service_burden)
-        + float(weights.feasibility_scarcity) * float(features.feasibility_scarcity)
-        + float(weights.route_instability) * float(features.route_instability)
-    )
+def operator_score_to_prior(score: int) -> float:
+    lower, upper = OPERATOR_PRIOR_BOUNDS
+    return lower + (float(score) / 10.0) * (upper - lower)
 
 
-def score_insert_candidate_features(features: InsertCandidateFeatures, weights: MetricWeights) -> float:
-    """Lower is better for an insertion action.
-
-    This is the primary ranking signal for filtered insertion positions.
-    Strict evaluation only certifies feasibility after ranking.
-    """
-    return (
-        float(weights.priority) * (1.0 - float(features.priority))
-        + float(weights.tw_tightness) * float(features.tw_tightness)
-        + float(weights.violation_risk) * float(features.violation_risk)
-        + float(weights.energy_pressure) * float(features.energy_pressure)
-        + float(weights.detour_cost) * float(features.detour_cost)
-        + float(weights.service_burden) * float(features.service_burden)
-        + float(weights.feasibility_scarcity) * float(features.feasibility_scarcity)
-        + float(weights.route_instability) * float(features.route_instability)
-    )
+def score_to_range(score: int, lower: float, upper: float) -> float:
+    return float(lower) + (float(score) / 10.0) * (float(upper) - float(lower))
