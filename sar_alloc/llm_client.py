@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .demo_policy import (
-    demo_build_initial_action,
-    demo_objective_plan,
-    demo_run_alns_action,
-    demo_stop_action,
+    demo_solver_decision,
+    demo_supervisor_kickoff,
+    demo_supervisor_review,
 )
 
 
@@ -56,8 +56,6 @@ class OpenAICompatClient(BaseLLMClient):
                 "The 'openai' package is required for real LLM calls."
             ) from exc
 
-        # The caller owns the exact endpoint. This client does not append /v1,
-        # rewrite URLs, or fall back to any other provider.
         self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def chat(
@@ -69,22 +67,6 @@ class OpenAICompatClient(BaseLLMClient):
         timeout_sec: float = 30.0,
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Call an OpenAI-compatible chat-completions endpoint.
-
-        Args:
-            messages: Chat messages with string `role` and `content` fields.
-            temperature: Sampling temperature passed through to the provider.
-            max_tokens: Maximum generated tokens.
-            timeout_sec: Request timeout in seconds.
-            extra: Optional provider-specific request fields.
-
-        Returns:
-            The model response text.
-
-        Raises:
-            LLMClientError: If the provider call fails or returns non-text
-                content. The error includes the configured model and base URL.
-        """
         for index, message in enumerate(messages):
             if not isinstance(message.get("content"), str):
                 raise LLMClientError(
@@ -128,7 +110,7 @@ class OpenAICompatClient(BaseLLMClient):
 class DummyLLMClient(BaseLLMClient):
     """Deterministic local client that emits demo policy JSON only."""
 
-    _action_calls: int = field(default=0, init=False)
+    _supervisor_review_calls: int = field(default=0, init=False)
 
     def chat(
         self,
@@ -139,31 +121,38 @@ class DummyLLMClient(BaseLLMClient):
         timeout_sec: float = 1.0,
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Return a fixed demo objective/action for smoke testing.
-
-        Dummy mode never reads real LLM configuration and never imports the
-        OpenAI SDK. It is intentionally labeled as a demo policy source in
-        runner/orchestrator logs.
-        """
+        del temperature, max_tokens, timeout_sec, extra
         if not messages:
             raise LLMClientError("DummyLLMClient requires at least one message.")
         prompt = messages[-1].get("content")
         if not isinstance(prompt, str):
             raise LLMClientError("DummyLLMClient requires string message content.")
+        observation = _observation_from_prompt(prompt)
+        if "ROLE: SUPERVISOR_KICKOFF" in prompt:
+            return json.dumps(demo_supervisor_kickoff(observation), ensure_ascii=True)
+        if "ROLE: SUPERVISOR_REVIEW" in prompt:
+            self._supervisor_review_calls += 1
+            return json.dumps(
+                demo_supervisor_review(observation, stop=self._supervisor_review_calls > 1),
+                ensure_ascii=True,
+            )
+        if "ROLE: SOLVER" in prompt:
+            return json.dumps(demo_solver_decision(observation), ensure_ascii=True)
+        raise LLMClientError("DummyLLMClient received an unknown prompt role.")
 
-        import json
 
-        if "choose a locked lexicographic objective" in prompt:
-            return json.dumps(demo_objective_plan(), ensure_ascii=True)
-
-        if self._action_calls == 0:
-            self._action_calls += 1
-            return json.dumps(demo_build_initial_action(), ensure_ascii=True)
-        if self._action_calls == 1:
-            self._action_calls += 1
-            return json.dumps(demo_run_alns_action(), ensure_ascii=True)
-        self._action_calls += 1
-        return json.dumps(demo_stop_action(), ensure_ascii=True)
+def _observation_from_prompt(prompt: str) -> Dict[str, Any]:
+    marker = "CONTEXT:\n"
+    schema_marker = "\n\nOUTPUT JSON SCHEMA:"
+    if marker not in prompt or schema_marker not in prompt:
+        return {}
+    raw = prompt.split(marker, 1)[1].split(schema_marker, 1)[0]
+    try:
+        context = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    observation = context.get("observation", {}) if isinstance(context, dict) else {}
+    return observation if isinstance(observation, dict) else {}
 
 
 def build_llm_client(
@@ -173,24 +162,6 @@ def build_llm_client(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> BaseLLMClient:
-    """Build the LLM client used by the command-line runner.
-
-    Args:
-        dummy: When true, return `DummyLLMClient` without reading real LLM
-            environment variables and without importing `openai`.
-        base_url: Explicit endpoint override. If omitted, `LLM_BASE_URL` is
-            read from the environment.
-        api_key: Explicit API key override. If omitted, `LLM_API_KEY` is read.
-        model: Explicit model override. If omitted, `LLM_MODEL` is read.
-
-    Returns:
-        A dummy or OpenAI-compatible client.
-
-    Raises:
-        ValueError: If real mode is selected and any required connection field
-            is missing.
-        LLMClientError: If the OpenAI SDK is unavailable in real mode.
-    """
     if dummy:
         return DummyLLMClient()
 

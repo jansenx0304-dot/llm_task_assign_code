@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 Direction = Literal["min", "max"]
@@ -51,4 +51,4 @@ class Config:
     eval: EvaluationConfig = field(default_factory=EvaluationConfig)
     solver: SolverConfig = field(default_factory=SolverConfig)
     rng_seed: int = 0
-    extras: Dict[str, float] = field(default_factory=dict)
+    extras: Dict[str, Any] = field(default_factory=dict)

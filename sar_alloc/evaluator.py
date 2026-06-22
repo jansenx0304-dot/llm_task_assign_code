@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from .config import Config, ObjectiveLayer, ObjectivePolicy
-from .models import Agent, Instance, Task
+from .constraint_checker import check_constraints
+from .models import Instance
+from .schemas import CONSTRAINT_METRICS, QUALITY_METRICS
 from .solution import AssignmentSolution, EvalResult
 
 
@@ -16,54 +18,27 @@ def evaluate(
     config: Config,
     update_solution_schedule: bool = True,
 ) -> EvalResult:
-    """Evaluate a solution under the LLM-selected objective policy.
-
-    Args:
-        solution: Assignment solution to score.
-        instance: Task-assignment instance that defines agents, tasks, and
-            travel/energy calculations.
-        config: Run config. `config.eval.objective_policy.layers` must already
-            have been populated from a validated LLM objective plan.
-        update_solution_schedule: Whether to write the computed schedule back to
-            the solution object.
-
-    Returns:
-        An `EvalResult` containing hard-constraint violations, soft metrics, and
-        the lexicographic key used by comparisons.
-
-    Raises:
-        ValueError: If no objective layers were provided by the LLM.
-    """
     travel_energy_per_time = float(config.extras.get("travel_energy_per_time", 0.0)) > 0.5
-
-    violations: Dict[str, float] = {}
     total_distance = 0.0
     total_time = 0.0
     makespan = 0.0
     travel_energy = 0.0
     standby_energy = 0.0
     service_energy = 0.0
-    schedule = {} if update_solution_schedule else None
+    route_counts: List[float] = []
 
-    unassigned_count = len(solution.unassigned)
-    missed_priority = 0.0
-    for tid in solution.unassigned:
-        missed_priority += float(instance.task_by_id(tid).priority)
+    missed_priority = sum(float(instance.task_by_id(int(tid)).priority) for tid in solution.unassigned)
+    unassigned_count = float(len(solution.unassigned))
 
     for aid in instance.all_agent_ids():
         agent = instance.agent_by_id(aid)
-        route = solution.routes.get(aid, [])
+        route = [int(tid) for tid in solution.routes.get(aid, [])]
+        route_counts.append(float(len(route)))
         cur_loc = instance.depot.loc
         cur_time = 0.0
-        agent_energy = 0.0
 
         for tid in route:
             task = instance.task_by_id(tid)
-
-            cap_def = _capability_deficit(agent, task)
-            if cap_def > 0:
-                violations["capability"] = violations.get("capability", 0.0) + cap_def
-
             dist = instance.distance(cur_loc, task.loc)
             t_travel = instance.travel_time(agent, cur_loc, task.loc)
             total_distance += dist
@@ -72,95 +47,63 @@ def evaluate(
 
             e_travel = agent.travel_energy_rate * (t_travel if travel_energy_per_time else dist)
             travel_energy += e_travel
-            agent_energy += e_travel
 
-            arrival = cur_time
-            if arrival < task.tw_start:
-                wait = task.tw_start - arrival
+            if cur_time < task.tw_start:
+                wait = task.tw_start - cur_time
                 cur_time += wait
                 total_time += wait
-                e_wait = agent.standby_power * wait
-                standby_energy += e_wait
-                agent_energy += e_wait
+                standby_energy += agent.standby_power * wait
 
             service_start = cur_time
-            service_end = service_start + task.service_time
-            cur_time = service_end
+            cur_time = service_start + task.service_time
             total_time += task.service_time
-
-            late = max(0.0, service_start - task.tw_end)
-            if late > 0:
-                violations["time_window"] = violations.get("time_window", 0.0) + late
-
-            e_service = _service_energy(agent, task)
-            service_energy += e_service
-            agent_energy += e_service
-
-            if schedule is not None:
-                schedule[(aid, tid)] = (service_start, service_end)
+            service_energy += _service_energy(agent, task)
             cur_loc = task.loc
 
-        if config.eval.include_depot_legs and len(route) > 0:
+        if config.eval.include_depot_legs and route:
             dist_back = instance.distance(cur_loc, instance.depot.loc)
             t_back = instance.travel_time(agent, cur_loc, instance.depot.loc)
             total_distance += dist_back
             cur_time += t_back
             total_time += t_back
-            e_back = agent.travel_energy_rate * (t_back if travel_energy_per_time else dist_back)
-            travel_energy += e_back
-            agent_energy += e_back
-
-        if agent_energy - agent.init_energy > _EPS:
-            violations["energy"] = violations.get("energy", 0.0) + (agent_energy - agent.init_energy)
+            travel_energy += agent.travel_energy_rate * (t_back if travel_energy_per_time else dist_back)
 
         makespan = max(makespan, cur_time)
 
-    violation_total = sum(violations.values()) if violations else 0.0
-    total_energy = travel_energy + standby_energy + service_energy
-    metrics: Dict[str, float] = {
-        "violation_total": float(violation_total),
-        "violation_capability": float(violations.get("capability", 0.0)),
-        "violation_time_window": float(violations.get("time_window", 0.0)),
-        "violation_energy": float(violations.get("energy", 0.0)),
+    constraint_report, _ = check_constraints(
+        solution,
+        instance,
+        config,
+        update_solution_schedule=update_solution_schedule,
+    )
+    quality_metrics = {
         "missed_priority": float(missed_priority),
         "unassigned_count": float(unassigned_count),
-        "energy_total": float(total_energy),
+        "energy_total": float(travel_energy + standby_energy + service_energy),
         "total_distance": float(total_distance),
         "makespan": float(makespan),
+        "route_balance": float(_coefficient_of_variation(route_counts)),
     }
-
     ev = EvalResult(
-        is_feasible=bool(violation_total <= _EPS),
-        violations=dict(violations),
-        metrics=metrics,
-        lex_key=_build_lex_key(metrics, config),
+        quality_metrics=quality_metrics,
+        constraint_report=constraint_report,
+        lex_key=_build_lex_key(quality_metrics, config.eval.objective_policy.layers),
     )
-
-    if update_solution_schedule and schedule is not None:
-        solution.schedule = schedule
     solution.eval = ev
     return ev
 
 
-def _build_lex_key(metrics: Dict[str, float], config: Config) -> Tuple[float, ...]:
-    layers = _validated_layers(config.eval.objective_policy)
-    key_values: List[float] = []
-    for layer in layers:
-        value = metrics.get(layer.metric, 0.0)
-        if layer.direction == "max":
-            value = -value
-        key_values.append(float(value))
-    return tuple(key_values)
-
-
-def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
-    """Compare two evaluation results using the active lexicographic objective."""
-    layers = _validated_layers(config.eval.objective_policy)
-    for layer in layers:
-        va = a.get_metric(layer.metric)
-        vb = b.get_metric(layer.metric)
+def compare_quality(eval_a: EvalResult, eval_b: EvalResult, objective_layers: Iterable[Any]) -> int:
+    for layer in _normalize_layers(objective_layers):
+        metric = str(layer["metric"])
+        if metric in CONSTRAINT_METRICS:
+            raise ValueError(f"constraint metric is not allowed in quality comparison: {metric}")
+        if metric not in QUALITY_METRICS:
+            raise ValueError(f"unknown quality metric: {metric}")
+        va = float(eval_a.quality_metrics.get(metric, 0.0))
+        vb = float(eval_b.quality_metrics.get(metric, 0.0))
         diff = va - vb
-        if layer.direction == "max":
+        if str(layer["direction"]) == "max":
             diff = -diff
         if diff < -_EPS:
             return -1
@@ -169,21 +112,54 @@ def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
     return 0
 
 
-def _capability_deficit(agent: Agent, task: Task) -> float:
-    return float(len(task.skill_req - agent.skills))
+def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
+    return compare_quality(a, b, config.eval.objective_policy.layers)
 
 
-def _service_energy(agent: Agent, task: Task) -> float:
-    total_energy = 0.0
-    for skill in task.skill_req & agent.skills:
-        total_energy += task.service_time * agent.skill_energy_rate.get(skill, 1.0)
-    return total_energy
+def _build_lex_key(metrics: Dict[str, float], objective_layers: Iterable[Any]) -> Tuple[float, ...]:
+    key_values: List[float] = []
+    for layer in _normalize_layers(objective_layers):
+        metric = str(layer["metric"])
+        if metric in CONSTRAINT_METRICS:
+            raise ValueError(f"constraint metric is not allowed in objective: {metric}")
+        value = float(metrics.get(metric, 0.0))
+        if str(layer["direction"]) == "max":
+            value = -value
+        key_values.append(value)
+    return tuple(key_values)
 
 
-def _validated_layers(policy: ObjectivePolicy) -> List[ObjectiveLayer]:
-    layers = [layer for layer in policy.layers if isinstance(layer.metric, str) and layer.metric]
+def _normalize_layers(objective_layers: Iterable[Any]) -> List[Dict[str, str]]:
+    layers: List[Dict[str, str]] = []
+    for raw in objective_layers:
+        if isinstance(raw, ObjectiveLayer):
+            metric = raw.metric
+            direction = raw.direction
+        elif isinstance(raw, dict):
+            metric = str(raw.get("metric", ""))
+            direction = str(raw.get("direction", ""))
+        else:
+            metric = str(getattr(raw, "metric", ""))
+            direction = str(getattr(raw, "direction", ""))
+        if not metric:
+            continue
+        if direction not in {"min", "max"}:
+            raise ValueError(f"illegal objective direction: {direction}")
+        layers.append({"metric": metric, "direction": direction})
     if not layers:
-        raise ValueError("Objective policy has no layers. LLM objective plan is required.")
-    if len(layers) > policy.max_layers:
-        layers = layers[: policy.max_layers]
+        raise ValueError("Objective policy has no layers.")
     return layers
+
+
+def _service_energy(agent: Any, task: Any) -> float:
+    return sum(float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0)) for skill in task.skill_req & agent.skills)
+
+
+def _coefficient_of_variation(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    if abs(mean) <= _EPS:
+        return 0.0
+    var = sum((value - mean) ** 2 for value in values) / len(values)
+    return float((var ** 0.5) / mean)

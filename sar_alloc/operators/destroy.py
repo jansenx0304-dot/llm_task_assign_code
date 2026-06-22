@@ -8,25 +8,23 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from ..config import Config
+from ..constraint_checker import check_constraints
 from ..models import Instance, Location
 from ..solution import AssignmentSolution
 from .features import enumerate_filtered_insert_positions
-from .scoring import operator_score_to_prior, score_metric_preferences
 from .types import (
-    DESTROY_CANDIDATE_GENERATORS,
-    LANDSCAPE_METRIC_FIELDS,
-    REPAIR_TASK_SELECTORS,
-    SEARCH_DIAGNOSIS_FIELDS,
+    DESTROY_OPERATOR_NAMES,
+    DestroyPolicy,
     LandscapeFeatures,
-    LandscapeMetricPreferences,
-    MetricPreference,
-    PositionMetricPreferences,
-    WeightedALNSPolicy,
 )
 
 
 _EPS = 1e-9
-MAX_CANDIDATE_MOVES = 30
+LANDSCAPE_METRIC_FIELDS = (
+    "cost_pressure", "priority_loss", "scarcity_pressure", "coupling_pressure",
+    "mobility_opportunity", "route_balance_pressure", "violation_pressure",
+    "regret_pressure", "bottleneck_pressure",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +57,7 @@ class DestroyMove:
 
 
 DestroyOperator = Callable[
-    [AssignmentSolution, Instance, Config, WeightedALNSPolicy, DestroyStrength, random.Random],
+    [AssignmentSolution, Instance, Config, DestroyPolicy, DestroyStrength, random.Random],
     List[DestroyMove],
 ]
 
@@ -78,7 +76,7 @@ def enumerate_random_removal(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
     strength: DestroyStrength,
     rng: random.Random,
 ) -> List[DestroyMove]:
@@ -101,7 +99,7 @@ def enumerate_worst_task_removal(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
     strength: DestroyStrength,
     rng: random.Random,
 ) -> List[DestroyMove]:
@@ -140,7 +138,7 @@ def enumerate_related_cluster_removal(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
     strength: DestroyStrength,
     rng: random.Random,
 ) -> List[DestroyMove]:
@@ -156,7 +154,7 @@ def enumerate_related_cluster_removal(
             affected_routes=_affected_routes_for_tasks(sol, assigned),
             metadata={"target_k": int(strength.target_k), "seed_task": int(assigned[0])},
         )
-        return _top_scored_moves([move], sol, instance, config, policy)
+        return _scored_moves([move], sol, instance, config, policy)
 
     single_moves = [
         _make_move(
@@ -170,13 +168,12 @@ def enumerate_related_cluster_removal(
     ]
     seed_moves = _score_moves(single_moves, sol, instance, config, policy)
     seed_moves.sort(key=lambda move: (-float(move.score), int(move.task_ids[0])))
-    seed_limit = min(20, len(seed_moves))
     assignment = _task_assignment_index(sol)
     distance_scale = _distance_scale(instance, assigned)
     time_scale = _time_scale(instance, assigned)
 
     moves: List[DestroyMove] = []
-    for seed_move in seed_moves[:seed_limit]:
+    for seed_move in seed_moves:
         seed = int(seed_move.task_ids[0])
         related = [
             (_relatedness(seed, other, sol, instance, assignment, distance_scale, time_scale), int(other))
@@ -194,14 +191,14 @@ def enumerate_related_cluster_removal(
                 metadata={"target_k": int(strength.target_k), "seed_task": int(seed)},
             )
         )
-    return _top_scored_moves(moves, sol, instance, config, policy)
+    return _scored_moves(moves, sol, instance, config, policy)
 
 
 def enumerate_critical_block_removal(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
     strength: DestroyStrength,
     rng: random.Random,
 ) -> List[DestroyMove]:
@@ -232,14 +229,14 @@ def enumerate_critical_block_removal(
                         },
                     )
                 )
-    return _top_scored_moves(moves, sol, instance, config, policy)
+    return _scored_moves(moves, sol, instance, config, policy)
 
 
 def enumerate_route_rebalance_removal(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
     strength: DestroyStrength,
     rng: random.Random,
 ) -> List[DestroyMove]:
@@ -263,7 +260,36 @@ def enumerate_route_rebalance_removal(
                 },
             )
         )
-    return _top_scored_moves(moves, sol, instance, config, policy)
+    return _scored_moves(moves, sol, instance, config, policy)
+
+
+def enumerate_violation_removal(
+    sol: AssignmentSolution,
+    instance: Instance,
+    config: Config,
+    policy: DestroyPolicy,
+    strength: DestroyStrength,
+    rng: random.Random,
+) -> List[DestroyMove]:
+    del rng
+    report, _ = check_constraints(sol, instance, config, update_solution_schedule=False)
+    contributions = []
+    for tid_s, values in report.violation_by_task.items():
+        total = sum(float(value) for value in dict(values).values())
+        if total > _EPS:
+            contributions.append((total, int(tid_s)))
+    contributions.sort(key=lambda item: (-float(item[0]), int(item[1])))
+    if not contributions or strength.target_k <= 0:
+        return []
+    selected = tuple(tid for _, tid in contributions[: min(int(strength.target_k), len(contributions))])
+    move = _make_move(
+        operator_name="violation_removal",
+        shape="violation_task_set",
+        task_ids=selected,
+        affected_routes=_affected_routes_for_tasks(sol, selected),
+        metadata={"target_k": int(strength.target_k), "source": "constraint_report.violation_by_task"},
+    )
+    return _score_moves([move], sol, instance, config, policy)
 
 
 DESTROY_OPERATORS: Dict[str, DestroyOperator] = {
@@ -293,42 +319,17 @@ def build_destroy_landscape(
         for aid, route in sol.routes.items()
         if route
     ]
-    policy = WeightedALNSPolicy(
-        search_diagnosis_scores={name: 5 for name in SEARCH_DIAGNOSIS_FIELDS},
-        destroy_operator_scores={name: 5 for name in DESTROY_CANDIDATE_GENERATORS},
-        repair_operator_scores={name: 5 for name in REPAIR_TASK_SELECTORS},
-        destroy_metric_preferences=LandscapeMetricPreferences(
-            cost_pressure=MetricPreference(7, "prefer_high"),
-            scarcity_pressure=MetricPreference(7, "avoid_high"),
-            coupling_pressure=MetricPreference(6, "prefer_high"),
-            mobility_opportunity=MetricPreference(6, "prefer_high"),
-            balance_pressure=MetricPreference(5, "prefer_high"),
-        ),
-        repair_task_metric_preferences=LandscapeMetricPreferences(
-            cost_pressure=MetricPreference(5, "prefer_high"),
-            scarcity_pressure=MetricPreference(8, "prefer_high"),
-            coupling_pressure=MetricPreference(6, "prefer_high"),
-            mobility_opportunity=MetricPreference(4, "prefer_low"),
-            balance_pressure=MetricPreference(5, "prefer_high"),
-        ),
-        repair_position_metric_preferences=PositionMetricPreferences(
-            insert_cost=MetricPreference(8, "prefer_low"),
-            future_slack=MetricPreference(7, "prefer_high"),
-            route_balance_gain=MetricPreference(5, "prefer_high"),
-            local_coupling_penalty=MetricPreference(5, "prefer_low"),
-            diversity_gain=MetricPreference(3, "prefer_high"),
-        ),
-        destroy_strength_score=5,
-        candidate_budget_score=5,
-        exploration_score=3,
-        destroy_operator_priors={name: operator_score_to_prior(5) for name in DESTROY_CANDIDATE_GENERATORS},
-        repair_operator_priors={name: operator_score_to_prior(5) for name in REPAIR_TASK_SELECTORS},
-        strength_ratio=float(strength_ratio),
-        exploration_rate=0.10,
-        acceptance="sa",
-        accept_level=0.25,
-        reaction_factor=0.20,
-        prior_mix_lambda=0.25,
+    policy = DestroyPolicy(
+        operator_weights={name: 5 for name in DESTROY_OPERATOR_NAMES},
+        signal_weights={
+            "cost_pressure": 7,
+            "coupling_pressure": 6,
+            "route_balance_pressure": 5,
+            "mobility_opportunity": 5,
+            "scarcity_protection": 7,
+        },
+        intensity_score=5,
+        remove_ratio=float(strength_ratio),
     )
     rng = random.Random(0)
     candidate_landscape: Dict[str, Any] = {}
@@ -350,8 +351,8 @@ def build_destroy_landscape(
 
     return {
         "solution_policy": "feasible_solution_only",
-        "destroy_operators": list(DESTROY_CANDIDATE_GENERATORS),
-        "landscape_metric_fields": list(LANDSCAPE_METRIC_FIELDS),
+        "destroy_operators": list(DESTROY_OPERATOR_NAMES),
+        "destroy_signal_fields": list(policy.signal_weights),
         "strength_preview": {
             "assigned_count": int(len(sol.all_assigned_tasks())),
             "target_k_at_current_strength": int(strength.target_k),
@@ -397,16 +398,16 @@ def _arc_cost(instance: Instance, config: Config, aid: int, loc_a: Location, loc
     return travel_distance + travel_time + travel_energy
 
 
-def _top_scored_moves(
+def _scored_moves(
     moves: Sequence[DestroyMove],
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
 ) -> List[DestroyMove]:
     scored = _score_moves(moves, sol, instance, config, policy)
     scored.sort(key=lambda move: (-float(move.score), tuple(int(tid) for tid in move.task_ids)))
-    return scored[:MAX_CANDIDATE_MOVES]
+    return scored
 
 
 def _score_moves(
@@ -414,7 +415,7 @@ def _score_moves(
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: DestroyPolicy,
 ) -> List[DestroyMove]:
     if not moves:
         return []
@@ -430,9 +431,12 @@ def _score_moves(
                 task_ids=tuple(int(tid) for tid in move.task_ids),
                 affected_routes=tuple(int(aid) for aid in move.affected_routes),
                 features=features,
-                score=score_metric_preferences(
-                    features.as_dict(),
-                    policy.destroy_metric_preferences.preferences_dict(),
+                score=(
+                    policy.signal_weights.get("cost_pressure", 0) * features.cost_pressure
+                    + policy.signal_weights.get("coupling_pressure", 0) * features.coupling_pressure
+                    + policy.signal_weights.get("route_balance_pressure", 0) * features.route_balance_pressure
+                    + policy.signal_weights.get("mobility_opportunity", 0) * features.mobility_opportunity
+                    - policy.signal_weights.get("scarcity_protection", 0) * features.scarcity_pressure
                 ),
                 metadata=dict(move.metadata),
             )
@@ -456,10 +460,14 @@ def _compute_raw_move_feature_rows(
     for index, move in enumerate(moves):
         rows[index] = {
             "cost_pressure": _group_removal_cost_release(sol, instance, config, move.task_ids),
+            "priority_loss": sum(float(instance.task_by_id(int(tid)).priority) for tid in move.task_ids),
             "mobility_opportunity": _move_mobility_opportunity(sol, instance, config, move.task_ids, assignment, relocation_cache),
             "coupling_pressure": _coupling_pressure(move, sol, instance, assignment, distance_scale, time_scale),
             "scarcity_pressure": _scarcity_pressure(sol, instance, config, move.task_ids, assignment, relocation_cache),
-            "balance_pressure": _move_balance_pressure(move, route_pressure),
+            "route_balance_pressure": _move_balance_pressure(move, route_pressure),
+            "violation_pressure": 0.0,
+            "regret_pressure": 0.0,
+            "bottleneck_pressure": 0.0,
         }
     return rows
 
@@ -720,10 +728,14 @@ def _make_move(
 def _zero_features() -> LandscapeFeatures:
     return LandscapeFeatures(
         cost_pressure=0.0,
+        priority_loss=0.0,
         scarcity_pressure=0.0,
         coupling_pressure=0.0,
         mobility_opportunity=0.0,
-        balance_pressure=0.0,
+        route_balance_pressure=0.0,
+        violation_pressure=0.0,
+        regret_pressure=0.0,
+        bottleneck_pressure=0.0,
     )
 
 
@@ -762,7 +774,7 @@ def _top_pattern(features: LandscapeFeatures) -> str:
         and levels["scarcity_pressure"] == "low"
     ):
         return "high-cost mobile structures with low scarcity risk"
-    if levels["balance_pressure"] == "high":
+    if levels["route_balance_pressure"] == "high":
         return "high route-balance pressure candidates"
     if levels["coupling_pressure"] == "high":
         return "strongly coupled local structures"
@@ -795,7 +807,7 @@ def _cv_level(values: Sequence[float]) -> str:
 
 def _compact_recent_destroy_feedback(summary: Mapping[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
-    for name in DESTROY_CANDIDATE_GENERATORS:
+    for name in DESTROY_OPERATOR_NAMES:
         raw = summary.get(name)
         if not isinstance(raw, Mapping):
             continue

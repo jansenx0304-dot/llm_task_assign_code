@@ -1,10 +1,8 @@
-# sar_alloc/solution.py
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
-from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Optional, Set, Tuple, Any
+from dataclasses import asdict, dataclass, field, is_dataclass
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from .models import Instance
 
@@ -13,69 +11,69 @@ AgentID = int
 TaskID = int
 
 
-def _obj_to_dict(o: Any) -> Any:
-    if o is None:
+def _obj_to_dict(value: Any) -> Any:
+    if value is None:
         return None
-    if is_dataclass(o):
-        return asdict(o)
-    if hasattr(o, "model_dump"):  # pydantic v2
-        return o.model_dump()
-    if hasattr(o, "dict"):        # pydantic v1
-        return o.dict()
-    if hasattr(o, "_asdict"):     # namedtuple
-        return o._asdict()
-    return vars(o)                # 普通对象（有 __dict__）
+    if is_dataclass(value):
+        return asdict(value)
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    if hasattr(value, "_asdict"):
+        return value._asdict()
+    if hasattr(value, "__dict__"):
+        return vars(value)
+    return value
 
-@dataclass(slots=True)
+
+@dataclass(frozen=True, slots=True)
 class EvalResult:
-    """
-    评估器输出的统一指标结构（由 tools/evaluator.py 生成）。
+    """Evaluation result with quality metrics separated from constraints."""
 
-    最小化字段（必需）：
-    - is_feasible: 解是否满足所有硬约束
-    - violations: 三类违规的总量（capability/time_window/energy）
-    - metrics: 通用指标字典（用于分层目标的 metric 查找）
-    - lex_key: 可选缓存（字典序比较向量）
-    """
-    is_feasible: bool = False
-    violations: Dict[str, float] = field(default_factory=dict)
-
-    # 通用指标（分层目标优先从这里取）
-    metrics: Dict[str, float] = field(default_factory=dict)
-
-    # 可选：缓存的字典序 key（比如 (violation_total, missed_priority, energy_total)）
+    quality_metrics: Dict[str, float] = field(default_factory=dict)
+    constraint_report: Any = None
     lex_key: Optional[Tuple[float, ...]] = None
 
+    @property
+    def is_feasible(self) -> bool:
+        return bool(getattr(self.constraint_report, "is_feasible", False))
+
+    @property
+    def metrics(self) -> Dict[str, float]:
+        return dict(self.quality_metrics)
+
+    @property
+    def violations(self) -> Dict[str, float]:
+        return dict(getattr(self.constraint_report, "violation_by_type", {}) or {})
+
+    def get_quality_metric(self, name: str) -> float:
+        return float(self.quality_metrics.get(str(name), 0.0))
+
+    def get_constraint_metric(self, name: str) -> float:
+        report = self.constraint_report
+        if report is None:
+            return 0.0
+        mapping = {
+            "violation_total": "violation_total",
+            "violation_capability": "violation_capability",
+            "violation_time_window": "violation_time_window",
+            "violation_energy": "violation_energy",
+        }
+        attr = mapping.get(str(name))
+        return 0.0 if attr is None else float(getattr(report, attr))
+
     def get_metric(self, name: str) -> float:
-        """
-        统一访问口径：优先从 metrics 取。
-        特例：violation_total 可以从 violations 求和（避免漏填）。
-        """
-        if name in self.metrics:
-            return float(self.metrics[name])
-
-        # 特例：violation_total 可以即时求和
-        if name == "violation_total":
-            return float(sum(self.violations.values())) if self.violations else 0.0
-
-        # 未知指标默认 0
-        return 0.0
+        if str(name) in self.quality_metrics:
+            return self.get_quality_metric(name)
+        return self.get_constraint_metric(name)
 
 
 @dataclass(slots=True)
 class AssignmentSolution:
-    """
-    解结构：每个智能体一条任务序列（route），未分配任务集合，及可选的调度信息。
-
-    - routes[agent_id] = [task_id, ...]
-    - unassigned = {task_id, ...}
-    - schedule[(agent_id, task_id)] = (start, end)  # 可选
-    """
     routes: Dict[AgentID, List[TaskID]] = field(default_factory=dict)
     unassigned: Set[TaskID] = field(default_factory=set)
     schedule: Dict[Tuple[AgentID, TaskID], Tuple[float, float]] = field(default_factory=dict)
-
-    # 评估结果缓存（由 evaluator 写入/更新）
     eval: Optional[EvalResult] = None
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
     run_summary: Dict[str, Any] = field(default_factory=dict)
@@ -93,10 +91,10 @@ class AssignmentSolution:
                 run_artifact=self.run_artifact,
             )
         return AssignmentSolution(
-            routes={aid: list(seq) for aid, seq in self.routes.items()},
-            unassigned=set(self.unassigned),
+            routes={int(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()},
+            unassigned={int(tid) for tid in self.unassigned},
             schedule=dict(self.schedule),
-            eval=self.eval,  # 通常结构改变后 eval 需要置空；此处由调用方决定
+            eval=self.eval,
             solver_diagnostics=deepcopy(self.solver_diagnostics),
             run_summary=deepcopy(self.run_summary),
             run_artifact=deepcopy(self.run_artifact),
@@ -104,34 +102,37 @@ class AssignmentSolution:
 
     @staticmethod
     def empty_from_instance(instance: Instance, put_all_unassigned: bool = True) -> "AssignmentSolution":
-        sol = AssignmentSolution(routes={aid: [] for aid in instance.all_agent_ids()})
+        sol = AssignmentSolution(routes={int(aid): [] for aid in instance.all_agent_ids()})
         if put_all_unassigned:
-            sol.unassigned = set(instance.all_task_ids())
+            sol.unassigned = {int(tid) for tid in instance.all_task_ids()}
         return sol
 
     def all_assigned_tasks(self) -> Set[TaskID]:
-        s: Set[TaskID] = set()
+        out: Set[TaskID] = set()
         for seq in self.routes.values():
-            s.update(seq)
-        return s
+            out.update(int(tid) for tid in seq)
+        return out
 
     def add_task(self, agent_id: AgentID, task_id: TaskID, position: Optional[int] = None) -> None:
-        if agent_id not in self.routes:
-            self.routes[agent_id] = []
-        if position is None or position >= len(self.routes[agent_id]):
-            self.routes[agent_id].append(task_id)
+        aid = int(agent_id)
+        tid = int(task_id)
+        self.routes.setdefault(aid, [])
+        if position is None or int(position) >= len(self.routes[aid]):
+            self.routes[aid].append(tid)
         else:
-            self.routes[agent_id].insert(position, task_id)
-        self.unassigned.discard(task_id)
+            self.routes[aid].insert(int(position), tid)
+        self.unassigned.discard(tid)
         self.eval = None
 
     def remove_task(self, agent_id: AgentID, task_id: TaskID, to_unassigned: bool = True) -> None:
-        seq = self.routes.get(agent_id, [])
-        if task_id in seq:
-            seq.remove(task_id)
+        aid = int(agent_id)
+        tid = int(task_id)
+        seq = self.routes.get(aid, [])
+        if tid in seq:
+            seq.remove(tid)
             if to_unassigned:
-                self.unassigned.add(task_id)
-            self.schedule.pop((agent_id, task_id), None)
+                self.unassigned.add(tid)
+            self.schedule.pop((aid, tid), None)
             self.eval = None
 
     def move_task(
@@ -146,58 +147,41 @@ class AssignmentSolution:
 
     def normalize(self, instance: Instance) -> None:
         for aid in instance.all_agent_ids():
-            self.routes.setdefault(aid, [])
-
-        valid_tasks = set(instance.all_task_ids())
-
-        for aid, seq in self.routes.items():
-            self.routes[aid] = [tid for tid in seq if tid in valid_tasks]
-
-        self.unassigned = {tid for tid in self.unassigned if tid in valid_tasks}
-
-        assigned = self.all_assigned_tasks()
-        self.unassigned.difference_update(assigned)
-
-        valid_pairs = {(aid, tid) for aid, seq in self.routes.items() for tid in seq}
-        self.schedule = {k: v for k, v in self.schedule.items() if k in valid_pairs}
-
+            self.routes.setdefault(int(aid), [])
+        valid_tasks = {int(tid) for tid in instance.all_task_ids()}
+        for aid, seq in list(self.routes.items()):
+            self.routes[int(aid)] = [int(tid) for tid in seq if int(tid) in valid_tasks]
+        self.unassigned = {int(tid) for tid in self.unassigned if int(tid) in valid_tasks}
+        self.unassigned.difference_update(self.all_assigned_tasks())
+        valid_pairs = {(int(aid), int(tid)) for aid, seq in self.routes.items() for tid in seq}
+        self.schedule = {pair: value for pair, value in self.schedule.items() if pair in valid_pairs}
         self.eval = None
 
     def to_dict(self) -> Dict[str, Any]:
-        ev = self.eval
-        ev_dict = None if ev is None else _obj_to_dict(ev)
-
-        # 覆盖/修正 lex_key，确保 JSON 友好（无论原来是 tuple 还是别的可迭代）
-        if ev_dict is not None:
-            ev_dict["lex_key"] = list(getattr(ev, "lex_key", None)) if getattr(ev, "lex_key", None) is not None else None
-
+        ev_dict = _obj_to_dict(self.eval)
+        if isinstance(ev_dict, dict):
+            ev_dict["lex_key"] = list(self.eval.lex_key or ()) if self.eval is not None else None
         return {
-            "routes": {str(aid): list(map(int, seq)) for aid, seq in self.routes.items()},
-            "unassigned": list(map(int, self.unassigned)),
-            "schedule": {f"{aid}:{tid}": [st, en] for (aid, tid), (st, en) in self.schedule.items()},
+            "routes": {str(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()},
+            "unassigned": [int(tid) for tid in sorted(self.unassigned)],
+            "schedule": {f"{aid}:{tid}": [float(st), float(en)] for (aid, tid), (st, en) in self.schedule.items()},
             "eval": ev_dict,
             "solver_diagnostics": deepcopy(self.solver_diagnostics),
             "run_summary": deepcopy(self.run_summary),
         }
-    
+
     @staticmethod
     def from_dict(data: Mapping[str, Any]) -> "AssignmentSolution":
-        routes = {int(aid): list(map(int, seq)) for aid, seq in data.get("routes", {}).items()}
-        unassigned = set(map(int, data.get("unassigned", [])))
-
+        routes = {int(aid): [int(tid) for tid in seq] for aid, seq in dict(data.get("routes", {}) or {}).items()}
+        unassigned = {int(tid) for tid in list(data.get("unassigned", []) or [])}
         schedule: Dict[Tuple[int, int], Tuple[float, float]] = {}
-        for k, v in data.get("schedule", {}).items():
-            aid_s, tid_s = k.split(":")
-            schedule[(int(aid_s), int(tid_s))] = (float(v[0]), float(v[1]))
-
-        sol = AssignmentSolution(
+        for key, value in dict(data.get("schedule", {}) or {}).items():
+            aid_s, tid_s = str(key).split(":", 1)
+            schedule[(int(aid_s), int(tid_s))] = (float(value[0]), float(value[1]))
+        return AssignmentSolution(
             routes=routes,
             unassigned=unassigned,
             schedule=schedule,
             solver_diagnostics=dict(data.get("solver_diagnostics", {}) or {}),
             run_summary=dict(data.get("run_summary", {}) or {}),
         )
-
-        # eval 建议由 evaluator 重算；这里默认不反序列化为强一致性
-        sol.eval = None
-        return sol

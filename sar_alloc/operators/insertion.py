@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..config import Config
@@ -11,29 +11,27 @@ from ..evaluator import evaluate
 from ..models import Agent, Instance, Location, Task
 from ..solution import AssignmentSolution
 from .features import basic_insertion_feasibility_filter, insertion_lower_bound_filter
-from .scoring import operator_score_to_prior, score_metric_preferences
 from .types import (
-    DESTROY_CANDIDATE_GENERATORS,
-    REPAIR_TASK_SELECTORS,
-    SEARCH_DIAGNOSIS_FIELDS,
+    InsertionPolicy,
     LandscapeFeatures,
-    LandscapeMetricPreferences,
-    MetricPreference,
     PositionFeatures,
-    PositionMetricPreferences,
     InsertPosition,
-    WeightedALNSPolicy,
 )
 
 
 _EPS = 1e-9
 _BIG_M = 1e12
+REGRET_K = 2
 _ZERO_LANDSCAPE_FEATURES = LandscapeFeatures(
     cost_pressure=0.0,
+    priority_loss=0.0,
     scarcity_pressure=0.0,
     coupling_pressure=0.0,
     mobility_opportunity=0.0,
-    balance_pressure=0.0,
+    route_balance_pressure=0.0,
+    violation_pressure=0.0,
+    regret_pressure=0.0,
+    bottleneck_pressure=0.0,
 )
 _ZERO_POSITION_FEATURES = PositionFeatures(
     insert_cost=0.0,
@@ -41,18 +39,24 @@ _ZERO_POSITION_FEATURES = PositionFeatures(
     route_balance_gain=0.0,
     local_coupling_penalty=0.0,
     diversity_gain=0.0,
+    violation_delta=0.0,
 )
 
 
-@dataclass(frozen=True)
-class RepairBudget:
-    max_tasks_considered: int
-    max_positions_per_task: int
-    strict_check_limit: int
+@dataclass(frozen=True, slots=True)
+class InsertionContext:
+    kind: str
+    feasibility_mode: str = "strict"
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"initial", "alns"}:
+            raise ValueError(f"invalid insertion context kind: {self.kind}")
+        if self.feasibility_mode not in {"strict", "relaxed_recoverable", "recovery_only"}:
+            raise ValueError(f"invalid insertion feasibility mode: {self.feasibility_mode}")
 
 
 @dataclass(frozen=True)
-class RepairCandidate:
+class InsertionCandidate:
     tid: int
     agent_id: int
     position: int
@@ -69,18 +73,26 @@ class RepairCandidate:
     candidate_cost: float
     dominated: bool
     strict_feasible: bool
+    relaxed_admissible: bool = False
+    quality_delta: Dict[str, float] = field(default_factory=dict)
+    constraint_delta: Dict[str, float] = field(default_factory=dict)
     position_features: PositionFeatures = _ZERO_POSITION_FEATURES
     position_score: float = 0.0
 
+    @property
+    def task_id(self) -> str:
+        return str(self.tid)
+
 
 @dataclass(frozen=True)
-class TaskRepairStats:
+class TaskInsertionStats:
     tid: int
     candidate_count: int
     feasible_count: int
     feasible_agent_count: int
     best_cost: float
-    sorted_feasible_candidates: Tuple[RepairCandidate, ...]
+    sorted_feasible_candidates: Tuple[InsertionCandidate, ...]
+    sorted_relaxed_candidates: Tuple[InsertionCandidate, ...]
     task_priority: float
     time_window_width: float
     service_time: float
@@ -121,16 +133,16 @@ def enumerate_hard_filtered_positions(
     return insertion_lower_bound_filter(sol, tid, instance, config, candidate_positions=positions)
 
 
-def compute_repair_candidate(
+def compute_insertion_candidate(
     sol: AssignmentSolution,
     tid: int,
     position: InsertPosition,
     instance: Instance,
     config: Config,
     route_pressure_before: Dict[int, float],
-) -> RepairCandidate:
-    return _strict_evaluate_repair_candidate(
-        _build_lightweight_repair_candidate(
+) -> InsertionCandidate:
+    return _strict_evaluate_insertion_candidate(
+        _build_lightweight_insertion_candidate(
             sol=sol,
             tid=tid,
             position=position,
@@ -144,14 +156,14 @@ def compute_repair_candidate(
     )
 
 
-def _build_lightweight_repair_candidate(
+def _build_lightweight_insertion_candidate(
     sol: AssignmentSolution,
     tid: int,
     position: InsertPosition,
     instance: Instance,
     config: Config,
     route_pressure_before: Dict[int, float],
-) -> RepairCandidate:
+) -> InsertionCandidate:
     aid = int(position.agent_id)
     pos = int(position.position)
     task = instance.task_by_id(int(tid))
@@ -189,7 +201,7 @@ def _build_lightweight_repair_candidate(
     tw_risk = 1.0 / (1.0 + max(0.0, suffix_min_slack)) + suffix_tardiness_total
     candidate_cost = float(delta_distance) + 0.1 * float(delta_energy) + float(tw_risk) + 0.1 * float(suffix_ratio)
 
-    return RepairCandidate(
+    return InsertionCandidate(
         tid=int(tid),
         agent_id=aid,
         position=pos,
@@ -209,29 +221,46 @@ def _build_lightweight_repair_candidate(
     )
 
 
-def _strict_evaluate_repair_candidate(
-    candidate: RepairCandidate,
+def _strict_evaluate_insertion_candidate(
+    candidate: InsertionCandidate,
     sol: AssignmentSolution,
     instance: Instance,
     config: Config,
-) -> RepairCandidate:
+) -> InsertionCandidate:
     trial = sol.clone(deep=True)
     trial.add_task(int(candidate.agent_id), int(candidate.tid), position=int(candidate.position))
     ev = evaluate(trial, instance, config, update_solution_schedule=False)
-    return replace(candidate, strict_feasible=bool(ev.is_feasible))
+    report = ev.constraint_report
+    relaxed = bool(
+        report.violation_capability <= _EPS
+        and report.unrecoverable_violation_total <= _EPS
+        and report.violation_total > _EPS
+    )
+    return replace(
+        candidate,
+        strict_feasible=bool(ev.is_feasible),
+        relaxed_admissible=relaxed,
+        quality_delta=dict(ev.quality_metrics),
+        constraint_delta={
+            "violation_total": float(report.violation_total),
+            "violation_capability": float(report.violation_capability),
+            "violation_time_window": float(report.violation_time_window),
+            "violation_energy": float(report.violation_energy),
+        },
+    )
 
 
-def score_repair_positions_before_strict(
+def score_insert_positions(
     sol: AssignmentSolution,
     tid: int,
     positions: Sequence[InsertPosition],
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
+    policy: InsertionPolicy,
     route_pressure_before: Dict[int, float],
-) -> List[RepairCandidate]:
+) -> List[InsertionCandidate]:
     candidates = [
-        _build_lightweight_repair_candidate(
+        _build_lightweight_insertion_candidate(
             sol=sol,
             tid=int(tid),
             position=position,
@@ -262,36 +291,39 @@ def score_repair_positions_before_strict(
                 + float(candidate.depot_return_pressure)
             ),
             "diversity_gain": float(rank_by_index[index]) / float(denom),
+            "violation_delta": 0.0,
         }
 
     normalized = _normalize_rows(raw_rows)
-    scored: List[RepairCandidate] = []
-    preferences = policy.repair_position_metric_preferences.preferences_dict()
+    scored: List[InsertionCandidate] = []
     for index, candidate in enumerate(candidates):
         features = PositionFeatures(**normalized[index])
-        position_score = score_metric_preferences(features.as_dict(), preferences)
+        weights = policy.position_signal_weights
+        position_score = (
+            -weights.get("insert_cost", 0) * features.insert_cost
+            + weights.get("future_slack", 0) * features.future_slack
+            + weights.get("route_balance_gain", 0) * features.route_balance_gain
+            - weights.get("local_coupling_penalty", 0) * features.local_coupling_penalty
+            + weights.get("diversity_gain", 0) * features.diversity_gain
+        )
         scored.append(replace(candidate, position_features=features, position_score=float(position_score)))
     return scored
 
 
-def collect_task_repair_stats(
+def collect_task_insertion_stats(
     sol: AssignmentSolution,
     tid: int,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
-    budget: RepairBudget,
-    strict_checks_left: int,
+    policy: InsertionPolicy,
     route_pressure_before: Dict[int, float],
     recent_task_failures: Optional[Dict[int, Dict[str, int]]],
-    stop_after_feasible: Optional[int] = None,
-) -> Tuple[TaskRepairStats, int, Dict[str, int]]:
+) -> Tuple[TaskInsertionStats, Dict[str, int]]:
     positions = enumerate_hard_filtered_positions(sol, int(tid), instance, config)
     candidate_count = len(positions)
-    strict_left = max(0, int(strict_checks_left))
     checked = 0
-    candidates: List[RepairCandidate] = []
-    scored_positions = score_repair_positions_before_strict(
+    candidates: List[InsertionCandidate] = []
+    scored_positions = score_insert_positions(
         sol=sol,
         tid=int(tid),
         positions=positions,
@@ -304,39 +336,34 @@ def collect_task_repair_stats(
         scored_positions,
         key=lambda candidate: (-float(candidate.position_score), int(candidate.agent_id), int(candidate.position)),
     )
-    top_positions = ranked_positions[: max(0, int(budget.max_positions_per_task))]
 
-    for candidate in top_positions:
-        if strict_left <= 0:
-            break
-        strict_candidate = _strict_evaluate_repair_candidate(
+    for candidate in ranked_positions:
+        strict_candidate = _strict_evaluate_insertion_candidate(
             candidate,
             sol,
             instance=instance,
             config=config,
         )
         candidates.append(strict_candidate)
-        strict_left -= 1
         checked += 1
-        if stop_after_feasible is not None:
-            feasible_seen = sum(1 for item in candidates if item.strict_feasible)
-            if feasible_seen >= int(stop_after_feasible):
-                break
 
     candidates = _mark_dominated_candidates(candidates)
     feasible = [candidate for candidate in candidates if candidate.strict_feasible]
+    relaxed = [candidate for candidate in candidates if candidate.strict_feasible or candidate.relaxed_admissible]
     feasible.sort(key=lambda candidate: (-float(candidate.position_score), int(candidate.agent_id), int(candidate.position)))
+    relaxed.sort(key=lambda candidate: (0 if candidate.strict_feasible else 1, float(candidate.constraint_delta.get("violation_total", 0.0) if candidate.constraint_delta else 0.0), -float(candidate.position_score), int(candidate.agent_id), int(candidate.position)))
 
     task = instance.task_by_id(int(tid))
     failures = dict((recent_task_failures or {}).get(int(tid), {}) or {})
     best_cost = min((float(candidate.candidate_cost) for candidate in feasible), default=math.inf)
-    stats = TaskRepairStats(
+    stats = TaskInsertionStats(
         tid=int(tid),
         candidate_count=int(candidate_count),
         feasible_count=int(len(feasible)),
         feasible_agent_count=int(len({int(candidate.agent_id) for candidate in feasible})),
         best_cost=float(best_cost),
         sorted_feasible_candidates=tuple(feasible),
+        sorted_relaxed_candidates=tuple(relaxed),
         task_priority=float(task.priority),
         time_window_width=_time_window_width(task),
         service_time=float(task.service_time),
@@ -351,24 +378,11 @@ def collect_task_repair_stats(
         "positions_strict_checked": int(checked),
         "strict_feasible_positions": int(len(feasible)),
     }
-    return stats, int(strict_left), diagnostics
+    return stats, diagnostics
 
 
-def budget_from_score(score: int) -> RepairBudget:
-    s = float(score) / 10.0
-    return RepairBudget(
-        max_tasks_considered=round(8 + s * (40 - 8)),
-        max_positions_per_task=round(4 + s * (20 - 4)),
-        strict_check_limit=round(40 + s * (260 - 40)),
-    )
-
-
-def regret_k_from_budget(score: int) -> int:
-    return 3 if int(score) >= 6 else 2
-
-
-def build_repair_task_feature_rows(
-    stats_by_tid: Mapping[int, TaskRepairStats],
+def score_candidate_tasks(
+    stats_by_tid: Mapping[int, TaskInsertionStats],
 ) -> Dict[int, Dict[str, float]]:
     rows: Dict[int, Dict[str, float]] = {}
     for tid, stats in stats_by_tid.items():
@@ -377,6 +391,7 @@ def build_repair_task_feature_rows(
         best_cost = float(stats.best_cost) if math.isfinite(float(stats.best_cost)) else _BIG_M
         rows[int(tid)] = {
             "cost_pressure": best_cost,
+            "priority_loss": float(stats.task_priority),
             "scarcity_pressure": (
                 1.0 / (1.0 + float(stats.feasible_count))
                 + 1.0 / (1.0 + float(stats.feasible_agent_count))
@@ -389,22 +404,29 @@ def build_repair_task_feature_rows(
                 + float(stats.recent_skill_fail_count)
             ),
             "mobility_opportunity": float(stats.feasible_count) + float(stats.feasible_agent_count),
-            "balance_pressure": float(route_balance),
+            "route_balance_pressure": float(route_balance),
+            "violation_pressure": float(stats.recent_tw_fail_count + stats.recent_energy_fail_count),
+            "regret_pressure": 0.0,
+            "bottleneck_pressure": 1.0 / (1.0 + float(stats.feasible_agent_count)),
         }
     return rows
 
 
-def _score_repair_task_stats(
-    stats_by_tid: Mapping[int, TaskRepairStats],
-    policy: WeightedALNSPolicy,
-) -> Dict[int, TaskRepairStats]:
-    normalized = _normalize_rows(build_repair_task_feature_rows(stats_by_tid))
-    out: Dict[int, TaskRepairStats] = {}
+def _score_candidate_task_stats(
+    stats_by_tid: Mapping[int, TaskInsertionStats],
+    policy: InsertionPolicy,
+) -> Dict[int, TaskInsertionStats]:
+    normalized = _normalize_rows(score_candidate_tasks(stats_by_tid))
+    out: Dict[int, TaskInsertionStats] = {}
     for tid, stats in stats_by_tid.items():
         features = LandscapeFeatures(**normalized.get(int(tid), _ZERO_LANDSCAPE_FEATURES.as_dict()))
-        task_score = score_metric_preferences(
-            features.as_dict(),
-            policy.repair_task_metric_preferences.preferences_dict(),
+        weights = policy.task_signal_weights
+        task_score = (
+            weights.get("priority_loss", 0) * features.priority_loss
+            + weights.get("scarcity_pressure", 0) * features.scarcity_pressure
+            + weights.get("regret_pressure", 0) * features.regret_pressure
+            + weights.get("bottleneck_pressure", 0) * features.bottleneck_pressure
+            + weights.get("mobility_opportunity", 0) * features.mobility_opportunity
         )
         out[int(tid)] = replace(stats, landscape_features=features, task_score=float(task_score))
     return out
@@ -441,345 +463,230 @@ def _normalize_value_map(values: Mapping[int, float]) -> Dict[int, float]:
     return {int(key): max(0.0, min(1.0, (float(value) - lo) / (hi - lo))) for key, value in values.items()}
 
 
-def _preview_repair_policy() -> WeightedALNSPolicy:
-    return WeightedALNSPolicy(
-        search_diagnosis_scores={name: 5 for name in SEARCH_DIAGNOSIS_FIELDS},
-        destroy_operator_scores={name: 5 for name in DESTROY_CANDIDATE_GENERATORS},
-        repair_operator_scores={name: 5 for name in REPAIR_TASK_SELECTORS},
-        destroy_metric_preferences=LandscapeMetricPreferences(
-            cost_pressure=MetricPreference(7, "prefer_high"),
-            scarcity_pressure=MetricPreference(7, "avoid_high"),
-            coupling_pressure=MetricPreference(6, "prefer_high"),
-            mobility_opportunity=MetricPreference(6, "prefer_high"),
-            balance_pressure=MetricPreference(5, "prefer_high"),
-        ),
-        repair_task_metric_preferences=LandscapeMetricPreferences(
-            cost_pressure=MetricPreference(5, "prefer_high"),
-            scarcity_pressure=MetricPreference(8, "prefer_high"),
-            coupling_pressure=MetricPreference(6, "prefer_high"),
-            mobility_opportunity=MetricPreference(4, "prefer_low"),
-            balance_pressure=MetricPreference(5, "prefer_high"),
-        ),
-        repair_position_metric_preferences=PositionMetricPreferences(
-            insert_cost=MetricPreference(8, "prefer_low"),
-            future_slack=MetricPreference(7, "prefer_high"),
-            route_balance_gain=MetricPreference(5, "prefer_high"),
-            local_coupling_penalty=MetricPreference(5, "prefer_low"),
-            diversity_gain=MetricPreference(3, "prefer_high"),
-        ),
-        destroy_strength_score=5,
-        candidate_budget_score=10,
-        exploration_score=3,
-        destroy_operator_priors={name: operator_score_to_prior(5) for name in DESTROY_CANDIDATE_GENERATORS},
-        repair_operator_priors={name: operator_score_to_prior(5) for name in REPAIR_TASK_SELECTORS},
-        strength_ratio=0.18,
-        exploration_rate=0.10,
-        acceptance="sa",
-        accept_level=0.25,
-        reaction_factor=0.20,
-        prior_mix_lambda=0.25,
+def _default_insertion_policy() -> InsertionPolicy:
+    return InsertionPolicy(
+        operator_weights={
+            "greedy_insertion": 6,
+            "scarcity_first_insertion": 8,
+            "regret_insertion": 6,
+            "bottleneck_insertion": 4,
+            "diversified_insertion": 2,
+        },
+        task_signal_weights={
+            "priority_loss": 8,
+            "scarcity_pressure": 8,
+            "regret_pressure": 5,
+            "bottleneck_pressure": 4,
+            "mobility_opportunity": 2,
+        },
+        position_signal_weights={
+            "insert_cost": 8,
+            "future_slack": 7,
+            "route_balance_gain": 5,
+            "local_coupling_penalty": 5,
+            "diversity_gain": 2,
+        },
     )
 
 
-def build_repair_landscape(
+def build_insertion_landscape(
     sol: Optional[AssignmentSolution],
     instance: Instance,
     config: Config,
-    recent_repair_summary: Optional[Dict[str, Any]] = None,
+    recent_insertion_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if sol is None:
         return {}
-
     unassigned = sorted(int(tid) for tid in sol.unassigned)
-    assigned_count = len(sol.all_assigned_tasks())
+    policy = _default_insertion_policy()
     candidate_counts: List[int] = []
     feasible_counts: List[int] = []
-
-    policy = _preview_repair_policy()
-    budget = RepairBudget(max_tasks_considered=max(1, len(unassigned)), max_positions_per_task=10**9, strict_check_limit=10**9)
     route_pressure_before = _route_pressure_map(sol, instance, config)
-    strict_left = budget.strict_check_limit
     for tid in unassigned:
-        stats, strict_left, _ = collect_task_repair_stats(
-            sol=sol,
-            tid=tid,
-            instance=instance,
-            config=config,
-            policy=policy,
-            budget=budget,
-            strict_checks_left=strict_left,
-            route_pressure_before=route_pressure_before,
-            recent_task_failures=None,
-            stop_after_feasible=None,
+        stats, _ = collect_task_insertion_stats(
+            sol, tid, instance, config, policy,
+            route_pressure_before, None,
         )
-        candidate_counts.append(int(stats.candidate_count))
-        feasible_counts.append(int(stats.feasible_count))
-
-    task_pressure = _task_pressure_summary(sol, instance, config)
-    route_pressure = _route_pressure_summary(sol, instance, config)
+        candidate_counts.append(stats.candidate_count)
+        feasible_counts.append(stats.feasible_count)
     return {
-        "unassigned_count": int(len(unassigned)),
-        "assigned_count": int(assigned_count),
+        "unassigned_count": len(unassigned),
+        "assigned_count": len(sol.all_assigned_tasks()),
         "candidate_stats": {
-            "zero_candidate_tasks": int(sum(1 for value in candidate_counts if value == 0)),
-            "no_feasible_tasks": int(sum(1 for value in feasible_counts if value == 0)),
-            "one_feasible_position_tasks": int(sum(1 for value in feasible_counts if value == 1)),
+            "zero_candidate_tasks": sum(value == 0 for value in candidate_counts),
+            "no_feasible_tasks": sum(value == 0 for value in feasible_counts),
+            "one_feasible_position_tasks": sum(value == 1 for value in feasible_counts),
             "avg_candidate_positions": _mean(candidate_counts),
             "avg_feasible_positions": _mean(feasible_counts),
         },
-        "task_pressure": task_pressure,
-        "route_pressure": route_pressure,
-        "recent_repair_feedback": dict(recent_repair_summary or {}),
+        "task_pressure": _task_pressure_summary(sol, instance, config),
+        "route_pressure": _route_pressure_summary(sol, instance, config),
+        "recent_insertion_feedback": dict(recent_insertion_summary or {}),
     }
 
 
-def repair_with_feasible_greedy(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: WeightedALNSPolicy,
-    rng: random.Random,
-) -> AssignmentSolution:
-    del rng
-    return _run_repair_operator(
-        operator_name="feasible_greedy_repair",
-        partial=sol,
-        instance=instance,
-        config=config,
-        policy=policy,
-        choose_candidate=_choose_feasible_greedy,
-    )
-
-
-def repair_with_scarcity_first(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: WeightedALNSPolicy,
-    rng: random.Random,
-) -> AssignmentSolution:
-    del rng
-    return _run_repair_operator(
-        operator_name="scarcity_first_repair",
-        partial=sol,
-        instance=instance,
-        config=config,
-        policy=policy,
-        choose_candidate=_choose_scarcity_first,
-    )
-
-
-def repair_with_regret_k(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: WeightedALNSPolicy,
-    rng: random.Random,
-) -> AssignmentSolution:
-    del rng
-    return _run_repair_operator(
-        operator_name="regret_k_repair",
-        partial=sol,
-        instance=instance,
-        config=config,
-        policy=policy,
-        choose_candidate=lambda stats_by_tid: _choose_regret_k(stats_by_tid, policy.candidate_budget_score),
-    )
-
-
-def repair_with_bottleneck_targeted(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: WeightedALNSPolicy,
-    rng: random.Random,
-) -> AssignmentSolution:
-    del rng
-    bottleneck_metric = _top_non_neutral_landscape_metric(policy)
-
-    def choose(stats_by_tid: Dict[int, TaskRepairStats]) -> Optional[Tuple[TaskRepairStats, RepairCandidate]]:
-        feasible_stats = [stats for stats in stats_by_tid.values() if stats.feasible_count > 0]
-        if not feasible_stats:
-            return None
-        metric_values = {stats.tid: getattr(stats.landscape_features, bottleneck_metric) for stats in feasible_stats}
-        normalized = _normalize_value_map(metric_values)
-        stats = max(
-            feasible_stats,
-            key=lambda item: (float(item.task_score) + float(normalized.get(item.tid, 0.0)), -int(item.tid)),
-        )
-        candidate = _best_position(stats)
-        return stats, candidate
-
-    return _run_repair_operator(
-        operator_name="bottleneck_targeted_repair",
-        partial=sol,
-        instance=instance,
-        config=config,
-        policy=policy,
-        choose_candidate=choose,
-    )
-
-
-def repair_with_diversified_random(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: WeightedALNSPolicy,
-    rng: random.Random,
-) -> AssignmentSolution:
-    def choose(stats_by_tid: Dict[int, TaskRepairStats]) -> Optional[Tuple[TaskRepairStats, RepairCandidate]]:
-        feasible_stats = [stats for stats in stats_by_tid.values() if stats.feasible_count > 0]
-        if not feasible_stats:
-            return None
-        stats = _sample_from_top(feasible_stats, key=lambda item: (float(item.task_score), int(item.tid)), exploration_rate=policy.exploration_rate, rng=rng)
-        candidate = _sample_from_top(
-            list(stats.sorted_feasible_candidates),
-            key=lambda item: (float(item.position_score), -int(item.agent_id), -int(item.position)),
-            exploration_rate=policy.exploration_rate,
-            rng=rng,
-        )
-        return stats, candidate
-
-    return _run_repair_operator(
-        operator_name="diversified_random_repair",
-        partial=sol,
-        instance=instance,
-        config=config,
-        policy=policy,
-        choose_candidate=choose,
-    )
-
-
-def _run_repair_operator(
+def run_insertion_kernel(
+    partial_solution: AssignmentSolution,
+    candidate_tasks: Sequence[int],
+    insertion_policy: InsertionPolicy,
+    context: InsertionContext,
     *,
-    operator_name: str,
-    partial: AssignmentSolution,
     instance: Instance,
     config: Config,
-    policy: WeightedALNSPolicy,
-    choose_candidate: Any,
+    rng: random.Random,
 ) -> AssignmentSolution:
-    budget = budget_from_score(policy.candidate_budget_score)
-    out = partial.clone(deep=True)
-    diagnostics = _new_diagnostics(operator_name, policy, len(out.unassigned))
-    start = time.perf_counter()
-    recent_failures: Optional[Dict[int, Dict[str, int]]] = None
+    out = partial_solution.clone(deep=True)
+    pending = {
+        int(tid) for tid in candidate_tasks
+        if int(tid) not in out.all_assigned_tasks()
+    }
+    out.unassigned.update(pending)
+    out.normalize(instance)
+    diagnostics = _new_insertion_diagnostics(context, insertion_policy, len(pending))
+    started_at = time.perf_counter()
 
-    while out.unassigned:
+    while pending:
         route_pressure_before = _route_pressure_map(out, instance, config)
-        strict_left = int(budget.strict_check_limit)
-        stats_by_tid: Dict[int, TaskRepairStats] = {}
-        for tid in sorted(int(tid) for tid in out.unassigned)[: int(budget.max_tasks_considered)]:
-            stats, strict_left, diag = collect_task_repair_stats(
+        stats_by_tid: Dict[int, TaskInsertionStats] = {}
+        ordered_tasks = sorted(pending)
+        for tid in ordered_tasks:
+            stats, diag = collect_task_insertion_stats(
                 out,
                 tid,
                 instance,
                 config,
-                policy,
-                budget,
-                strict_left,
+                insertion_policy,
                 route_pressure_before,
-                recent_failures,
+                None,
             )
-            stats_by_tid[int(tid)] = stats
+            stats_by_tid[tid] = stats
             _add_stats_diagnostics(diagnostics, stats, diag)
-            if strict_left <= 0:
-                break
 
-        stats_by_tid = _score_repair_task_stats(stats_by_tid, policy)
-        choice = choose_candidate(stats_by_tid)
+        stats_by_tid = _score_candidate_task_stats(stats_by_tid, insertion_policy)
+        operator_name = _weighted_choice(insertion_policy.operator_weights, rng)
+        choice = _choose_for_context(
+            operator_name,
+            stats_by_tid,
+            insertion_policy,
+            context,
+            out,
+            instance,
+            config,
+            rng,
+        )
         if choice is None:
             break
         stats, candidate = choice
-        out.add_task(int(candidate.agent_id), int(stats.tid), position=int(candidate.position))
+        out.add_task(candidate.agent_id, stats.tid, position=candidate.position)
+        pending.discard(stats.tid)
         diagnostics["inserted_count"] += 1
+        diagnostics["operator_use"][operator_name] = diagnostics["operator_use"].get(operator_name, 0) + 1
 
-    _finish_diagnostics(out, diagnostics, start)
+    diagnostics["unassigned_after"] = len(out.unassigned)
+    diagnostics["failed_count"] = len(pending)
+    diagnostics["time_ms"] = round((time.perf_counter() - started_at) * 1000.0, 4)
+    out.solver_diagnostics = dict(out.solver_diagnostics or {})
+    out.solver_diagnostics["last_insertion"] = diagnostics
+    out.normalize(instance)
     return out
 
 
-def _choose_feasible_greedy(stats_by_tid: Dict[int, TaskRepairStats]) -> Optional[Tuple[TaskRepairStats, RepairCandidate]]:
-    feasible_stats = [stats for stats in stats_by_tid.values() if stats.feasible_count > 0]
-    if not feasible_stats:
+def _choose_for_context(
+    operator_name: str,
+    stats_by_tid: Dict[int, TaskInsertionStats],
+    policy: InsertionPolicy,
+    context: InsertionContext,
+    current: AssignmentSolution,
+    instance: Instance,
+    config: Config,
+    rng: random.Random,
+) -> Optional[Tuple[TaskInsertionStats, InsertionCandidate]]:
+    available: Dict[int, Tuple[InsertionCandidate, ...]] = {}
+    current_violation = float(evaluate(current, instance, config, update_solution_schedule=False).constraint_report.violation_total)
+    for tid, stats in stats_by_tid.items():
+        candidates = stats.sorted_feasible_candidates
+        if context.feasibility_mode != "strict" and not candidates:
+            candidates = stats.sorted_relaxed_candidates
+        if context.feasibility_mode == "recovery_only":
+            candidates = tuple(
+                candidate for candidate in stats.sorted_relaxed_candidates
+                if float(candidate.constraint_delta.get("violation_total", math.inf)) < current_violation - _EPS
+            )
+        if candidates:
+            available[tid] = candidates
+    if not available:
         return None
-    stats = max(
-        feasible_stats,
-        key=lambda item: (
-            float(_best_position(item).position_score),
-            float(item.task_score),
-            -int(item.tid),
-        ),
-    )
-    return stats, _best_position(stats)
+
+    eligible = [stats_by_tid[tid] for tid in available]
+    if operator_name == "regret_insertion":
+        regrets = {
+            stats.tid: _candidate_regret(available[stats.tid], REGRET_K)
+            for stats in eligible
+        }
+        normalized = _normalize_value_map(regrets)
+        stats = max(eligible, key=lambda item: (item.task_score + normalized.get(item.tid, 0.0), -item.tid))
+    elif operator_name == "scarcity_first_insertion":
+        stats = max(eligible, key=lambda item: (item.task_score + item.landscape_features.scarcity_pressure, -item.tid))
+    elif operator_name == "bottleneck_insertion":
+        top_signal = max(policy.task_signal_weights, key=lambda name: (policy.task_signal_weights[name], name))
+        stats = max(eligible, key=lambda item: (item.task_score + getattr(item.landscape_features, top_signal), -item.tid))
+    elif operator_name == "diversified_insertion":
+        stats = _sample_rank_weighted(eligible, key=lambda item: (item.task_score, -item.tid), rng=rng)
+    else:
+        stats = max(eligible, key=lambda item: (max(candidate.position_score for candidate in available[item.tid]), item.task_score, -item.tid))
+
+    positions = list(available[stats.tid])
+    if operator_name == "diversified_insertion":
+        candidate = _sample_rank_weighted(positions, key=lambda item: (item.position_score, -item.agent_id, -item.position), rng=rng)
+    else:
+        candidate = max(positions, key=lambda item: (item.position_score, -item.agent_id, -item.position))
+    return stats, candidate
 
 
-def _choose_scarcity_first(stats_by_tid: Dict[int, TaskRepairStats]) -> Optional[Tuple[TaskRepairStats, RepairCandidate]]:
-    feasible_stats = [stats for stats in stats_by_tid.values() if stats.feasible_count > 0]
-    if not feasible_stats:
-        return None
-    stats = max(
-        feasible_stats,
-        key=lambda item: (
-            float(item.task_score) + float(item.landscape_features.scarcity_pressure),
-            -int(item.tid),
-        ),
-    )
-    return stats, _best_position(stats)
-
-
-def _choose_regret_k(stats_by_tid: Dict[int, TaskRepairStats], budget_score: int) -> Optional[Tuple[TaskRepairStats, RepairCandidate]]:
-    feasible_stats = [stats for stats in stats_by_tid.values() if stats.feasible_count > 0]
-    if not feasible_stats:
-        return None
-    k = regret_k_from_budget(budget_score)
-    regrets = {stats.tid: _position_score_regret(stats, k) for stats in feasible_stats}
-    normalized = _normalize_value_map(regrets)
-    stats = max(
-        feasible_stats,
-        key=lambda item: (float(item.task_score) + float(normalized.get(item.tid, 0.0)), -int(item.tid)),
-    )
-    return stats, _best_position(stats)
-
-
-def _position_score_regret(stats: TaskRepairStats, k: int) -> float:
-    scores = sorted((float(candidate.position_score) for candidate in stats.sorted_feasible_candidates), reverse=True)
+def _candidate_regret(candidates: Sequence[InsertionCandidate], k: int) -> float:
+    scores = sorted((candidate.position_score for candidate in candidates), reverse=True)
     if not scores:
         return 0.0
-    index = min(max(0, int(k) - 1), len(scores) - 1)
-    return float(scores[0] - scores[index])
+    return scores[0] - scores[min(k - 1, len(scores) - 1)]
 
 
-def _top_non_neutral_landscape_metric(policy: WeightedALNSPolicy) -> str:
-    options = [
-        (name, pref)
-        for name, pref in policy.repair_task_metric_preferences.preferences_dict().items()
-        if str(pref.direction) != "neutral"
-    ]
-    if not options:
-        return "cost_pressure"
-    return max(options, key=lambda item: (int(item[1].score), str(item[0])))[0]
+def _weighted_choice(weights: Dict[str, int], rng: random.Random) -> str:
+    positive = [(name, max(0, int(weight))) for name, weight in weights.items()]
+    total = sum(weight for _, weight in positive)
+    if total <= 0:
+        return sorted(weights)[0]
+    target = rng.uniform(0.0, total)
+    running = 0.0
+    for name, weight in positive:
+        running += weight
+        if target <= running:
+            return name
+    return positive[-1][0]
 
 
-def _sample_from_top(items: Sequence[Any], *, key: Any, exploration_rate: float, rng: random.Random) -> Any:
+def _sample_rank_weighted(items: Sequence[Any], *, key: Any, rng: random.Random, alpha: float = 0.75) -> Any:
     ordered = sorted(items, key=key, reverse=True)
-    top_n = max(1, min(len(ordered), round(1 + float(exploration_rate) * 10)))
-    return ordered[rng.randrange(top_n)]
+    if not ordered:
+        raise ValueError("cannot sample from empty items")
+    weights = [1.0 / ((rank + 1) ** float(alpha)) for rank in range(len(ordered))]
+    total = sum(weights)
+    threshold = rng.random() * total
+    acc = 0.0
+    for item, weight in zip(ordered, weights):
+        acc += weight
+        if acc >= threshold:
+            return item
+    return ordered[-1]
 
 
-def _best_position(stats: TaskRepairStats) -> RepairCandidate:
-    return max(
-        stats.sorted_feasible_candidates,
-        key=lambda item: (float(item.position_score), -int(item.agent_id), -int(item.position)),
-    )
-
-
-def _new_diagnostics(operator_name: str, policy: WeightedALNSPolicy, unassigned_before: int) -> Dict[str, Any]:
+def _new_insertion_diagnostics(context: InsertionContext, policy: InsertionPolicy, unassigned_before: int) -> Dict[str, Any]:
     return {
-        "operator": str(operator_name),
-        "candidate_budget_score": int(policy.candidate_budget_score),
-        "exploration_score": int(policy.exploration_score),
-        "repair_task_metric_preferences": policy.repair_task_metric_preferences.as_dict(),
-        "repair_position_metric_preferences": policy.repair_position_metric_preferences.as_dict(),
+        "context": context.kind,
+        "feasibility_mode": context.feasibility_mode,
+        "operator_weights": dict(policy.operator_weights),
+        "task_signal_weights": dict(policy.task_signal_weights),
+        "position_signal_weights": dict(policy.position_signal_weights),
+        "operator_use": {},
         "unassigned_before": int(unassigned_before),
         "unassigned_after": int(unassigned_before),
         "inserted_count": 0,
@@ -799,7 +706,7 @@ def _new_diagnostics(operator_name: str, policy: WeightedALNSPolicy, unassigned_
     }
 
 
-def _add_stats_diagnostics(diagnostics: Dict[str, Any], stats: TaskRepairStats, diag: Dict[str, int]) -> None:
+def _add_stats_diagnostics(diagnostics: Dict[str, Any], stats: TaskInsertionStats, diag: Dict[str, int]) -> None:
     diagnostics["tasks_analyzed"] += 1
     diagnostics["positions_generated"] += int(diag.get("positions_generated", 0))
     diagnostics["positions_strict_checked"] += int(diag.get("positions_strict_checked", 0))
@@ -815,18 +722,18 @@ def _finish_diagnostics(sol: AssignmentSolution, diagnostics: Dict[str, Any], st
     diagnostics["unassigned_after"] = int(len(sol.unassigned))
     diagnostics["failed_count"] = int(len(sol.unassigned))
     diagnostics["time_ms"] = round(1000.0 * max(0.0, time.perf_counter() - start), 4)
-    sol.solver_diagnostics["last_repair"] = diagnostics
+    sol.solver_diagnostics["last_insertion"] = diagnostics
 
 
-def _mark_dominated_candidates(candidates: Sequence[RepairCandidate]) -> List[RepairCandidate]:
-    marked: List[RepairCandidate] = []
+def _mark_dominated_candidates(candidates: Sequence[InsertionCandidate]) -> List[InsertionCandidate]:
+    marked: List[InsertionCandidate] = []
     for current in candidates:
         dominated = any(_dominates(other, current) for other in candidates if other is not current)
         marked.append(replace(current, dominated=bool(dominated)))
     return marked
 
 
-def _dominates(lhs: RepairCandidate, rhs: RepairCandidate) -> bool:
+def _dominates(lhs: InsertionCandidate, rhs: InsertionCandidate) -> bool:
     no_worse = (
         lhs.delta_distance <= rhs.delta_distance + _EPS
         and lhs.delta_energy <= rhs.delta_energy + _EPS
@@ -1066,20 +973,15 @@ def _std(values: Sequence[float]) -> float:
 
 
 __all__ = [
-    "RepairBudget",
-    "RepairCandidate",
-    "TaskRepairStats",
-    "budget_from_score",
-    "build_repair_landscape",
-    "build_repair_task_feature_rows",
-    "collect_task_repair_stats",
-    "compute_repair_candidate",
+    "InsertionContext",
+    "InsertionCandidate",
+    "TaskInsertionStats",
+    "build_insertion_landscape",
+    "score_candidate_tasks",
+    "collect_task_insertion_stats",
+    "compute_insertion_candidate",
     "enumerate_hard_filtered_positions",
-    "regret_k_from_budget",
-    "repair_with_bottleneck_targeted",
-    "repair_with_diversified_random",
-    "repair_with_feasible_greedy",
-    "repair_with_regret_k",
-    "repair_with_scarcity_first",
-    "score_repair_positions_before_strict",
+    "run_insertion_kernel",
+    "score_insert_positions",
 ]
+

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Unified feature computation for weighted ALNS destroy/repair decisions.
+"""Unified feature computation for weighted ALNS destroy/insertion decisions.
 
 All local value judgments flow through this module. Task-level reinsertion
 features drive only task ordering, while insert-candidate features drive only
@@ -44,7 +44,7 @@ def basic_insertion_feasibility_filter(
 ) -> List[InsertPosition]:
     """Hard/obvious feasibility pruning for insertion positions.
 
-    This stage only removes positions that fail skill coverage, optimistic depot
+    This filter only removes positions that fail skill coverage, optimistic depot
     reachability, or trivial route-independent energy lower bounds.
     """
     task = instance.task_by_id(int(tid))
@@ -422,4 +422,3 @@ def _service_energy(agent: Agent, task: Task) -> float:
     for skill in set(task.skill_req) & set(agent.skills):
         total += float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0))
     return total
-

@@ -1,121 +1,185 @@
 from __future__ import annotations
 
-"""Demo LLM policies used only by dummy mode and explicit fallback.
-
-These values are not imported by the real LLM path unless the caller has
-explicitly enabled `allow_llm_fallback`. They exist so command-line smoke tests
-can exercise the orchestration and ALNS plumbing without a network call.
-"""
-
 from typing import Any, Dict, Optional
 
 
-def demo_objective_plan() -> Dict[str, Any]:
+def demo_supervisor_kickoff(observation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    remaining = _remaining(observation)
     return {
-        "rationale": "Demo objective for local CLI smoke tests.",
-        "layers": [
-            {"name": "hard_feasibility", "metric": "violation_total", "direction": "min"},
-            {"name": "rescue_priority", "metric": "missed_priority", "direction": "min"},
-            {"name": "energy_use", "metric": "energy_total", "direction": "min"},
+        "supervisor_decision": {
+            "action": "start_run",
+            "global_objective": {
+                "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
+                "selection_basis": [
+                    {"metric": "missed_priority", "data_refs": ["E1"], "reason": "Prioritize mission value coverage."},
+                    {"metric": "unassigned_count", "data_refs": ["E1"], "reason": "Track task coverage after value loss."},
+                    {"metric": "energy_total", "data_refs": ["E1"], "reason": "Reduce resource use after coverage."},
+                ],
+            },
+            "next_contract": {
+                "contract_type": "initial_construction",
+                "stage_goal": {
+                    "summary": "Build a coverage-oriented initial solution.",
+                    "main_problem": "The run starts from empty routes.",
+                    "search_intent": "Insert valuable and scarce tasks early.",
+                },
+                "stage_objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
+                "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
+                "guidance": {
+                    "instruction": "Construct a stable initial solution with high task coverage.",
+                    "preferred_search_direction": "priority-and-scarcity-aware insertion",
+                    "protect": "Preserve time and energy slack for later insertions.",
+                    "success_signal": "Most high-priority tasks are assigned.",
+                    "failure_signal": "Many scarce high-priority tasks remain unassigned.",
+                },
+                "completion_policy": {
+                    "min_solver_actions": 1,
+                    "max_solver_actions": 1,
+                    "max_time_sec": _cap_time(remaining, 5.0),
+                    "max_iters": _cap_iters(remaining, 1),
+                    "success_rules": [{"event": "initial_solution_built", "count": 1, "scope": "total"}],
+                    "failure_rules": [{"event": "initial_solution_failed", "count": 1, "scope": "total"}],
+                },
+            },
+            "decision_basis": _basis("Start with coverage-oriented construction."),
+        }
+    }
+
+
+def demo_supervisor_review(observation: Optional[Dict[str, Any]] = None, *, stop: bool = False) -> Dict[str, Any]:
+    remaining = _remaining(observation)
+    allowed_actions = _allowed_actions(observation, remaining)
+    if stop or allowed_actions < 1 or int(float(remaining.get("iters", 0))) < 1:
+        return {
+            "supervisor_decision": {
+                "action": "stop_run",
+                "contract_review": _contract_review("The demo search is complete."),
+                "stop_reason": "The demo search is complete.",
+                "decision_basis": _basis("Return the best solution found."),
+            }
+        }
+    actions = min(3, allowed_actions)
+    actions = max(1, actions)
+    return {
+        "supervisor_decision": {
+            "action": "issue_contract",
+            "contract_review": _contract_review("Initial construction produced a working solution."),
+            "next_contract": {
+                "contract_type": "alns_search",
+                "stage_goal": {
+                    "summary": "Improve the coverage-oriented solution.",
+                    "main_problem": "Some valuable tasks may remain unassigned or costly.",
+                    "search_intent": "Locally rebuild routes around valuable and coupled tasks.",
+                },
+                "stage_objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
+                "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
+                "guidance": {
+                    "instruction": "Run focused ALNS actions to improve priority coverage.",
+                    "preferred_search_direction": "related-cluster removal with scarcity-aware reinsertion",
+                    "protect": "Preserve feasible route structure and useful slack.",
+                    "success_signal": "Priority loss or unassigned count decreases.",
+                    "failure_signal": "Repeated flat outcomes indicate this direction is exhausted.",
+                },
+                "completion_policy": {
+                    "min_solver_actions": actions,
+                    "max_solver_actions": actions,
+                    "max_time_sec": _cap_time(remaining, 1.0),
+                    "max_iters": _cap_iters(remaining, max(actions, 3)),
+                    "success_rules": [{"event": "global_best_improved", "count": 1, "scope": "total"}],
+                    "failure_rules": [{"event": "quality_flat", "count": actions, "scope": "consecutive"}],
+                },
+            },
+            "decision_basis": _basis("Use a short multi-action ALNS contract."),
+        }
+    }
+
+
+def demo_solver_decision(observation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    contract = (observation or {}).get("active_contract", {}) or {}
+    if contract.get("contract_type") == "initial_construction":
+        return {
+            "solver_decision": {
+                "action": "construct_initial",
+                "reason": "Build the first working solution under the initial construction contract.",
+                "insertion_control": _insertion_control(),
+                "decision_basis": _basis("Use priority and scarcity aware construction."),
+            }
+        }
+    return {
+        "solver_decision": {
+            "action": "run_alns",
+            "reason": "Use a focused local rebuild under the active contract.",
+            "destroy_control": {
+                "operator_scores": [{"name": "related_cluster_removal", "score": 8, "reason": "Rebuild a coupled local region."}],
+                "signal_scores": [{"name": "coupling_pressure", "score": 8, "reason": "Target tightly coupled tasks."}],
+                "intensity_score": 5,
+            },
+            "insertion_control": _insertion_control(),
+            "acceptance_control": {"mode": "threshold", "intensity_score": 4, "reason": "Allow limited exploration."},
+            "decision_basis": _basis("Run one bounded ALNS action."),
+        }
+    }
+
+
+def _insertion_control() -> Dict[str, Any]:
+    return {
+        "operator_scores": [
+            {"name": "scarcity_first_insertion", "score": 8, "reason": "Insert scarce tasks early."},
+            {"name": "regret_insertion", "score": 7, "reason": "Avoid losing future insertion opportunities."},
+        ],
+        "task_signal_scores": [
+            {"name": "priority_loss", "score": 9, "reason": "Protect valuable tasks."},
+            {"name": "scarcity_pressure", "score": 8, "reason": "Prioritize constrained tasks."},
+        ],
+        "position_signal_scores": [
+            {"name": "insert_cost", "score": 8, "reason": "Control route growth."},
+            {"name": "future_slack", "score": 7, "reason": "Preserve future flexibility."},
         ],
     }
 
 
-def demo_build_initial_action() -> Dict[str, Any]:
+def _basis(summary: str) -> Dict[str, Any]:
+    return {"evidence_refs": ["E1"], "memory_refs": [], "summary": summary}
+
+
+def _contract_review(summary: str) -> Dict[str, str]:
     return {
-        "rationale": "Build a deterministic initial incumbent before ALNS.",
-        "operator_intent": {
-            "remove": "not used during construction",
-            "reinsert": "high priority feasible tasks",
-            "insert": "low violation insertion positions",
-        },
-        "action_type": "build_initial_solution",
-        "action_payload": {},
-        "budget_request": {},
+        "outcome_summary": summary,
+        "main_lesson": "The next decision should use the completed contract result and remaining budget.",
+        "next_intent": "Continue only when there is enough budget for another contract.",
     }
 
 
-def demo_run_alns_action(
-    *,
-    time_limit_sec: float = 1.0,
-    max_iters: Optional[int] = 60,
-) -> Dict[str, Any]:
-    budget_request: Dict[str, Any] = {"time_limit_sec": float(time_limit_sec)}
-    if max_iters is not None:
-        budget_request["max_iters"] = int(max_iters)
-
+def _remaining(observation: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    raw = (observation or {}).get("remaining_global_budget", {}) or {}
     return {
-        "rationale": "Run demo weighted ALNS with balanced repair pressure.",
-        "operator_intent": {
-            "remove": "risky assigned tasks",
-            "reinsert": "high priority unassigned tasks",
-            "insert": "feasible low detour positions",
-        },
-        "action_type": "run_alns",
-        "action_payload": {
-            "search_diagnosis_scores": {
-                "cost_descent": 8,
-                "scarcity_protection": 7,
-                "structure_rebuild": 6,
-                "route_rebalance": 5,
-                "diversified_escape": 3,
-            },
-            "destroy_operator_scores": {
-                "random_removal": 2,
-                "worst_task_removal": 8,
-                "related_cluster_removal": 7,
-                "critical_block_removal": 6,
-                "route_rebalance_removal": 5,
-            },
-            "repair_operator_scores": {
-                "feasible_greedy_repair": 4,
-                "scarcity_first_repair": 8,
-                "regret_k_repair": 8,
-                "bottleneck_targeted_repair": 6,
-                "diversified_random_repair": 3,
-            },
-            "destroy_metric_preferences": {
-                "cost_pressure": {"score": 9, "direction": "prefer_high"},
-                "scarcity_pressure": {"score": 7, "direction": "avoid_high"},
-                "coupling_pressure": {"score": 8, "direction": "prefer_high"},
-                "mobility_opportunity": {"score": 6, "direction": "prefer_high"},
-                "balance_pressure": {"score": 5, "direction": "prefer_high"},
-            },
-            "repair_task_metric_preferences": {
-                "cost_pressure": {"score": 5, "direction": "prefer_high"},
-                "scarcity_pressure": {"score": 9, "direction": "prefer_high"},
-                "coupling_pressure": {"score": 7, "direction": "prefer_high"},
-                "mobility_opportunity": {"score": 4, "direction": "prefer_low"},
-                "balance_pressure": {"score": 6, "direction": "prefer_high"},
-            },
-            "repair_position_metric_preferences": {
-                "insert_cost": {"score": 9, "direction": "prefer_low"},
-                "future_slack": {"score": 8, "direction": "prefer_high"},
-                "route_balance_gain": {"score": 6, "direction": "prefer_high"},
-                "local_coupling_penalty": {"score": 5, "direction": "prefer_low"},
-                "diversity_gain": {"score": 3, "direction": "prefer_high"},
-            },
-            "destroy_strength_score": 6,
-            "candidate_budget_score": 7,
-            "exploration_score": 3,
-            "acceptance": "sa",
-            "accept_level": 0.25,
-            "reaction_factor": 0.20,
-            "prior_mix_lambda": 0.25,
-        },
-        "budget_request": budget_request,
+        "solver_calls": float(raw.get("solver_calls", 1) or 0),
+        "time_sec": float(raw.get("time_sec", 1.0) or 0.0),
+        "iters": float(raw.get("iters", 1) or 0),
     }
 
 
-def demo_stop_action() -> Dict[str, Any]:
-    return {
-        "rationale": "Stop after the demo construction and ALNS step.",
-        "operator_intent": {
-            "remove": "not needed",
-            "reinsert": "not needed",
-            "insert": "not needed",
-        },
-        "action_type": "stop",
-        "action_payload": {},
-        "budget_request": {},
-    }
+def _allowed_actions(observation: Optional[Dict[str, Any]], remaining: Dict[str, float]) -> int:
+    limits = (observation or {}).get("next_contract_resource_limits", {}) or {}
+    if "max_solver_actions_allowed" in limits:
+        return max(0, int(float(limits.get("max_solver_actions_allowed", 0) or 0)))
+    return max(
+        0,
+        min(
+            int(float(remaining.get("solver_calls", 0) or 0)),
+            int(float((observation or {}).get("remaining_global_budget", {}).get("step_calls", remaining.get("solver_calls", 0)) or 0)),
+        ),
+    )
+
+
+def _cap_time(remaining: Dict[str, float], desired: float) -> float:
+    available = max(1e-6, float(remaining.get("time_sec", desired)))
+    return max(1e-6, min(float(desired), available))
+
+
+def _cap_iters(remaining: Dict[str, float], desired: int) -> int:
+    available = max(1, int(float(remaining.get("iters", desired))))
+    return max(1, min(int(desired), available))
+
+
+__all__ = ["demo_supervisor_kickoff", "demo_supervisor_review", "demo_solver_decision"]

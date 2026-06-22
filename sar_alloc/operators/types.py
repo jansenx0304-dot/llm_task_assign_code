@@ -1,93 +1,118 @@
 from __future__ import annotations
 
-"""Typed objects for the weighted ALNS policy interface."""
+"""Typed internal policies compiled from the small public LLM controls."""
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Tuple
 
 
-LANDSCAPE_METRIC_FIELDS: Tuple[str, ...] = (
-    "cost_pressure",
-    "scarcity_pressure",
-    "coupling_pressure",
-    "mobility_opportunity",
-    "balance_pressure",
+DESTROY_OPERATOR_NAMES: Tuple[str, ...] = (
+    "random_removal", "worst_task_removal", "related_cluster_removal",
+    "critical_block_removal", "route_rebalance_removal",
 )
-
-REPAIR_POSITION_METRIC_FIELDS: Tuple[str, ...] = (
-    "insert_cost",
-    "future_slack",
-    "route_balance_gain",
-    "local_coupling_penalty",
-    "diversity_gain",
+INSERTION_OPERATOR_NAMES: Tuple[str, ...] = (
+    "greedy_insertion", "scarcity_first_insertion", "regret_insertion",
+    "bottleneck_insertion", "diversified_insertion",
 )
-
-METRIC_DIRECTIONS: Tuple[str, ...] = (
-    "prefer_high",
-    "prefer_low",
-    "avoid_high",
-    "neutral",
+DESTROY_SIGNAL_NAMES: Tuple[str, ...] = (
+    "cost_pressure", "coupling_pressure", "route_balance_pressure",
+    "mobility_opportunity", "scarcity_protection",
 )
-
-SEARCH_DIAGNOSIS_FIELDS: Tuple[str, ...] = (
-    "cost_descent",
-    "scarcity_protection",
-    "structure_rebuild",
-    "route_rebalance",
-    "diversified_escape",
+INSERTION_TASK_SIGNAL_NAMES: Tuple[str, ...] = (
+    "priority_loss", "scarcity_pressure", "regret_pressure",
+    "bottleneck_pressure", "mobility_opportunity",
 )
-
-DESTROY_CANDIDATE_GENERATORS: Tuple[str, ...] = (
-    "random_removal",
-    "worst_task_removal",
-    "related_cluster_removal",
-    "critical_block_removal",
-    "route_rebalance_removal",
+INSERTION_POSITION_SIGNAL_NAMES: Tuple[str, ...] = (
+    "insert_cost", "future_slack", "route_balance_gain",
+    "local_coupling_penalty", "diversity_gain",
 )
-
-REPAIR_TASK_SELECTORS: Tuple[str, ...] = (
-    "feasible_greedy_repair",
-    "scarcity_first_repair",
-    "regret_k_repair",
-    "bottleneck_targeted_repair",
-    "diversified_random_repair",
-)
-
-ACCEPTANCE_MODES: Tuple[str, ...] = (
-    "greedy",
-    "threshold",
-    "sa",
-)
-
-POLICY_BOUNDS: Dict[str, Tuple[float, float]] = {
-    "strength_ratio": (0.02, 0.40),
-    "reaction_factor": (0.05, 0.40),
-    "accept_level": (0.0, 1.0),
-    "prior_mix_lambda": (0.20, 0.35),
-}
-
-OPERATOR_PRIOR_BOUNDS: Tuple[float, float] = (0.10, 5.0)
+ACCEPTANCE_MODES: Tuple[str, ...] = ("greedy", "threshold", "sa")
 
 
 @dataclass(frozen=True, slots=True)
-class MetricPreference:
-    score: int
-    direction: str
+class DestroyPolicy:
+    operator_weights: Dict[str, int]
+    signal_weights: Dict[str, int]
+    intensity_score: int
+    remove_ratio: float
 
     def as_dict(self) -> Dict[str, Any]:
         return {
-            "score": int(self.score),
-            "direction": str(self.direction),
+            "operator_weights": dict(self.operator_weights),
+            "signal_weights": dict(self.signal_weights),
+            "intensity_score": self.intensity_score,
+            "remove_ratio": self.remove_ratio,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class InsertionPolicy:
+    operator_weights: Dict[str, int]
+    task_signal_weights: Dict[str, int]
+    position_signal_weights: Dict[str, int]
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "operator_weights": dict(self.operator_weights),
+            "task_signal_weights": dict(self.task_signal_weights),
+            "position_signal_weights": dict(self.position_signal_weights),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptancePolicy:
+    mode: str
+    intensity_score: int
+    accept_level: float
+    exploration_score: float
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "intensity_score": self.intensity_score,
+            "accept_level": self.accept_level,
+            "exploration_score": self.exploration_score,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledALNSPolicy:
+    destroy_policy: DestroyPolicy
+    insertion_policy: InsertionPolicy
+    acceptance_policy: AcceptancePolicy
+    reaction_factor: float = 0.20
+    prior_mix_lambda: float = 0.25
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "destroy_policy": self.destroy_policy.as_dict(),
+            "insertion_policy": self.insertion_policy.as_dict(),
+            "acceptance_policy": self.acceptance_policy.as_dict(),
+            "reaction_factor": self.reaction_factor,
+            "prior_mix_lambda": self.prior_mix_lambda,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SolverRequest:
+    time_limit_sec: float
+    max_iters: int
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"time_limit_sec": self.time_limit_sec, "max_iters": self.max_iters}
 
 
 @dataclass(frozen=True, slots=True)
 class LandscapeFeatures:
     cost_pressure: float
+    priority_loss: float
     scarcity_pressure: float
     coupling_pressure: float
     mobility_opportunity: float
-    balance_pressure: float
+    route_balance_pressure: float
+    violation_pressure: float
+    regret_pressure: float
+    bottleneck_pressure: float
 
     def as_dict(self) -> Dict[str, float]:
         return {field.name: float(getattr(self, field.name)) for field in fields(self)}
@@ -100,39 +125,10 @@ class PositionFeatures:
     route_balance_gain: float
     local_coupling_penalty: float
     diversity_gain: float
+    violation_delta: float
 
     def as_dict(self) -> Dict[str, float]:
         return {field.name: float(getattr(self, field.name)) for field in fields(self)}
-
-
-@dataclass(frozen=True, slots=True)
-class LandscapeMetricPreferences:
-    cost_pressure: MetricPreference
-    scarcity_pressure: MetricPreference
-    coupling_pressure: MetricPreference
-    mobility_opportunity: MetricPreference
-    balance_pressure: MetricPreference
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {field.name: getattr(self, field.name).as_dict() for field in fields(self)}
-
-    def preferences_dict(self) -> Dict[str, MetricPreference]:
-        return {field.name: getattr(self, field.name) for field in fields(self)}
-
-
-@dataclass(frozen=True, slots=True)
-class PositionMetricPreferences:
-    insert_cost: MetricPreference
-    future_slack: MetricPreference
-    route_balance_gain: MetricPreference
-    local_coupling_penalty: MetricPreference
-    diversity_gain: MetricPreference
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {field.name: getattr(self, field.name).as_dict() for field in fields(self)}
-
-    def preferences_dict(self) -> Dict[str, MetricPreference]:
-        return {field.name: getattr(self, field.name) for field in fields(self)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,64 +137,13 @@ class InsertPosition:
     position: int
 
     def as_dict(self) -> Dict[str, int]:
-        return {
-            "agent_id": int(self.agent_id),
-            "position": int(self.position),
-        }
+        return {"agent_id": self.agent_id, "position": self.position}
 
 
-@dataclass(frozen=True, slots=True)
-class WeightedALNSPolicy:
-    destroy_operator_scores: Dict[str, int]
-    repair_operator_scores: Dict[str, int]
-    destroy_metric_preferences: LandscapeMetricPreferences
-    repair_task_metric_preferences: LandscapeMetricPreferences
-    repair_position_metric_preferences: PositionMetricPreferences
-    search_diagnosis_scores: Dict[str, int]
-    destroy_strength_score: int
-    candidate_budget_score: int
-    exploration_score: int
-    destroy_operator_priors: Dict[str, float]
-    repair_operator_priors: Dict[str, float]
-    strength_ratio: float
-    exploration_rate: float
-    acceptance: str
-    accept_level: float
-    reaction_factor: float
-    prior_mix_lambda: float
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "search_diagnosis_scores": {
-                str(name): int(score)
-                for name, score in self.search_diagnosis_scores.items()
-            },
-            "destroy_operator_scores": {
-                str(name): int(score)
-                for name, score in self.destroy_operator_scores.items()
-            },
-            "repair_operator_scores": {
-                str(name): int(score)
-                for name, score in self.repair_operator_scores.items()
-            },
-            "destroy_metric_preferences": self.destroy_metric_preferences.as_dict(),
-            "repair_task_metric_preferences": self.repair_task_metric_preferences.as_dict(),
-            "repair_position_metric_preferences": self.repair_position_metric_preferences.as_dict(),
-            "destroy_strength_score": int(self.destroy_strength_score),
-            "candidate_budget_score": int(self.candidate_budget_score),
-            "exploration_score": int(self.exploration_score),
-            "destroy_operator_priors": {
-                str(name): float(weight)
-                for name, weight in self.destroy_operator_priors.items()
-            },
-            "repair_operator_priors": {
-                str(name): float(weight)
-                for name, weight in self.repair_operator_priors.items()
-            },
-            "strength_ratio": float(self.strength_ratio),
-            "exploration_rate": float(self.exploration_rate),
-            "acceptance": str(self.acceptance),
-            "accept_level": float(self.accept_level),
-            "reaction_factor": float(self.reaction_factor),
-            "prior_mix_lambda": float(self.prior_mix_lambda),
-        }
+__all__ = [
+    "ACCEPTANCE_MODES", "DESTROY_OPERATOR_NAMES", "DESTROY_SIGNAL_NAMES",
+    "INSERTION_OPERATOR_NAMES", "INSERTION_TASK_SIGNAL_NAMES",
+    "INSERTION_POSITION_SIGNAL_NAMES", "DestroyPolicy",
+    "InsertionPolicy", "AcceptancePolicy", "CompiledALNSPolicy", "SolverRequest",
+    "LandscapeFeatures", "PositionFeatures", "InsertPosition",
+]
