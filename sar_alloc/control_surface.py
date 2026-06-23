@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Single registry for the public, executable LLM control surface."""
+
+from __future__ import annotations
 
 from typing import Dict, Tuple
 
@@ -12,7 +12,6 @@ from .operators.types import (
     INSERTION_POSITION_SIGNAL_NAMES,
     INSERTION_TASK_SIGNAL_NAMES,
 )
-
 
 QUALITY_METRICS: Tuple[str, ...] = (
     "missed_priority",

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-
 SYSTEM_PROMPT = (
     "You control a task-assignment optimizer. Return exactly one JSON object "
     "matching the requested schema. Do not use markdown or add extra fields."
@@ -14,7 +13,9 @@ def get_system_prompt() -> str:
     return SYSTEM_PROMPT
 
 
-def get_supervisor_kickoff_prompt(*, user_goal_text: str, observation: Dict[str, Any], json_schema: str) -> str:
+def get_supervisor_kickoff_prompt(
+    *, user_goal_text: str, observation: Dict[str, Any], json_schema: str
+) -> str:
     return _prompt(
         "SUPERVISOR_KICKOFF",
         (
@@ -27,7 +28,9 @@ def get_supervisor_kickoff_prompt(*, user_goal_text: str, observation: Dict[str,
     )
 
 
-def get_supervisor_review_prompt(*, user_goal_text: str, observation: Dict[str, Any], json_schema: str) -> str:
+def get_supervisor_review_prompt(
+    *, user_goal_text: str, observation: Dict[str, Any], json_schema: str
+) -> str:
     return _prompt(
         "SUPERVISOR_REVIEW",
         (
@@ -40,7 +43,9 @@ def get_supervisor_review_prompt(*, user_goal_text: str, observation: Dict[str, 
     )
 
 
-def get_solver_prompt(*, user_goal_text: str, observation: Dict[str, Any], json_schema: str) -> str:
+def get_solver_prompt(
+    *, user_goal_text: str, observation: Dict[str, Any], json_schema: str
+) -> str:
     return _prompt(
         "SOLVER",
         (

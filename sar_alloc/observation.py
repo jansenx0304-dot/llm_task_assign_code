@@ -72,9 +72,15 @@ def build_supervisor_review_observation(
             "max_time_sec": resource_limits["max_time_sec_allowed"],
             "max_iters": resource_limits["max_iters_allowed"],
         },
-        "completed_contract": _contract_view(completed_contract, completed_contract_progress),
+        "completed_contract": _contract_view(
+            completed_contract, completed_contract_progress
+        ),
         "contract_completion": dict(completed_contract_result),
-        "condition_report": list(completed_contract_progress.get("condition_report", []) or completed_contract_result.get("condition_report", []) or []),
+        "condition_report": list(
+            completed_contract_progress.get("condition_report", [])
+            or completed_contract_result.get("condition_report", [])
+            or []
+        ),
         "stage_verification_summary": _verification_summary(verifications or []),
         "solution_position": {
             "working": _state_digest_from_summary(working_summary),
@@ -121,9 +127,15 @@ def build_solver_observation(
             "role": "solver",
             "step_index": step_index,
             "contract_view": contract,
-            "task_buildability_view": _task_buildability_view(working_summary or {}, candidate_landscape or {}),
-            "insertion_position_landscape": _insertion_position_landscape(candidate_landscape or {}),
-            "decision_targets": _initial_targets(working_summary or {}, candidate_landscape or {}),
+            "task_buildability_view": _task_buildability_view(
+                working_summary or {}, candidate_landscape or {}
+            ),
+            "insertion_position_landscape": _insertion_position_landscape(
+                candidate_landscape or {}
+            ),
+            "decision_targets": _initial_targets(
+                working_summary or {}, candidate_landscape or {}
+            ),
             "last_action_verification": _compact_last_verification(last_verification),
             "action_space": _action_space(candidates, initial=True),
             "usable_memory": list(recent_memory or []),
@@ -139,23 +151,33 @@ def build_solver_observation(
             "best_feasible": _best_digest(best_summary),
         },
         "last_action_verification": _compact_last_verification(last_verification),
-        "decision_targets": _decision_targets(active_contract, working_summary or {}, candidate_landscape or {}),
+        "decision_targets": _decision_targets(
+            active_contract, working_summary or {}, candidate_landscape or {}
+        ),
         "action_space": _action_space(candidates, initial=False),
         "usable_memory": list(recent_memory or []),
     }
 
 
-def next_contract_resource_limits(remaining_global_budget: Dict[str, Any]) -> Dict[str, Any]:
+def next_contract_resource_limits(
+    remaining_global_budget: Dict[str, Any],
+) -> Dict[str, Any]:
     step_calls = int(float(remaining_global_budget.get("step_calls", 0) or 0))
     solver_calls = int(float(remaining_global_budget.get("solver_calls", 0) or 0))
     return {
         "max_solver_actions_allowed": max(0, min(step_calls, solver_calls)),
-        "max_time_sec_allowed": max(0.0, float(remaining_global_budget.get("time_sec", 0.0) or 0.0)),
-        "max_iters_allowed": max(0, int(float(remaining_global_budget.get("iters", 0) or 0))),
+        "max_time_sec_allowed": max(
+            0.0, float(remaining_global_budget.get("time_sec", 0.0) or 0.0)
+        ),
+        "max_iters_allowed": max(
+            0, int(float(remaining_global_budget.get("iters", 0) or 0))
+        ),
     }
 
 
-def _contract_view(active_contract: Dict[str, Any], progress: Dict[str, Any]) -> Dict[str, Any]:
+def _contract_view(
+    active_contract: Dict[str, Any], progress: Dict[str, Any]
+) -> Dict[str, Any]:
     del progress
     feasibility = dict(active_contract.get("feasibility_control", {}) or {})
     return {
@@ -166,19 +188,42 @@ def _contract_view(active_contract: Dict[str, Any], progress: Dict[str, Any]) ->
             for item in active_contract.get("objective_layers", [])
         ],
         "feasibility_mode": feasibility.get("mode", "strict"),
-        "protected_metrics": [dict(item) for item in active_contract.get("protected_metrics", [])],
+        "protected_metrics": [
+            dict(item) for item in active_contract.get("protected_metrics", [])
+        ],
+        "protected_metric_baseline": dict(
+            active_contract.get("protected_metric_baseline", {}) or {}
+        ),
     }
 
 
-def _problem_profile(instance: Instance, instance_summary: Dict[str, Any]) -> Dict[str, Any]:
+def _problem_profile(
+    instance: Instance, instance_summary: Dict[str, Any]
+) -> Dict[str, Any]:
     tasks = list(instance.tasks)
     agents = list(instance.agents)
     capable_counts = [_capable_count(agents, task) for task in tasks]
     priorities = [float(task.priority) for task in tasks]
-    high_cut = sorted(priorities)[max(0, int(0.75 * len(priorities)) - 1)] if priorities else 0.0
-    scarce = [task for task, count in zip(tasks, capable_counts) if count <= max(1, len(agents) // 4)]
-    tw_risk = float((instance_summary.get("time_window_risk", {}) or {}).get("negative_slack_frac_lb", 0.0) or 0.0)
-    energy_risk = float((instance_summary.get("energy_risk", {}) or {}).get("energy_tight_frac_lb", 0.0) or 0.0)
+    high_cut = (
+        sorted(priorities)[max(0, int(0.75 * len(priorities)) - 1)]
+        if priorities
+        else 0.0
+    )
+    scarce = [
+        task
+        for task, count in zip(tasks, capable_counts)
+        if count <= max(1, len(agents) // 4)
+    ]
+    tw_risk = float(
+        (instance_summary.get("time_window_risk", {}) or {}).get(
+            "negative_slack_frac_lb", 0.0
+        )
+        or 0.0
+    )
+    energy_risk = float(
+        (instance_summary.get("energy_risk", {}) or {}).get("energy_tight_frac_lb", 0.0)
+        or 0.0
+    )
     dominant = "energy" if energy_risk >= tw_risk else "time_window"
     return {
         "num_tasks": len(tasks),
@@ -186,15 +231,19 @@ def _problem_profile(instance: Instance, instance_summary: Dict[str, Any]) -> Di
         "priority_mass": round(sum(priorities), 6),
         "high_priority_task_count": sum(1 for value in priorities if value >= high_cut),
         "zero_capable_task_count": sum(1 for count in capable_counts if count == 0),
-        "scarce_task_count": len(scarce),
-        "scarce_priority_mass": round(sum(float(task.priority) for task in scarce), 6),
+        "static_capability_scarce_task_count": len(scarce),
+        "static_capability_scarce_priority_mass": round(
+            sum(float(task.priority) for task in scarce), 6
+        ),
         "time_window_risk": _risk_label(tw_risk),
         "energy_risk": _risk_label(energy_risk),
         "dominant_risk": dominant,
     }
 
 
-def _task_buildability_view(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> Dict[str, Any]:
+def _task_buildability_view(
+    working_summary: Dict[str, Any], landscape: Dict[str, Any]
+) -> Dict[str, Any]:
     raw_buckets = landscape.get("target_buckets", {}) or {}
     quality = working_summary.get("quality_summary", {}) or {}
     if "unassigned_priority" not in raw_buckets:
@@ -208,27 +257,40 @@ def _task_buildability_view(working_summary: Dict[str, Any], landscape: Dict[str
     inactive: List[Dict[str, Any]] = []
     for kind, target_id, controls in (
         (
-            "unassigned_priority", "T_unassigned_priority",
+            "unassigned_priority",
+            "T_unassigned_priority",
             {
-                "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
-                "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
+                "insertion_control.task_signal_scores": [
+                    "priority_loss",
+                    "scarcity_pressure",
+                ],
+                "insertion_control.position_signal_scores": [
+                    "future_slack",
+                    "insert_cost",
+                ],
             },
         ),
         (
-            "scarce_unassigned", "T_scarce_unassigned",
+            "insertion_scarce_unassigned",
+            "T_scarce_unassigned",
             {
-                "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
+                "insertion_control.task_signal_scores": [
+                    "scarcity_pressure",
+                    "priority_loss",
+                ],
                 "insertion_control.position_signal_scores": ["future_slack"],
             },
         ),
     ):
         bucket = dict(raw_buckets.get(kind, {}) or {})
+        if not bucket and kind == "insertion_scarce_unassigned":
+            bucket = dict(raw_buckets.get("scarce_unassigned", {}) or {})
         item = {
             "target_id": target_id,
             "kind": kind,
-            "task_ids": [int(value) for value in bucket.get("task_ids", [])],
             "task_count": int(bucket.get("task_count", 0) or 0),
             "priority_mass": float(bucket.get("priority_mass", 0.0) or 0.0),
+            "top_tasks": list(bucket.get("top_tasks", []) or []),
             "recommended_controls": controls,
         }
         (active if item["task_count"] > 0 else inactive).append(item)
@@ -264,17 +326,32 @@ def _insertion_position_landscape(landscape: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _initial_targets(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
-    targets = list(_task_buildability_view(working_summary, landscape)["target_buckets"])
-    targets.append({"target_id": "contract_review", "kind": "contract_review", "recommended_controls": {}})
+def _initial_targets(
+    working_summary: Dict[str, Any], landscape: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    targets = list(
+        _task_buildability_view(working_summary, landscape)["target_buckets"]
+    )
+    targets.append(
+        {
+            "target_id": "contract_review",
+            "kind": "contract_review",
+            "recommended_controls": {},
+        }
+    )
     _validate_recommended_controls(targets)
     return targets
 
 
-def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
-    quality = (working_summary.get("quality_summary", {}) or {})
-    feasibility = (working_summary.get("feasibility_summary", {}) or {})
-    target_kinds = list((contract.get("target_policy", {}) or {}).get("preferred_target_kinds", []) or [])
+def _decision_targets(
+    contract: Dict[str, Any], working_summary: Dict[str, Any], landscape: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    quality = working_summary.get("quality_summary", {}) or {}
+    feasibility = working_summary.get("feasibility_summary", {}) or {}
+    target_kinds = list(
+        (contract.get("target_policy", {}) or {}).get("preferred_target_kinds", [])
+        or []
+    )
     if not target_kinds:
         target_kinds = ["unassigned_priority", "energy_debt"]
     out: List[Dict[str, Any]] = []
@@ -286,73 +363,121 @@ def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any],
                 bucket = {
                     "task_count": int(quality.get("unassigned_count", 0) or 0),
                     "priority_mass": float(quality.get("missed_priority", 0.0) or 0.0),
-                    "task_ids": [],
+                    "top_tasks": [],
                 }
             if int(bucket.get("task_count", 0) or 0) == 0:
                 continue
-            out.append({
-                "target_id": "T_unassigned_priority",
-                "kind": kind,
-                "task_ids": [int(value) for value in bucket.get("task_ids", [])],
-                "task_count": int(bucket.get("task_count", 0)),
-                "priority_mass": float(bucket.get("priority_mass", 0.0)),
-                "metric_pressure": {
-                    "missed_priority": float(quality.get("missed_priority", 0.0) or 0.0),
-                    "unassigned_count": float(quality.get("unassigned_count", 0.0) or 0.0),
-                },
-                "recommended_controls": {
-                    "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
-                    "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
-                    "destroy_control.signal_scores": ["mobility_opportunity", "scarcity_protection"],
-                },
-            })
-        elif kind == "scarce_unassigned":
-            bucket = dict(bucket_map.get(kind, {}) or {})
+            out.append(
+                {
+                    "target_id": "T_unassigned_priority",
+                    "kind": kind,
+                    "task_count": int(bucket.get("task_count", 0)),
+                    "priority_mass": float(bucket.get("priority_mass", 0.0)),
+                    "top_tasks": list(bucket.get("top_tasks", []) or []),
+                    "metric_pressure": {
+                        "missed_priority": float(
+                            quality.get("missed_priority", 0.0) or 0.0
+                        ),
+                        "unassigned_count": float(
+                            quality.get("unassigned_count", 0.0) or 0.0
+                        ),
+                    },
+                    "recommended_controls": {
+                        "insertion_control.task_signal_scores": [
+                            "priority_loss",
+                            "scarcity_pressure",
+                        ],
+                        "insertion_control.position_signal_scores": [
+                            "future_slack",
+                            "insert_cost",
+                        ],
+                        "destroy_control.signal_scores": [
+                            "mobility_opportunity",
+                            "scarcity_protection",
+                        ],
+                    },
+                }
+            )
+        elif kind in {"scarce_unassigned", "insertion_scarce_unassigned"}:
+            normalized_kind = "insertion_scarce_unassigned"
+            bucket = dict(
+                bucket_map.get(normalized_kind, bucket_map.get("scarce_unassigned", {}))
+                or {}
+            )
             if int(bucket.get("task_count", 0) or 0) == 0:
                 continue
-            out.append({
-                "target_id": "T_scarce_unassigned",
-                "kind": kind,
-                "task_ids": [int(value) for value in bucket.get("task_ids", [])],
-                "task_count": int(bucket.get("task_count", 0)),
-                "priority_mass": float(bucket.get("priority_mass", 0.0)),
-                "metric_pressure": {"count": int(bucket.get("task_count", 0) or 0)},
-                "recommended_controls": {
-                    "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
-                    "insertion_control.position_signal_scores": ["future_slack"],
-                    "destroy_control.signal_scores": ["scarcity_protection", "mobility_opportunity"],
-                },
-            })
+            out.append(
+                {
+                    "target_id": "T_scarce_unassigned",
+                    "kind": normalized_kind,
+                    "task_count": int(bucket.get("task_count", 0)),
+                    "priority_mass": float(bucket.get("priority_mass", 0.0)),
+                    "top_tasks": list(bucket.get("top_tasks", []) or []),
+                    "metric_pressure": {"count": int(bucket.get("task_count", 0) or 0)},
+                    "recommended_controls": {
+                        "insertion_control.task_signal_scores": [
+                            "scarcity_pressure",
+                            "priority_loss",
+                        ],
+                        "insertion_control.position_signal_scores": ["future_slack"],
+                        "destroy_control.signal_scores": [
+                            "scarcity_protection",
+                            "mobility_opportunity",
+                        ],
+                    },
+                }
+            )
         elif kind == "time_window_debt":
-            out.append(_debt_target("T_time_window_debt", kind, "time_window", feasibility))
+            out.append(
+                _debt_target("T_time_window_debt", kind, "time_window", feasibility)
+            )
         elif kind == "route_balance":
-            out.append({
-                "target_id": "T_route_balance",
-                "kind": kind,
-                "metric_pressure": {"route_balance": float(quality.get("route_balance", 0.0) or 0.0)},
-                "recommended_controls": {
-                    "destroy_control.signal_scores": ["route_balance_pressure"],
-                    "insertion_control.position_signal_scores": ["route_balance_gain"],
-                },
-            })
+            out.append(
+                {
+                    "target_id": "T_route_balance",
+                    "kind": kind,
+                    "metric_pressure": {
+                        "route_balance": float(quality.get("route_balance", 0.0) or 0.0)
+                    },
+                    "recommended_controls": {
+                        "destroy_control.signal_scores": ["route_balance_pressure"],
+                        "insertion_control.position_signal_scores": [
+                            "route_balance_gain"
+                        ],
+                    },
+                }
+            )
         else:
-            out.append(_debt_target("T_energy_debt", "energy_debt", "energy", feasibility))
-    out.append({"target_id": "contract_review", "kind": "contract_review", "recommended_controls": {}})
+            out.append(
+                _debt_target("T_energy_debt", "energy_debt", "energy", feasibility)
+            )
+    out.append(
+        {
+            "target_id": "contract_review",
+            "kind": "contract_review",
+            "recommended_controls": {},
+        }
+    )
     _validate_recommended_controls(out)
     return out
 
 
-def _debt_target(target_id: str, kind: str, debt_type: str, feasibility: Dict[str, Any]) -> Dict[str, Any]:
+def _debt_target(
+    target_id: str, kind: str, debt_type: str, feasibility: Dict[str, Any]
+) -> Dict[str, Any]:
     ratios = feasibility.get("violation_ratio_by_type", {}) or {}
     return {
         "target_id": target_id,
         "kind": kind,
-        "metric_pressure": {f"{debt_type}_ratio": float(ratios.get(debt_type, 0.0) or 0.0)},
+        "metric_pressure": {
+            f"{debt_type}_ratio": float(ratios.get(debt_type, 0.0) or 0.0)
+        },
         "recommended_controls": {
             "destroy_control.signal_scores": ["cost_pressure", "mobility_opportunity"],
             "insertion_control.position_signal_scores": (
                 ["future_slack", "local_coupling_penalty"]
-                if debt_type == "time_window" else ["insert_cost", "future_slack"]
+                if debt_type == "time_window"
+                else ["insert_cost", "future_slack"]
             ),
             "acceptance_control.mode": ["threshold"],
         },
@@ -363,7 +488,9 @@ def _validate_recommended_controls(targets: List[Dict[str, Any]]) -> None:
     for target in targets:
         controls = target.get("recommended_controls", {})
         if not isinstance(controls, dict):
-            raise ValueError(f"{target.get('target_id')}.recommended_controls must be an object")
+            raise ValueError(
+                f"{target.get('target_id')}.recommended_controls must be an object"
+            )
         for field_path, names in controls.items():
             if field_path not in FIELD_CANDIDATES:
                 raise ValueError(f"unknown recommended control field: {field_path}")
@@ -380,17 +507,31 @@ def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     quality = summary.get("quality_summary", {}) or {}
     feasibility = summary.get("feasibility_summary", {}) or {}
     ratios = dict(feasibility.get("violation_ratio_by_type", {}) or {})
-    debt_total = float(feasibility.get("recoverable_violation_total", feasibility.get("violation_total", 0.0)) or 0.0)
+    debt_total = float(
+        feasibility.get(
+            "recoverable_violation_total", feasibility.get("violation_total", 0.0)
+        )
+        or 0.0
+    )
     dominant = (
         ("none", 0.0)
         if debt_total <= 0.0
         else max(ratios.items(), key=lambda item: float(item[1]), default=("none", 0.0))
     )
     return {
-        "is_feasible": bool(feasibility.get("is_feasible", summary.get("is_feasible", False))),
+        "is_feasible": bool(
+            feasibility.get("is_feasible", summary.get("is_feasible", False))
+        ),
         "quality": {
             name: float(quality.get(name, 0.0) or 0.0)
-            for name in ("missed_priority", "unassigned_count", "energy_total", "total_distance", "makespan", "route_balance")
+            for name in (
+                "missed_priority",
+                "unassigned_count",
+                "energy_total",
+                "total_distance",
+                "makespan",
+                "route_balance",
+            )
             if name in quality
         },
         "debt": {
@@ -410,7 +551,9 @@ def _best_digest(best_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _compact_last_verification(verification: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _compact_last_verification(
+    verification: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
     if not verification:
         return {"exists": False}
     trace = verification.get("trace", {}) or {}
@@ -426,7 +569,7 @@ def _compact_last_verification(verification: Optional[Dict[str, Any]]) -> Dict[s
             "candidate_trials": int(flow.get("candidate_trials", 0) or 0),
             "feasibility_rejected": int(flow.get("feasibility_rejected", 0) or 0),
             "accepted": int(flow.get("accepted_trials", 0) or 0),
-            "best_improved": int(flow.get("best_improved_trials", 0) or 0),
+            "global_best_updates": int(flow.get("global_best_improved_trials", 0) or 0),
         },
     }
 
@@ -438,35 +581,63 @@ def _verification_summary(verifications: List[Dict[str, Any]]) -> Dict[str, Any]
         "verification_ids": [item.get("verification_id") for item in verifications],
         "intent_status_counts": dict(statuses),
         "dominant_blocker_counts": dict(blockers),
-        "last": _compact_last_verification(verifications[-1] if verifications else None),
+        "last": _compact_last_verification(
+            verifications[-1] if verifications else None
+        ),
     }
 
 
 def _action_space(candidates: PublicCandidates, *, initial: bool) -> Dict[str, Any]:
     base = {
-        "allowed_actions": ["construct_initial", "request_supervisor_review"] if initial else ["run_alns", "request_supervisor_review"],
-        "allowed_insertion_operators": list(candidates.names("insertion_operator_candidates")),
-        "allowed_task_signals": list(candidates.names("insertion_task_signal_candidates")),
-        "allowed_position_signals": list(candidates.names("insertion_position_signal_candidates")),
+        "allowed_actions": (
+            ["construct_initial", "request_supervisor_review"]
+            if initial
+            else ["run_alns", "request_supervisor_review"]
+        ),
+        "allowed_insertion_operators": list(
+            candidates.names("insertion_operator_candidates")
+        ),
+        "allowed_task_signals": list(
+            candidates.names("insertion_task_signal_candidates")
+        ),
+        "allowed_position_signals": list(
+            candidates.names("insertion_position_signal_candidates")
+        ),
     }
     if not initial:
-        base.update({
-            "allowed_destroy_operators": list(candidates.names("destroy_operator_candidates")),
-            "allowed_destroy_signals": list(candidates.names("destroy_signal_candidates")),
-            "allowed_acceptance_modes": list(candidates.names("acceptance_candidates")),
-        })
+        base.update(
+            {
+                "allowed_destroy_operators": list(
+                    candidates.names("destroy_operator_candidates")
+                ),
+                "allowed_destroy_signals": list(
+                    candidates.names("destroy_signal_candidates")
+                ),
+                "allowed_acceptance_modes": list(
+                    candidates.names("acceptance_candidates")
+                ),
+            }
+        )
     return base
 
 
 def _relaxation_reference(context: Dict[str, Any]) -> Dict[str, float]:
     if "time_window_median_width" in context or "agent_energy_median" in context:
         return {
-            "time_window_median_width": float(context.get("time_window_median_width", 0.0) or 0.0),
-            "agent_energy_median": float(context.get("agent_energy_median", 0.0) or 0.0),
+            "time_window_median_width": float(
+                context.get("time_window_median_width", 0.0) or 0.0
+            ),
+            "agent_energy_median": float(
+                context.get("agent_energy_median", 0.0) or 0.0
+            ),
         }
     return {
-        "time_window_median_width": float((context.get("time_window", {}) or {}).get("median", 0.0) or 0.0),
-        "agent_energy_median": float((context.get("energy", {}) or {}).get("median", 0.0) or 0.0),
+        "time_window_median_width": float(
+            (context.get("time_window", {}) or {}).get("median", 0.0) or 0.0
+        ),
+        "agent_energy_median": float(
+            (context.get("energy", {}) or {}).get("median", 0.0) or 0.0
+        ),
     }
 
 

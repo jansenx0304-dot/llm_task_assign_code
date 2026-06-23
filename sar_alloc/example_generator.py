@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 # sar_alloc/example_generator.py
 from __future__ import annotations
 
@@ -54,7 +55,6 @@ F. 目标冲突与策略鲁棒性（Objective tradeoff）
 
 import json
 import math
-import os
 import random
 import sys
 from dataclasses import dataclass
@@ -66,7 +66,9 @@ from typing import Dict, List, Optional, Tuple
 # 若以脚本方式运行（非 python -m），确保项目根目录在 sys.path，便于绝对导入 sar_alloc.*
 # ---------------------------------------------------------
 _THIS = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS.parents[1]  # .../<repo_root>/sar_alloc/example_generator.py -> repo_root
+_PROJECT_ROOT = _THIS.parents[
+    1
+]  # .../<repo_root>/sar_alloc/example_generator.py -> repo_root
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -84,14 +86,14 @@ class GenConfig:
     seed: int = 0
 
     # 空间结构
-    spatial_scale: float = 80.0         # 地图尺度（坐标范围大致 [-scale, scale]）
-    n_clusters: Optional[int] = None    # None -> 默认等于 n_agents
-    cluster_spread: float = 12.0        # 簇内离散度（越小越聚类）
+    spatial_scale: float = 80.0  # 地图尺度（坐标范围大致 [-scale, scale]）
+    n_clusters: Optional[int] = None  # None -> 默认等于 n_agents
+    cluster_spread: float = 12.0  # 簇内离散度（越小越聚类）
 
     # 时间窗难度
-    tw_late_slack: float = 6.0          # tw_end = tw_start + slack（越小越紧）
-    max_wait: float = 3.0               # 允许“提前到达后等待”的最大等待时间（制造等待/站立能耗）
-    route_overlap: float = 0.25         # [0,1] 不同 agent 的时间起点扰动比例（越大越重叠）
+    tw_late_slack: float = 6.0  # tw_end = tw_start + slack（越小越紧）
+    max_wait: float = 3.0  # 允许“提前到达后等待”的最大等待时间（制造等待/站立能耗）
+    route_overlap: float = 0.25  # [0,1] 不同 agent 的时间起点扰动比例（越大越重叠）
 
     # 服务时间
     service_time_min: float = 2.0
@@ -99,16 +101,20 @@ class GenConfig:
 
     # 技能复杂度
     skill_pool_size: int = 5
-    agent_skill_frac: float = 0.55      # 每个 agent 拥有技能的比例（0~1）
+    agent_skill_frac: float = 0.55  # 每个 agent 拥有技能的比例（0~1）
     task_requires_skill_prob: float = 0.85
     max_task_skills: int = 2
-    rare_skill_task_frac: float = 0.25    # “瓶颈技能任务”的比例（只少数 agent 能做）
-    shared_skill_task_frac: float = 0.35  # “多 agent 可做”的比例（但时窗紧 -> 选择困难）
+    rare_skill_task_frac: float = 0.25  # “瓶颈技能任务”的比例（只少数 agent 能做）
+    shared_skill_task_frac: float = (
+        0.35  # “多 agent 可做”的比例（但时窗紧 -> 选择困难）
+    )
 
     # 能耗/速度异质性
     speed_min: float = 0.9
     speed_max: float = 1.4
-    travel_energy_rate_min: float = 0.8   # evaluator 默认按距离算 travel_energy（config.extras 未开启 per_time）
+    travel_energy_rate_min: float = (
+        0.8  # evaluator 默认按距离算 travel_energy（config.extras 未开启 per_time）
+    )
     travel_energy_rate_max: float = 1.3
     standby_power_min: float = 0.00
     standby_power_max: float = 0.05
@@ -116,7 +122,7 @@ class GenConfig:
     skill_energy_rate_max: float = 0.55
 
     # 能量紧约束：init_energy = planned_energy * (1 + energy_margin)
-    energy_margin: float = 0.005          # 越小越难（0.00~0.15 合理）
+    energy_margin: float = 0.005  # 越小越难（0.00~0.15 合理）
 
 
 # -------------------------
@@ -124,7 +130,11 @@ class GenConfig:
 # -------------------------
 def instance_to_json_dict(inst: Instance) -> Dict:
     return {
-        "depot": {"id": int(inst.depot.id), "x": float(inst.depot.loc[0]), "y": float(inst.depot.loc[1])},
+        "depot": {
+            "id": int(inst.depot.id),
+            "x": float(inst.depot.loc[0]),
+            "y": float(inst.depot.loc[1]),
+        },
         "agents": [
             {
                 "id": int(a.id),
@@ -133,7 +143,9 @@ def instance_to_json_dict(inst: Instance) -> Dict:
                 "speed": float(a.speed),
                 "travel_energy_rate": float(a.travel_energy_rate),
                 "standby_power": float(a.standby_power),
-                "skill_energy_rate": {str(k): float(v) for k, v in a.skill_energy_rate.items()},
+                "skill_energy_rate": {
+                    str(k): float(v) for k, v in a.skill_energy_rate.items()
+                },
             }
             for a in inst.agents
         ],
@@ -157,7 +169,10 @@ def instance_to_json_dict(inst: Instance) -> Dict:
 def save_instance_json(inst: Instance, out_path: str | Path) -> Path:
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(instance_to_json_dict(inst), ensure_ascii=False, indent=2), encoding="utf-8")
+    p.write_text(
+        json.dumps(instance_to_json_dict(inst), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return p
 
 
@@ -176,7 +191,9 @@ def generate_instance(cfg: GenConfig) -> Tuple[Instance, Dict[int, List[int]]]:
     skill_pool = [f"s{i}" for i in range(int(cfg.skill_pool_size))]
 
     # 2) cluster centers
-    n_clusters = int(cfg.n_clusters) if cfg.n_clusters is not None else int(cfg.n_agents)
+    n_clusters = (
+        int(cfg.n_clusters) if cfg.n_clusters is not None else int(cfg.n_agents)
+    )
     centers: List[Tuple[float, float]] = []
     for k in range(n_clusters):
         ang = 2.0 * math.pi * (k / max(1, n_clusters))
@@ -202,9 +219,14 @@ def generate_instance(cfg: GenConfig) -> Tuple[Instance, Dict[int, List[int]]]:
             skills.add(rng.choice(skill_pool))
 
         speed = rng.uniform(cfg.speed_min, cfg.speed_max)
-        travel_energy_rate = rng.uniform(cfg.travel_energy_rate_min, cfg.travel_energy_rate_max)
+        travel_energy_rate = rng.uniform(
+            cfg.travel_energy_rate_min, cfg.travel_energy_rate_max
+        )
         standby_power = rng.uniform(cfg.standby_power_min, cfg.standby_power_max)
-        skill_energy_rate = {s: rng.uniform(cfg.skill_energy_rate_min, cfg.skill_energy_rate_max) for s in skills}
+        skill_energy_rate = {
+            s: rng.uniform(cfg.skill_energy_rate_min, cfg.skill_energy_rate_max)
+            for s in skills
+        }
 
         agents_tmp.append(
             Agent(
@@ -248,8 +270,16 @@ def generate_instance(cfg: GenConfig) -> Tuple[Instance, Dict[int, List[int]]]:
 
         for _ in range(n_i):
             step = rng.uniform(0.0, cfg.cluster_spread * 0.6)
-            cx = center[0] + rng.gauss(0.0, cfg.cluster_spread) + step * math.cos(heading)
-            cy = center[1] + rng.gauss(0.0, cfg.cluster_spread) + step * math.sin(heading)
+            cx = (
+                center[0]
+                + rng.gauss(0.0, cfg.cluster_spread)
+                + step * math.cos(heading)
+            )
+            cy = (
+                center[1]
+                + rng.gauss(0.0, cfg.cluster_spread)
+                + step * math.sin(heading)
+            )
 
             dist = euclidean(cur_loc, (cx, cy))
             t_travel = dist / (agent.speed if agent.speed > 0 else 1.0)
@@ -304,11 +334,13 @@ def generate_instance(cfg: GenConfig) -> Tuple[Instance, Dict[int, List[int]]]:
         for s in a.skills:
             skill_owners.setdefault(s, []).append(a.id)
 
-    rare_skill_candidates = sorted(skill_owners.keys(), key=lambda s: len(skill_owners[s]))
+    rare_skill_candidates = sorted(
+        skill_owners.keys(), key=lambda s: len(skill_owners[s])
+    )
     common_skills = sorted(skill_owners.keys(), key=lambda s: -len(skill_owners[s]))
 
     rare_tids = all_tids[:n_rare]
-    shared_tids = all_tids[n_rare:n_rare + n_shared]
+    shared_tids = all_tids[n_rare : n_rare + n_shared]
 
     tasks_by_id = {t.id: t for t in tasks}
 
@@ -375,7 +407,7 @@ def generate_instance(cfg: GenConfig) -> Tuple[Instance, Dict[int, List[int]]]:
                 energy += agent.standby_power * wait
 
             cur_time += t.service_time
-            for s in (t.skill_req & agent.skills):
+            for s in t.skill_req & agent.skills:
                 energy += t.service_time * float(agent.skill_energy_rate.get(s, 1.0))
 
             cur_loc = t.loc
@@ -449,19 +481,28 @@ def default_output_path(tag: str = "demo", name: str = "instance") -> Path:
     return root / "data" / "instances" / tag / f"{name}.json"
 
 
-def generate_and_save(cfg: GenConfig, out_path: Optional[str | Path] = None, tag: str = "demo") -> Path:
+def generate_and_save(
+    cfg: GenConfig, out_path: Optional[str | Path] = None, tag: str = "demo"
+) -> Path:
     inst, routes = generate_instance(cfg)
     # 生成器自检：确保至少存在一组严格可行路线
     verify_reference_feasible(inst, routes)
 
     if out_path is None:
-        out_path = default_output_path(tag=tag, name=f"seed{cfg.seed}_T{cfg.n_tasks}_A{cfg.n_agents}")
+        out_path = default_output_path(
+            tag=tag, name=f"seed{cfg.seed}_T{cfg.n_tasks}_A{cfg.n_agents}"
+        )
 
     p = save_instance_json(inst, out_path)
 
     # 同目录写一个“参考可行路线”文件，便于 debug / sanity check
     route_path = Path(p).with_suffix(".routes.json")
-    route_path.write_text(json.dumps({str(k): v for k, v in routes.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
+    route_path.write_text(
+        json.dumps(
+            {str(k): v for k, v in routes.items()}, ensure_ascii=False, indent=2
+        ),
+        encoding="utf-8",
+    )
 
     return p
 

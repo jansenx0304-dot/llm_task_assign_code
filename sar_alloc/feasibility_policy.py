@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 from .constraint_checker import ConstraintReport
 
-
 _EPS = 1e-9
 
 
@@ -34,8 +33,18 @@ def check_feasibility_admissibility(
 
 def _strict_decision(trial: ConstraintReport) -> FeasibilityDecision:
     if trial.is_feasible:
-        return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible under strict policy.", [])
-    return FeasibilityDecision(False, "reject", "feasibility_rejected_infeasible_trial", ["feasibility_rejected_infeasible_trial"])
+        return FeasibilityDecision(
+            True,
+            "working_and_best_candidate",
+            "Trial is feasible under strict policy.",
+            [],
+        )
+    return FeasibilityDecision(
+        False,
+        "reject",
+        "feasibility_rejected_infeasible_trial",
+        ["feasibility_rejected_infeasible_trial"],
+    )
 
 
 def _relaxed_recoverable_decision(
@@ -85,7 +94,9 @@ def _relaxed_recoverable_decision(
     if trial.is_feasible:
         if current.violation_total > _EPS:
             events.append("feasibility_recovered")
-        return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible.", events)
+        return FeasibilityDecision(
+            True, "working_and_best_candidate", "Trial is feasible.", events
+        )
 
     if trial.recoverable_violation_total > current.recoverable_violation_total + _EPS:
         events.append("feasibility_debt_increased")
@@ -104,7 +115,16 @@ def _recovery_only_decision(
     trial: ConstraintReport,
 ) -> FeasibilityDecision:
     if trial.is_feasible:
-        return FeasibilityDecision(True, "working_and_best_candidate", "Trial restored feasibility.", ["feasibility_recovered"])
+        return FeasibilityDecision(
+            True,
+            "working_and_best_candidate",
+            "Trial restored feasibility.",
+            ["feasibility_recovered"],
+        )
     if trial.violation_total < current.violation_total - _EPS:
-        return FeasibilityDecision(True, "working_only", "recovery_debt_reduced", ["recovery_debt_reduced"])
-    return FeasibilityDecision(False, "reject", "recovery_non_reducing_trial", ["recovery_non_reducing_trial"])
+        return FeasibilityDecision(
+            True, "working_only", "recovery_debt_reduced", ["recovery_debt_reduced"]
+        )
+    return FeasibilityDecision(
+        False, "reject", "recovery_non_reducing_trial", ["recovery_non_reducing_trial"]
+    )

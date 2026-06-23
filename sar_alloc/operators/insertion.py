@@ -18,7 +18,6 @@ from .types import (
     InsertPosition,
 )
 
-
 _EPS = 1e-9
 _BIG_M = 1e12
 REGRET_K = 2
@@ -51,8 +50,14 @@ class InsertionContext:
     def __post_init__(self) -> None:
         if self.kind not in {"initial", "alns"}:
             raise ValueError(f"invalid insertion context kind: {self.kind}")
-        if self.feasibility_mode not in {"strict", "relaxed_recoverable", "recovery_only"}:
-            raise ValueError(f"invalid insertion feasibility mode: {self.feasibility_mode}")
+        if self.feasibility_mode not in {
+            "strict",
+            "relaxed_recoverable",
+            "recovery_only",
+        }:
+            raise ValueError(
+                f"invalid insertion feasibility mode: {self.feasibility_mode}"
+            )
 
 
 @dataclass(slots=True)
@@ -144,10 +149,14 @@ def enumerate_hard_filtered_positions(
     instance: Instance,
     config: Config,
 ) -> List[InsertPosition]:
-    positions = basic_insertion_feasibility_filter(sol, tid, instance, config, candidate_positions=None)
+    positions = basic_insertion_feasibility_filter(
+        sol, tid, instance, config, candidate_positions=None
+    )
     if not positions:
         return []
-    return insertion_lower_bound_filter(sol, tid, instance, config, candidate_positions=positions)
+    return insertion_lower_bound_filter(
+        sol, tid, instance, config, candidate_positions=positions
+    )
 
 
 def compute_insertion_candidate(
@@ -195,28 +204,48 @@ def _build_lightweight_insertion_candidate(
 
     states_after, metrics_after = _simulate_route(instance, config, aid, route_after)
     suffix = states_after[pos:]
-    suffix_min_slack = min((state.slack for state in suffix), default=float(task.tw_end) - float(task.tw_start))
+    suffix_min_slack = min(
+        (state.slack for state in suffix),
+        default=float(task.tw_end) - float(task.tw_start),
+    )
     suffix_tardiness_total = sum(float(state.tardiness) for state in suffix)
-    suffix_ratio = float(len(route_before) - pos + 1) / max(1.0, float(len(route_before) + 1))
-    energy_remaining_ratio = (float(agent.init_energy) - float(metrics_after.energy)) / max(float(agent.init_energy), _EPS)
+    suffix_ratio = float(len(route_before) - pos + 1) / max(
+        1.0, float(len(route_before) + 1)
+    )
+    energy_remaining_ratio = (
+        float(agent.init_energy) - float(metrics_after.energy)
+    ) / max(float(agent.init_energy), _EPS)
 
     depot_return_pressure = 0.0
     if bool(config.eval.include_depot_legs) and route_after:
         last_task = instance.task_by_id(int(route_after[-1]))
-        depot_return_energy = _travel_energy(config, instance, agent, last_task.loc, instance.depot.loc)
+        depot_return_energy = _travel_energy(
+            config, instance, agent, last_task.loc, instance.depot.loc
+        )
         depot_return_pressure = depot_return_energy / max(
-            float(agent.init_energy) - float(metrics_after.energy) + depot_return_energy,
+            float(agent.init_energy)
+            - float(metrics_after.energy)
+            + depot_return_energy,
             _EPS,
         )
 
-    routes_after = {int(a): list(int(t) for t in route) for a, route in sol.routes.items()}
+    routes_after = {
+        int(a): list(int(t) for t in route) for a, route in sol.routes.items()
+    }
     routes_after[aid] = route_after
     pressure_after = _route_pressure_map_for_routes(routes_after, instance, config)
     route_pressure_after = float(pressure_after.get(aid, 0.0))
-    balance_improvement = max(route_pressure_before.values(), default=0.0) - max(pressure_after.values(), default=0.0)
+    balance_improvement = max(route_pressure_before.values(), default=0.0) - max(
+        pressure_after.values(), default=0.0
+    )
 
     tw_risk = 1.0 / (1.0 + max(0.0, suffix_min_slack)) + suffix_tardiness_total
-    candidate_cost = float(delta_distance) + 0.1 * float(delta_energy) + float(tw_risk) + 0.1 * float(suffix_ratio)
+    candidate_cost = (
+        float(delta_distance)
+        + 0.1 * float(delta_energy)
+        + float(tw_risk)
+        + 0.1 * float(suffix_ratio)
+    )
 
     return InsertionCandidate(
         tid=int(tid),
@@ -245,7 +274,9 @@ def _strict_evaluate_insertion_candidate(
     config: Config,
 ) -> InsertionCandidate:
     trial = sol.clone(deep=True)
-    trial.add_task(int(candidate.agent_id), int(candidate.tid), position=int(candidate.position))
+    trial.add_task(
+        int(candidate.agent_id), int(candidate.tid), position=int(candidate.position)
+    )
     ev = evaluate(trial, instance, config, update_solution_schedule=False)
     report = ev.constraint_report
     relaxed = bool(
@@ -293,14 +324,19 @@ def score_insert_positions(
     raw_rows: Dict[int, Dict[str, float]] = {}
     ordered_by_cost = sorted(
         enumerate(candidates),
-        key=lambda item: (float(item[1].candidate_cost), int(item[1].agent_id), int(item[1].position)),
+        key=lambda item: (
+            float(item[1].candidate_cost),
+            int(item[1].agent_id),
+            int(item[1].position),
+        ),
     )
     rank_by_index = {index: rank for rank, (index, _) in enumerate(ordered_by_cost)}
     denom = max(1, len(candidates) - 1)
     for index, candidate in enumerate(candidates):
         raw_rows[index] = {
             "insert_cost": float(candidate.candidate_cost),
-            "future_slack": max(0.0, float(candidate.suffix_min_slack)) + float(candidate.energy_remaining_ratio),
+            "future_slack": max(0.0, float(candidate.suffix_min_slack))
+            + float(candidate.energy_remaining_ratio),
             "route_balance_gain": float(candidate.balance_improvement),
             "local_coupling_penalty": (
                 float(candidate.suffix_ratio)
@@ -323,7 +359,13 @@ def score_insert_positions(
             - weights.get("local_coupling_penalty", 0) * features.local_coupling_penalty
             + weights.get("diversity_gain", 0) * features.diversity_gain
         )
-        scored.append(replace(candidate, position_features=features, position_score=float(position_score)))
+        scored.append(
+            replace(
+                candidate,
+                position_features=features,
+                position_score=float(position_score),
+            )
+        )
     return scored
 
 
@@ -351,7 +393,11 @@ def collect_task_insertion_stats(
     )
     ranked_positions = sorted(
         scored_positions,
-        key=lambda candidate: (-float(candidate.position_score), int(candidate.agent_id), int(candidate.position)),
+        key=lambda candidate: (
+            -float(candidate.position_score),
+            int(candidate.agent_id),
+            int(candidate.position),
+        ),
     )
 
     for candidate in ranked_positions:
@@ -366,18 +412,44 @@ def collect_task_insertion_stats(
 
     candidates = _mark_dominated_candidates(candidates)
     feasible = [candidate for candidate in candidates if candidate.strict_feasible]
-    relaxed = [candidate for candidate in candidates if candidate.strict_feasible or candidate.relaxed_admissible]
-    feasible.sort(key=lambda candidate: (-float(candidate.position_score), int(candidate.agent_id), int(candidate.position)))
-    relaxed.sort(key=lambda candidate: (0 if candidate.strict_feasible else 1, float(candidate.constraint_delta.get("violation_total", 0.0) if candidate.constraint_delta else 0.0), -float(candidate.position_score), int(candidate.agent_id), int(candidate.position)))
+    relaxed = [
+        candidate
+        for candidate in candidates
+        if candidate.strict_feasible or candidate.relaxed_admissible
+    ]
+    feasible.sort(
+        key=lambda candidate: (
+            -float(candidate.position_score),
+            int(candidate.agent_id),
+            int(candidate.position),
+        )
+    )
+    relaxed.sort(
+        key=lambda candidate: (
+            0 if candidate.strict_feasible else 1,
+            float(
+                candidate.constraint_delta.get("violation_total", 0.0)
+                if candidate.constraint_delta
+                else 0.0
+            ),
+            -float(candidate.position_score),
+            int(candidate.agent_id),
+            int(candidate.position),
+        )
+    )
 
     task = instance.task_by_id(int(tid))
     failures = dict((recent_task_failures or {}).get(int(tid), {}) or {})
-    best_cost = min((float(candidate.candidate_cost) for candidate in feasible), default=math.inf)
+    best_cost = min(
+        (float(candidate.candidate_cost) for candidate in feasible), default=math.inf
+    )
     stats = TaskInsertionStats(
         tid=int(tid),
         candidate_count=int(candidate_count),
         feasible_count=int(len(feasible)),
-        feasible_agent_count=int(len({int(candidate.agent_id) for candidate in feasible})),
+        feasible_agent_count=int(
+            len({int(candidate.agent_id) for candidate in feasible})
+        ),
         best_cost=float(best_cost),
         sorted_feasible_candidates=tuple(feasible),
         sorted_relaxed_candidates=tuple(relaxed),
@@ -404,8 +476,14 @@ def score_candidate_tasks(
     rows: Dict[int, Dict[str, float]] = {}
     for tid, stats in stats_by_tid.items():
         feasible = list(stats.sorted_feasible_candidates)
-        route_balance = _mean([candidate.route_pressure_after for candidate in feasible]) if feasible else 0.0
-        best_cost = float(stats.best_cost) if math.isfinite(float(stats.best_cost)) else _BIG_M
+        route_balance = (
+            _mean([candidate.route_pressure_after for candidate in feasible])
+            if feasible
+            else 0.0
+        )
+        best_cost = (
+            float(stats.best_cost) if math.isfinite(float(stats.best_cost)) else _BIG_M
+        )
         rows[int(tid)] = {
             "cost_pressure": best_cost,
             "priority_loss": float(stats.task_priority),
@@ -420,9 +498,12 @@ def score_candidate_tasks(
                 + float(stats.recent_energy_fail_count)
                 + float(stats.recent_skill_fail_count)
             ),
-            "mobility_opportunity": float(stats.feasible_count) + float(stats.feasible_agent_count),
+            "mobility_opportunity": float(stats.feasible_count)
+            + float(stats.feasible_agent_count),
             "route_balance_pressure": float(route_balance),
-            "violation_pressure": float(stats.recent_tw_fail_count + stats.recent_energy_fail_count),
+            "violation_pressure": float(
+                stats.recent_tw_fail_count + stats.recent_energy_fail_count
+            ),
             "regret_pressure": 0.0,
             "bottleneck_pressure": 1.0 / (1.0 + float(stats.feasible_agent_count)),
         }
@@ -436,7 +517,9 @@ def _score_candidate_task_stats(
     normalized = _normalize_rows(score_candidate_tasks(stats_by_tid))
     out: Dict[int, TaskInsertionStats] = {}
     for tid, stats in stats_by_tid.items():
-        features = LandscapeFeatures(**normalized.get(int(tid), _ZERO_LANDSCAPE_FEATURES.as_dict()))
+        features = LandscapeFeatures(
+            **normalized.get(int(tid), _ZERO_LANDSCAPE_FEATURES.as_dict())
+        )
         weights = policy.task_signal_weights
         task_score = (
             weights.get("priority_loss", 0) * features.priority_loss
@@ -445,11 +528,15 @@ def _score_candidate_task_stats(
             + weights.get("bottleneck_pressure", 0) * features.bottleneck_pressure
             + weights.get("mobility_opportunity", 0) * features.mobility_opportunity
         )
-        out[int(tid)] = replace(stats, landscape_features=features, task_score=float(task_score))
+        out[int(tid)] = replace(
+            stats, landscape_features=features, task_score=float(task_score)
+        )
     return out
 
 
-def _normalize_rows(rows: Mapping[int, Mapping[str, float]]) -> Dict[int, Dict[str, float]]:
+def _normalize_rows(
+    rows: Mapping[int, Mapping[str, float]],
+) -> Dict[int, Dict[str, float]]:
     if not rows:
         return {}
     names = tuple(next(iter(rows.values())).keys())
@@ -465,7 +552,11 @@ def _normalize_rows(rows: Mapping[int, Mapping[str, float]]) -> Dict[int, Dict[s
         for name in names:
             lo = mins[name]
             hi = maxs[name]
-            current[str(name)] = 0.0 if hi - lo <= _EPS else max(0.0, min(1.0, (float(row[name]) - lo) / (hi - lo)))
+            current[str(name)] = (
+                0.0
+                if hi - lo <= _EPS
+                else max(0.0, min(1.0, (float(row[name]) - lo) / (hi - lo)))
+            )
         normalized[int(key)] = current
     return normalized
 
@@ -477,7 +568,10 @@ def _normalize_value_map(values: Mapping[int, float]) -> Dict[int, float]:
     hi = max(float(value) for value in values.values())
     if hi - lo <= _EPS:
         return {int(key): 0.0 for key in values}
-    return {int(key): max(0.0, min(1.0, (float(value) - lo) / (hi - lo))) for key, value in values.items()}
+    return {
+        int(key): max(0.0, min(1.0, (float(value) - lo) / (hi - lo)))
+        for key, value in values.items()
+    }
 
 
 def _default_insertion_policy() -> InsertionPolicy:
@@ -522,8 +616,13 @@ def build_insertion_landscape(
     route_pressure_before = _route_pressure_map(sol, instance, config)
     for tid in unassigned:
         stats, _ = collect_task_insertion_stats(
-            sol, tid, instance, config, policy,
-            route_pressure_before, None,
+            sol,
+            tid,
+            instance,
+            config,
+            policy,
+            route_pressure_before,
+            None,
         )
         candidate_counts.append(stats.candidate_count)
         feasible_counts.append(stats.feasible_count)
@@ -531,16 +630,47 @@ def build_insertion_landscape(
     scarce_capability_threshold = max(1, int(math.ceil(0.25 * len(instance.agents))))
     scarce_position_threshold = 1
     scarce_ids = [
-        tid for tid in unassigned
-        if _count_basic_feasible_agents(instance, config, instance.task_by_id(tid)) <= scarce_capability_threshold
+        tid
+        for tid in unassigned
+        if _count_basic_feasible_agents(instance, config, instance.task_by_id(tid))
+        <= scarce_capability_threshold
         or task_stats[tid].feasible_count <= scarce_position_threshold
     ]
+
     def bucket(task_ids: Sequence[int]) -> Dict[str, Any]:
+        ordered = sorted(
+            (int(tid) for tid in task_ids),
+            key=lambda tid: (-float(instance.task_by_id(tid).priority), tid),
+        )
         return {
-            "task_ids": [int(tid) for tid in task_ids],
+            "task_ids": ordered,
             "task_count": len(task_ids),
-            "priority_mass": float(sum(instance.task_by_id(int(tid)).priority for tid in task_ids)),
+            "priority_mass": float(
+                sum(instance.task_by_id(int(tid)).priority for tid in task_ids)
+            ),
+            "top_tasks": [
+                {
+                    "task_id": tid,
+                    "priority": float(instance.task_by_id(tid).priority),
+                    "capable_agents": _count_basic_feasible_agents(
+                        instance, config, instance.task_by_id(tid)
+                    ),
+                    "candidate_positions": int(task_stats[tid].candidate_count),
+                    "feasible_positions": int(task_stats[tid].feasible_count),
+                    "dominant_reason": (
+                        "no_candidate_position"
+                        if task_stats[tid].candidate_count == 0
+                        else (
+                            "no_feasible_position"
+                            if task_stats[tid].feasible_count == 0
+                            else "limited_insertion_options"
+                        )
+                    ),
+                }
+                for tid in ordered[:5]
+            ],
         }
+
     return {
         "unassigned_count": len(unassigned),
         "assigned_count": len(sol.all_assigned_tasks()),
@@ -563,7 +693,7 @@ def build_insertion_landscape(
         },
         "target_buckets": {
             "unassigned_priority": bucket(unassigned),
-            "scarce_unassigned": bucket(scarce_ids),
+            "insertion_scarce_unassigned": bucket(scarce_ids),
         },
         "task_pressure": _task_pressure_summary(sol, instance, config),
         "route_pressure": _route_pressure_summary(sol, instance, config),
@@ -583,8 +713,7 @@ def run_insertion_kernel(
 ) -> AssignmentSolution:
     out = partial_solution.clone(deep=True)
     pending = {
-        int(tid) for tid in candidate_tasks
-        if int(tid) not in out.all_assigned_tasks()
+        int(tid) for tid in candidate_tasks if int(tid) not in out.all_assigned_tasks()
     }
     out.unassigned.update(pending)
     out.normalize(instance)
@@ -637,7 +766,10 @@ def run_insertion_kernel(
             task_id=int(stats.tid),
             candidate_positions=int(stats.candidate_count),
             hard_feasible_positions=int(stats.feasible_count),
-            evaluated_positions=int(len(stats.sorted_feasible_candidates) + len(stats.sorted_relaxed_candidates)),
+            evaluated_positions=int(
+                len(stats.sorted_feasible_candidates)
+                + len(stats.sorted_relaxed_candidates)
+            ),
             inserted=True,
             failure_reasons={},
             chosen_agent_id=int(candidate.agent_id),
@@ -645,7 +777,9 @@ def run_insertion_kernel(
         )
         pending.discard(stats.tid)
         diagnostics["inserted_count"] += 1
-        diagnostics["operator_use"][operator_name] = diagnostics["operator_use"].get(operator_name, 0) + 1
+        diagnostics["operator_use"][operator_name] = (
+            diagnostics["operator_use"].get(operator_name, 0) + 1
+        )
         diagnostics["operator"] = operator_name
 
     diagnostics["unassigned_after"] = len(out.unassigned)
@@ -669,15 +803,21 @@ def _choose_for_context(
     rng: random.Random,
 ) -> Optional[Tuple[TaskInsertionStats, InsertionCandidate]]:
     available: Dict[int, Tuple[InsertionCandidate, ...]] = {}
-    current_violation = float(evaluate(current, instance, config, update_solution_schedule=False).constraint_report.violation_total)
+    current_violation = float(
+        evaluate(
+            current, instance, config, update_solution_schedule=False
+        ).constraint_report.violation_total
+    )
     for tid, stats in stats_by_tid.items():
         candidates = stats.sorted_feasible_candidates
         if context.feasibility_mode != "strict" and not candidates:
             candidates = stats.sorted_relaxed_candidates
         if context.feasibility_mode == "recovery_only":
             candidates = tuple(
-                candidate for candidate in stats.sorted_relaxed_candidates
-                if float(candidate.constraint_delta.get("violation_total", math.inf)) < current_violation - _EPS
+                candidate
+                for candidate in stats.sorted_relaxed_candidates
+                if float(candidate.constraint_delta.get("violation_total", math.inf))
+                < current_violation - _EPS
             )
         if candidates:
             available[tid] = candidates
@@ -691,27 +831,66 @@ def _choose_for_context(
             for stats in eligible
         }
         normalized = _normalize_value_map(regrets)
-        stats = max(eligible, key=lambda item: (item.task_score + normalized.get(item.tid, 0.0), -item.tid))
+        stats = max(
+            eligible,
+            key=lambda item: (
+                item.task_score + normalized.get(item.tid, 0.0),
+                -item.tid,
+            ),
+        )
     elif operator_name == "scarcity_first_insertion":
-        stats = max(eligible, key=lambda item: (item.task_score + item.landscape_features.scarcity_pressure, -item.tid))
+        stats = max(
+            eligible,
+            key=lambda item: (
+                item.task_score + item.landscape_features.scarcity_pressure,
+                -item.tid,
+            ),
+        )
     elif operator_name == "bottleneck_insertion":
-        top_signal = max(policy.task_signal_weights, key=lambda name: (policy.task_signal_weights[name], name))
-        stats = max(eligible, key=lambda item: (item.task_score + getattr(item.landscape_features, top_signal), -item.tid))
+        top_signal = max(
+            policy.task_signal_weights,
+            key=lambda name: (policy.task_signal_weights[name], name),
+        )
+        stats = max(
+            eligible,
+            key=lambda item: (
+                item.task_score + getattr(item.landscape_features, top_signal),
+                -item.tid,
+            ),
+        )
     elif operator_name == "diversified_insertion":
-        stats = _sample_rank_weighted(eligible, key=lambda item: (item.task_score, -item.tid), rng=rng)
+        stats = _sample_rank_weighted(
+            eligible, key=lambda item: (item.task_score, -item.tid), rng=rng
+        )
     else:
-        stats = max(eligible, key=lambda item: (max(candidate.position_score for candidate in available[item.tid]), item.task_score, -item.tid))
+        stats = max(
+            eligible,
+            key=lambda item: (
+                max(candidate.position_score for candidate in available[item.tid]),
+                item.task_score,
+                -item.tid,
+            ),
+        )
 
     positions = list(available[stats.tid])
     if operator_name == "diversified_insertion":
-        candidate = _sample_rank_weighted(positions, key=lambda item: (item.position_score, -item.agent_id, -item.position), rng=rng)
+        candidate = _sample_rank_weighted(
+            positions,
+            key=lambda item: (item.position_score, -item.agent_id, -item.position),
+            rng=rng,
+        )
     else:
-        candidate = max(positions, key=lambda item: (item.position_score, -item.agent_id, -item.position))
+        candidate = max(
+            positions,
+            key=lambda item: (item.position_score, -item.agent_id, -item.position),
+        )
     return stats, candidate
 
 
 def _candidate_regret(candidates: Sequence[InsertionCandidate], k: int) -> float:
-    scores = sorted((candidate.position_score for candidate in candidates), reverse=True)
+    scores = sorted(
+        (candidate.position_score for candidate in candidates), reverse=True
+    )
     if not scores:
         return 0.0
     return scores[0] - scores[min(k - 1, len(scores) - 1)]
@@ -731,7 +910,9 @@ def _weighted_choice(weights: Dict[str, int], rng: random.Random) -> str:
     return positive[-1][0]
 
 
-def _sample_rank_weighted(items: Sequence[Any], *, key: Any, rng: random.Random, alpha: float = 0.75) -> Any:
+def _sample_rank_weighted(
+    items: Sequence[Any], *, key: Any, rng: random.Random, alpha: float = 0.75
+) -> Any:
     ordered = sorted(items, key=key, reverse=True)
     if not ordered:
         raise ValueError("cannot sample from empty items")
@@ -746,7 +927,9 @@ def _sample_rank_weighted(items: Sequence[Any], *, key: Any, rng: random.Random,
     return ordered[-1]
 
 
-def _new_insertion_diagnostics(context: InsertionContext, policy: InsertionPolicy, unassigned_before: int) -> Dict[str, Any]:
+def _new_insertion_diagnostics(
+    context: InsertionContext, policy: InsertionPolicy, unassigned_before: int
+) -> Dict[str, Any]:
     return {
         "context": context.kind,
         "feasibility_mode": context.feasibility_mode,
@@ -774,11 +957,17 @@ def _new_insertion_diagnostics(context: InsertionContext, policy: InsertionPolic
     }
 
 
-def _add_stats_diagnostics(diagnostics: Dict[str, Any], stats: TaskInsertionStats, diag: Dict[str, int]) -> None:
+def _add_stats_diagnostics(
+    diagnostics: Dict[str, Any], stats: TaskInsertionStats, diag: Dict[str, int]
+) -> None:
     diagnostics["tasks_analyzed"] += 1
     diagnostics["positions_generated"] += int(diag.get("positions_generated", 0))
-    diagnostics["positions_strict_checked"] += int(diag.get("positions_strict_checked", 0))
-    diagnostics["strict_feasible_positions"] += int(diag.get("strict_feasible_positions", 0))
+    diagnostics["positions_strict_checked"] += int(
+        diag.get("positions_strict_checked", 0)
+    )
+    diagnostics["strict_feasible_positions"] += int(
+        diag.get("strict_feasible_positions", 0)
+    )
     breakdown = diagnostics["failure_breakdown"]
     if stats.candidate_count == 0:
         breakdown["no_candidate"] += 1
@@ -794,37 +983,55 @@ def _failure_reasons(stats: TaskInsertionStats) -> Dict[str, int]:
     return {}
 
 
-def _top_failed_attempts(attempts: Dict[int, TaskInsertionAttempt], instance: Instance, limit: int = 5) -> List[Dict[str, Any]]:
+def _top_failed_attempts(
+    attempts: Dict[int, TaskInsertionAttempt], instance: Instance, limit: int = 5
+) -> List[Dict[str, Any]]:
     failed = [attempt for attempt in attempts.values() if not attempt.inserted]
     failed.sort(key=lambda item: (-sum(item.failure_reasons.values()), item.task_id))
     out: List[Dict[str, Any]] = []
     for attempt in failed[:limit]:
         task = instance.task_by_id(int(attempt.task_id))
         reasons = dict(attempt.failure_reasons)
-        dominant = max(reasons.items(), key=lambda item: int(item[1]))[0] if reasons else "none"
-        out.append({
-            "task_id": int(attempt.task_id),
-            "priority": float(task.priority),
-            "capable_agents": sum(1 for agent in instance.agents if set(task.skill_req).issubset(agent.skills)),
-            "candidate_positions": int(attempt.candidate_positions),
-            "hard_feasible_positions": int(attempt.hard_feasible_positions),
-            "hard_filter_rejections": reasons,
-            "dominant_reason": dominant,
-        })
+        dominant = (
+            max(reasons.items(), key=lambda item: int(item[1]))[0]
+            if reasons
+            else "none"
+        )
+        out.append(
+            {
+                "task_id": int(attempt.task_id),
+                "priority": float(task.priority),
+                "capable_agents": sum(
+                    1
+                    for agent in instance.agents
+                    if set(task.skill_req).issubset(agent.skills)
+                ),
+                "candidate_positions": int(attempt.candidate_positions),
+                "hard_feasible_positions": int(attempt.hard_feasible_positions),
+                "hard_filter_rejections": reasons,
+                "dominant_reason": dominant,
+            }
+        )
     return out
 
 
-def _finish_diagnostics(sol: AssignmentSolution, diagnostics: Dict[str, Any], start: float) -> None:
+def _finish_diagnostics(
+    sol: AssignmentSolution, diagnostics: Dict[str, Any], start: float
+) -> None:
     diagnostics["unassigned_after"] = int(len(sol.unassigned))
     diagnostics["failed_count"] = int(len(sol.unassigned))
     diagnostics["time_ms"] = round(1000.0 * max(0.0, time.perf_counter() - start), 4)
     sol.solver_diagnostics["last_insertion"] = diagnostics
 
 
-def _mark_dominated_candidates(candidates: Sequence[InsertionCandidate]) -> List[InsertionCandidate]:
+def _mark_dominated_candidates(
+    candidates: Sequence[InsertionCandidate],
+) -> List[InsertionCandidate]:
     marked: List[InsertionCandidate] = []
     for current in candidates:
-        dominated = any(_dominates(other, current) for other in candidates if other is not current)
+        dominated = any(
+            _dominates(other, current) for other in candidates if other is not current
+        )
         marked.append(replace(current, dominated=bool(dominated)))
     return marked
 
@@ -851,9 +1058,15 @@ def _insertion_neighbor_locs(
     route: Sequence[int],
     position: int,
 ) -> Tuple[Location, Optional[Location]]:
-    prev_loc = instance.depot.loc if int(position) == 0 else instance.task_by_id(int(route[int(position) - 1])).loc
+    prev_loc = (
+        instance.depot.loc
+        if int(position) == 0
+        else instance.task_by_id(int(route[int(position) - 1])).loc
+    )
     if int(position) < len(route):
-        next_loc: Optional[Location] = instance.task_by_id(int(route[int(position)])).loc
+        next_loc: Optional[Location] = instance.task_by_id(
+            int(route[int(position)])
+        ).loc
     elif bool(config.eval.include_depot_legs):
         next_loc = instance.depot.loc
     else:
@@ -861,13 +1074,29 @@ def _insertion_neighbor_locs(
     return prev_loc, next_loc
 
 
-def _distance_delta(instance: Instance, prev_loc: Location, task_loc: Location, next_loc: Optional[Location]) -> float:
+def _distance_delta(
+    instance: Instance,
+    prev_loc: Location,
+    task_loc: Location,
+    next_loc: Optional[Location],
+) -> float:
     if next_loc is not None:
-        return float(instance.distance(prev_loc, task_loc)) + float(instance.distance(task_loc, next_loc)) - float(instance.distance(prev_loc, next_loc))
+        return (
+            float(instance.distance(prev_loc, task_loc))
+            + float(instance.distance(task_loc, next_loc))
+            - float(instance.distance(prev_loc, next_loc))
+        )
     return float(instance.distance(prev_loc, task_loc))
 
 
-def _energy_delta(config: Config, instance: Instance, agent: Agent, prev_loc: Location, task: Task, next_loc: Optional[Location]) -> float:
+def _energy_delta(
+    config: Config,
+    instance: Instance,
+    agent: Agent,
+    prev_loc: Location,
+    task: Task,
+    next_loc: Optional[Location],
+) -> float:
     if next_loc is not None:
         return (
             _travel_energy(config, instance, agent, prev_loc, task.loc)
@@ -875,7 +1104,9 @@ def _energy_delta(config: Config, instance: Instance, agent: Agent, prev_loc: Lo
             - _travel_energy(config, instance, agent, prev_loc, next_loc)
             + _service_energy(agent, task)
         )
-    return _travel_energy(config, instance, agent, prev_loc, task.loc) + _service_energy(agent, task)
+    return _travel_energy(
+        config, instance, agent, prev_loc, task.loc
+    ) + _service_energy(agent, task)
 
 
 def _simulate_route(
@@ -922,7 +1153,9 @@ def _simulate_route(
         dist_back = float(instance.distance(current_loc, instance.depot.loc))
         time_back = float(instance.travel_time(agent, current_loc, instance.depot.loc))
         total_distance += dist_back
-        total_energy += _travel_energy(config, instance, agent, current_loc, instance.depot.loc)
+        total_energy += _travel_energy(
+            config, instance, agent, current_loc, instance.depot.loc
+        )
         current_time += time_back
 
     return stops, _RouteMetrics(
@@ -933,8 +1166,13 @@ def _simulate_route(
     )
 
 
-def _route_pressure_map(sol: AssignmentSolution, instance: Instance, config: Config) -> Dict[int, float]:
-    routes = {int(aid): list(int(tid) for tid in sol.routes.get(int(aid), [])) for aid in instance.all_agent_ids()}
+def _route_pressure_map(
+    sol: AssignmentSolution, instance: Instance, config: Config
+) -> Dict[int, float]:
+    routes = {
+        int(aid): list(int(tid) for tid in sol.routes.get(int(aid), []))
+        for aid in instance.all_agent_ids()
+    }
     return _route_pressure_map_for_routes(routes, instance, config)
 
 
@@ -948,7 +1186,9 @@ def _route_pressure_map_for_routes(
     energies: Dict[int, float] = {}
     slacks: Dict[int, float] = {}
     for aid in instance.all_agent_ids():
-        _, metrics = _simulate_route(instance, config, int(aid), list(routes.get(int(aid), [])))
+        _, metrics = _simulate_route(
+            instance, config, int(aid), list(routes.get(int(aid), []))
+        )
         durations[int(aid)] = float(metrics.duration)
         energies[int(aid)] = float(metrics.energy)
         slacks[int(aid)] = float(metrics.min_slack)
@@ -968,25 +1208,37 @@ def _route_pressure_map_for_routes(
     return out
 
 
-def _route_pressure_summary(sol: AssignmentSolution, instance: Instance, config: Config) -> Dict[str, float]:
+def _route_pressure_summary(
+    sol: AssignmentSolution, instance: Instance, config: Config
+) -> Dict[str, float]:
     pressure = _route_pressure_map(sol, instance, config)
     values = list(float(x) for x in pressure.values())
     min_energy_ratio = math.inf
     min_slack = math.inf
     for aid in instance.all_agent_ids():
-        _, metrics = _simulate_route(instance, config, int(aid), list(sol.routes.get(int(aid), [])))
+        _, metrics = _simulate_route(
+            instance, config, int(aid), list(sol.routes.get(int(aid), []))
+        )
         agent = instance.agent_by_id(int(aid))
-        min_energy_ratio = min(min_energy_ratio, (float(agent.init_energy) - float(metrics.energy)) / max(float(agent.init_energy), _EPS))
+        min_energy_ratio = min(
+            min_energy_ratio,
+            (float(agent.init_energy) - float(metrics.energy))
+            / max(float(agent.init_energy), _EPS),
+        )
         min_slack = min(min_slack, float(metrics.min_slack))
     return {
         "max_pressure": max(values) if values else 0.0,
         "pressure_std": _std(values),
-        "min_energy_ratio": 0.0 if math.isinf(min_energy_ratio) else float(min_energy_ratio),
+        "min_energy_ratio": (
+            0.0 if math.isinf(min_energy_ratio) else float(min_energy_ratio)
+        ),
         "min_slack": 0.0 if math.isinf(min_slack) else float(min_slack),
     }
 
 
-def _task_pressure_summary(sol: AssignmentSolution, instance: Instance, config: Config) -> Dict[str, int]:
+def _task_pressure_summary(
+    sol: AssignmentSolution, instance: Instance, config: Config
+) -> Dict[str, int]:
     tids = sorted(int(tid) for tid in sol.unassigned)
     if not tids:
         return {
@@ -1003,10 +1255,26 @@ def _task_pressure_summary(sol: AssignmentSolution, instance: Instance, config: 
     median_energy = _median(energy_lbs)
     scarce_limit = max(1, int(math.ceil(0.25 * len(instance.agents))))
     return {
-        "high_priority_unassigned": int(sum(1 for task in tasks if float(task.priority) >= 0.75 * max_priority)),
-        "tight_tw_unassigned": int(sum(1 for task in tasks if _time_window_width(task) <= median_width)),
-        "skill_scarce_unassigned": int(sum(1 for task in tasks if _count_basic_feasible_agents(instance, config, task) <= scarce_limit)),
-        "energy_heavy_unassigned": int(sum(1 for task in tasks if _task_energy_lb(instance, config, task) >= median_energy)),
+        "high_priority_unassigned": int(
+            sum(1 for task in tasks if float(task.priority) >= 0.75 * max_priority)
+        ),
+        "tight_tw_unassigned": int(
+            sum(1 for task in tasks if _time_window_width(task) <= median_width)
+        ),
+        "skill_scarce_unassigned": int(
+            sum(
+                1
+                for task in tasks
+                if _count_basic_feasible_agents(instance, config, task) <= scarce_limit
+            )
+        ),
+        "energy_heavy_unassigned": int(
+            sum(
+                1
+                for task in tasks
+                if _task_energy_lb(instance, config, task) >= median_energy
+            )
+        ),
     }
 
 
@@ -1026,21 +1294,32 @@ def _task_energy_lb(instance: Instance, config: Config, task: Task) -> float:
     for agent in instance.agents:
         if not set(task.skill_req).issubset(set(agent.skills)):
             continue
-        energy = _travel_energy(config, instance, agent, instance.depot.loc, task.loc) + _service_energy(agent, task)
+        energy = _travel_energy(
+            config, instance, agent, instance.depot.loc, task.loc
+        ) + _service_energy(agent, task)
         if bool(config.eval.include_depot_legs):
-            energy += _travel_energy(config, instance, agent, task.loc, instance.depot.loc)
+            energy += _travel_energy(
+                config, instance, agent, task.loc, instance.depot.loc
+            )
         best = min(best, float(energy))
     return float(best if math.isfinite(best) else _BIG_M)
 
 
-def _travel_energy(config: Config, instance: Instance, agent: Agent, a: Location, b: Location) -> float:
+def _travel_energy(
+    config: Config, instance: Instance, agent: Agent, a: Location, b: Location
+) -> float:
     if float(config.extras.get("travel_energy_per_time", 0.0)) > 0.5:
-        return float(agent.travel_energy_rate) * float(instance.travel_time(agent, a, b))
+        return float(agent.travel_energy_rate) * float(
+            instance.travel_time(agent, a, b)
+        )
     return float(agent.travel_energy_rate) * float(instance.distance(a, b))
 
 
 def _service_energy(agent: Agent, task: Task) -> float:
-    return sum(float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0)) for skill in set(task.skill_req) & set(agent.skills))
+    return sum(
+        float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0))
+        for skill in set(task.skill_req) & set(agent.skills)
+    )
 
 
 def _time_window_width(task: Task) -> float:
@@ -1078,7 +1357,9 @@ def _std(values: Sequence[float]) -> float:
     if not values:
         return 0.0
     mean = _mean(values)
-    return math.sqrt(sum((float(value) - mean) ** 2 for value in values) / max(1, len(values)))
+    return math.sqrt(
+        sum((float(value) - mean) ** 2 for value in values) / max(1, len(values))
+    )
 
 
 __all__ = [

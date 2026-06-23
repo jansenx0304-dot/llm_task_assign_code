@@ -1,30 +1,44 @@
-from __future__ import annotations
-
 """Typed internal policies compiled from the small public LLM controls."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Tuple
 
-
 DESTROY_OPERATOR_NAMES: Tuple[str, ...] = (
-    "random_removal", "worst_task_removal", "related_cluster_removal",
-    "critical_block_removal", "route_rebalance_removal",
+    "random_removal",
+    "worst_task_removal",
+    "related_cluster_removal",
+    "critical_block_removal",
+    "route_rebalance_removal",
 )
 INSERTION_OPERATOR_NAMES: Tuple[str, ...] = (
-    "greedy_insertion", "scarcity_first_insertion", "regret_insertion",
-    "bottleneck_insertion", "diversified_insertion",
+    "greedy_insertion",
+    "scarcity_first_insertion",
+    "regret_insertion",
+    "bottleneck_insertion",
+    "diversified_insertion",
 )
 DESTROY_SIGNAL_NAMES: Tuple[str, ...] = (
-    "cost_pressure", "coupling_pressure", "route_balance_pressure",
-    "mobility_opportunity", "scarcity_protection",
+    "cost_pressure",
+    "coupling_pressure",
+    "route_balance_pressure",
+    "mobility_opportunity",
+    "scarcity_protection",
 )
 INSERTION_TASK_SIGNAL_NAMES: Tuple[str, ...] = (
-    "priority_loss", "scarcity_pressure", "regret_pressure",
-    "bottleneck_pressure", "mobility_opportunity",
+    "priority_loss",
+    "scarcity_pressure",
+    "regret_pressure",
+    "bottleneck_pressure",
+    "mobility_opportunity",
 )
 INSERTION_POSITION_SIGNAL_NAMES: Tuple[str, ...] = (
-    "insert_cost", "future_slack", "route_balance_gain",
-    "local_coupling_penalty", "diversity_gain",
+    "insert_cost",
+    "future_slack",
+    "route_balance_gain",
+    "local_coupling_penalty",
+    "diversity_gain",
 )
 ACCEPTANCE_MODES: Tuple[str, ...] = ("greedy", "threshold", "sa")
 
@@ -141,9 +155,18 @@ class InsertPosition:
 
 
 __all__ = [
-    "ACCEPTANCE_MODES", "DESTROY_OPERATOR_NAMES", "DESTROY_SIGNAL_NAMES",
-    "INSERTION_OPERATOR_NAMES", "INSERTION_TASK_SIGNAL_NAMES",
-    "INSERTION_POSITION_SIGNAL_NAMES", "DestroyPolicy",
-    "InsertionPolicy", "AcceptancePolicy", "CompiledALNSPolicy", "SolverRequest",
-    "LandscapeFeatures", "PositionFeatures", "InsertPosition",
+    "ACCEPTANCE_MODES",
+    "DESTROY_OPERATOR_NAMES",
+    "DESTROY_SIGNAL_NAMES",
+    "INSERTION_OPERATOR_NAMES",
+    "INSERTION_TASK_SIGNAL_NAMES",
+    "INSERTION_POSITION_SIGNAL_NAMES",
+    "DestroyPolicy",
+    "InsertionPolicy",
+    "AcceptancePolicy",
+    "CompiledALNSPolicy",
+    "SolverRequest",
+    "LandscapeFeatures",
+    "PositionFeatures",
+    "InsertPosition",
 ]

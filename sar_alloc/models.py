@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Mapping, Optional, Tuple, Set
 
-
 Location = Tuple[float, float]  # (x, y)
 
 
@@ -26,6 +25,7 @@ class Agent:
     智能体：初始能量、能力、速度、不同能力能耗、待机能耗（个体差异）
     能力模型改为：skills为集合，表示智能体具有的能力（二元模型）
     """
+
     id: int
     init_energy: float
     skills: Set[str] = field(default_factory=set)
@@ -63,6 +63,7 @@ class Instance:
     - 若提供 travel_time_fn：优先用它
     - 否则：travel_time = distance / agent.speed（speed<=0 时回退 default_speed）
     """
+
     tasks: Tuple[Task, ...]
     agents: Tuple[Agent, ...]
     depot: Depot
@@ -136,8 +137,10 @@ class Instance:
         else:
             # reuse cached distance
             dist = self.distance(a, b)
-            spd = agent.speed if agent.speed > 0 else (
-                self.default_speed if self.default_speed > 0 else 1.0
+            spd = (
+                agent.speed
+                if agent.speed > 0
+                else (self.default_speed if self.default_speed > 0 else 1.0)
             )
             t = dist / spd
 

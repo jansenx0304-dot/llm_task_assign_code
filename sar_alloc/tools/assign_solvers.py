@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Weighted ALNS solver with separate operator-level scoring profiles.
 
 Reinsert-task score decides which task to insertion next. Insert score decides the
 order of filtered insertion positions. Insertion scans the full ranked candidate
 sets.
 """
+
+from __future__ import annotations
 
 import math
 import random
@@ -30,6 +30,11 @@ from ..operators.destroy import (
     enumerate_random_removal,
 )
 from ..operators.insertion import InsertionContext, run_insertion_kernel
+from ..protected_metrics import (
+    ProtectedMetricBound,
+    check_protected_metrics,
+    evaluation_quality,
+)
 from ..solution import AssignmentSolution, EvalResult
 
 
@@ -57,6 +62,7 @@ class ALNSResult:
 
 ALNSExecutionResult = ALNSResult
 
+
 def evaluate(*args, **kwargs):  # noqa: F811
     t0 = time.perf_counter()
     ev = _evaluate_raw(*args, **kwargs)
@@ -76,6 +82,7 @@ def solve_assignment(
     feasibility_policy: Optional[Dict[str, Any]] = None,
     global_objective_layers: Optional[List[Dict[str, Any]]] = None,
     trace_id: str = "X_solver",
+    protected_metric_bounds: Optional[List[ProtectedMetricBound]] = None,
 ) -> ALNSResult:
     """Run weighted ALNS from an incumbent using an already validated policy."""
     rng = random.Random(int(rng_seed))
@@ -101,10 +108,13 @@ def solve_assignment(
         budget,
         policy,
         rng,
-        contract_objective_layers=contract_objective_layers or _config_objective_layers(config),
+        contract_objective_layers=contract_objective_layers
+        or _config_objective_layers(config),
         feasibility_policy=feasibility_policy or {"mode": "strict"},
-        global_objective_layers=global_objective_layers or _config_objective_layers(config),
+        global_objective_layers=global_objective_layers
+        or _config_objective_layers(config),
         trace_id=trace_id,
+        protected_metric_bounds=list(protected_metric_bounds or []),
     )
 
 
@@ -121,9 +131,13 @@ def _solve_weighted_alns(
     feasibility_policy: Dict[str, Any],
     global_objective_layers: List[Dict[str, Any]],
     trace_id: str,
+    protected_metric_bounds: List[ProtectedMetricBound],
 ) -> ALNSResult:
     destroy_ops: Dict[str, DestroyOperator] = dict(DESTROY_OPERATORS)
-    destroy_priors = {name: max(0.1, float(score)) for name, score in policy.destroy_policy.operator_weights.items()}
+    destroy_priors = {
+        name: max(0.1, float(score))
+        for name, score in policy.destroy_policy.operator_weights.items()
+    }
     prior_mix_lambda = float(policy.prior_mix_lambda)
 
     d_w = {name: 1.0 for name in destroy_ops}
@@ -141,36 +155,54 @@ def _solve_weighted_alns(
     accept_level = float(policy.acceptance_policy.accept_level)
     temperature = 0.05 + 0.50 * accept_level
     cooling = _clamp_float(0.999 - 0.02 * accept_level, 0.90, 0.9999)
+    contract_start_solution = cur.clone(deep=True)
     initial_solution_feasible = bool(cur_ev.is_feasible)
+    initial_protected_check = check_protected_metrics(
+        evaluation_quality(cur_ev), protected_metric_bounds
+    )
     initial_working_objective_keys = build_objective_keys(
         cur_ev, contract_objective_layers, global_objective_layers
     )
 
-    action_best_feasible: Optional[AssignmentSolution] = cur.clone(deep=True) if cur_ev.is_feasible else None
-    action_best_feasible_ev: Optional[EvalResult] = cur_ev if cur_ev.is_feasible else None
-    global_best_feasible: Optional[AssignmentSolution] = cur.clone(deep=True) if cur_ev.is_feasible else None
-    global_best_feasible_ev: Optional[EvalResult] = cur_ev if cur_ev.is_feasible else None
+    initial_is_eligible = bool(cur_ev.is_feasible and initial_protected_check.passed)
+    action_best_feasible: Optional[AssignmentSolution] = (
+        cur.clone(deep=True) if initial_is_eligible else None
+    )
+    action_best_feasible_ev: Optional[EvalResult] = (
+        cur_ev if initial_is_eligible else None
+    )
+    global_best_feasible: Optional[AssignmentSolution] = (
+        cur.clone(deep=True) if initial_is_eligible else None
+    )
+    global_best_feasible_ev: Optional[EvalResult] = (
+        cur_ev if initial_is_eligible else None
+    )
 
     best_update_iters: List[int] = []
     best_update_objective_keys: List[Dict[str, Any]] = []
     last_acceptance_decision: Optional[Dict[str, Any]] = None
     destroy_operator_stats = _init_destroy_operator_stats(d_w.keys())
-    insertion_operator_summary = _init_insertion_operator_summary(policy.insertion_policy.operator_weights.keys())
+    insertion_operator_summary = _init_insertion_operator_summary(
+        policy.insertion_policy.operator_weights.keys()
+    )
     iteration_trace: List[Dict[str, Any]] = []
     last_destroy_move: Optional[Dict[str, Any]] = None
     last_insertion: Optional[Dict[str, Any]] = None
     accepted_trial_count = 0
     rejected_trial_count = 0
     feasibility_rejection_reasons: Dict[str, int] = {}
+    protected_metric_rejections = 0
+    protected_metric_rejection_reasons: Dict[str, int] = {}
     events: List[str] = []
     trial_flow = {
         "candidate_trials": 0,
         "hard_filter_failed": 0,
         "feasibility_rejected": 0,
+        "protected_metric_rejected": 0,
         "admissible_trials": 0,
         "acceptance_rejected": 0,
         "accepted_trials": 0,
-        "best_improved_trials": 0,
+        "global_best_improved_trials": 0,
     }
     repair_failure_reasons: Dict[str, int] = {}
     removed_task_count_sum = 0.0
@@ -202,28 +234,45 @@ def _solve_weighted_alns(
         partial.solver_diagnostics = {"last_destroy_move": last_destroy_move}
         partial.normalize(instance)
 
-        candidate_tasks = list(dict.fromkeys(removed + sorted(int(tid) for tid in partial.unassigned)))
+        candidate_tasks = list(
+            dict.fromkeys(removed + sorted(int(tid) for tid in partial.unassigned))
+        )
         trial = run_insertion_kernel(
             partial_solution=partial,
             candidate_tasks=candidate_tasks,
             insertion_policy=policy.insertion_policy,
-            context=InsertionContext(kind="alns", feasibility_mode=str(feasibility_policy.get("mode", "strict"))),
+            context=InsertionContext(
+                kind="alns",
+                feasibility_mode=str(feasibility_policy.get("mode", "strict")),
+            ),
             instance=instance,
             config=config,
             rng=rng,
         )
         trial.solver_diagnostics["last_destroy_move"] = last_destroy_move
-        last_insertion = dict((getattr(trial, "solver_diagnostics", {}) or {}).get("last_insertion", {}) or {})
+        last_insertion = dict(
+            (getattr(trial, "solver_diagnostics", {}) or {}).get("last_insertion", {})
+            or {}
+        )
         trial_flow["candidate_trials"] += 1
         if int(last_insertion.get("inserted_count", 0) or 0) == 0:
             trial_flow["hard_filter_failed"] += 1
-            repair_failure_reasons["no_reinserted_task"] = repair_failure_reasons.get("no_reinserted_task", 0) + 1
-        for name, count in dict(last_insertion.get("failure_breakdown", {}) or {}).items():
+            repair_failure_reasons["no_reinserted_task"] = (
+                repair_failure_reasons.get("no_reinserted_task", 0) + 1
+            )
+        for name, count in dict(
+            last_insertion.get("failure_breakdown", {}) or {}
+        ).items():
             if int(count):
-                repair_failure_reasons[str(name)] = repair_failure_reasons.get(str(name), 0) + int(count)
+                repair_failure_reasons[str(name)] = repair_failure_reasons.get(
+                    str(name), 0
+                ) + int(count)
 
         trial.normalize(instance)
         ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
+        protected_check = check_protected_metrics(
+            evaluation_quality(ev_trial), protected_metric_bounds
+        )
 
         feasibility_decision = check_feasibility_admissibility(
             cur_ev.constraint_report,
@@ -239,7 +288,8 @@ def _solve_weighted_alns(
             accept_scope=feasibility_decision.accept_scope,
             feasibility_reason=feasibility_decision.reason,
         )
-        if feasibility_decision.admissible:
+        rejection_reason = ""
+        if feasibility_decision.admissible and protected_check.passed:
             trial_flow["admissible_trials"] += 1
             acceptance = _alns_accept(
                 cur_ev=cur_ev,
@@ -253,11 +303,22 @@ def _solve_weighted_alns(
                 accept_scope=feasibility_decision.accept_scope,
                 feasibility_reason=feasibility_decision.reason,
             )
-        else:
+        elif not feasibility_decision.admissible:
             trial_flow["feasibility_rejected"] += 1
+            rejection_reason = feasibility_decision.reason
             feasibility_rejection_reasons[feasibility_decision.reason] = (
                 feasibility_rejection_reasons.get(feasibility_decision.reason, 0) + 1
             )
+        else:
+            protected_metric_rejections += 1
+            trial_flow["protected_metric_rejected"] += 1
+            rejection_reason = "protected_metric_violated"
+            events.append("protected_metric_violated")
+            for violation in protected_check.violations:
+                metric = str(violation["metric"])
+                protected_metric_rejection_reasons[metric] = (
+                    protected_metric_rejection_reasons.get(metric, 0) + 1
+                )
         accepted = acceptance.accepted
         last_acceptance_decision = acceptance.as_dict()
         if iteration % 100 == 0:
@@ -279,30 +340,49 @@ def _solve_weighted_alns(
             reward = max(reward, 0.2)
         else:
             rejected_trial_count += 1
-            if feasibility_decision.admissible:
+            if feasibility_decision.admissible and protected_check.passed:
                 trial_flow["acceptance_rejected"] += 1
+                rejection_reason = "acceptance_rejected"
 
-        if ev_trial.is_feasible and (
-            action_best_feasible_ev is None
-            or compare_quality(ev_trial, action_best_feasible_ev, contract_objective_layers) < 0
+        if (
+            protected_check.passed
+            and ev_trial.is_feasible
+            and (
+                action_best_feasible_ev is None
+                or compare_quality(
+                    ev_trial, action_best_feasible_ev, contract_objective_layers
+                )
+                < 0
+            )
         ):
             action_best_feasible = trial.clone(deep=True)
             action_best_feasible_ev = ev_trial
 
         best_improved = False
-        if ev_trial.is_feasible and (
-            global_best_feasible_ev is None
-            or compare_quality(ev_trial, global_best_feasible_ev, global_objective_layers) < 0
+        if (
+            protected_check.passed
+            and ev_trial.is_feasible
+            and (
+                global_best_feasible_ev is None
+                or compare_quality(
+                    ev_trial, global_best_feasible_ev, global_objective_layers
+                )
+                < 0
+            )
         ):
             global_best_feasible = trial.clone(deep=True)
             global_best_feasible_ev = ev_trial
             best_update_iters.append(iteration)
             best_update_objective_keys.append(
-                build_objective_keys(global_best_feasible_ev, contract_objective_layers, global_objective_layers)
+                build_objective_keys(
+                    global_best_feasible_ev,
+                    contract_objective_layers,
+                    global_objective_layers,
+                )
             )
             reward = max(reward, 5.0)
             best_improved = True
-            trial_flow["best_improved_trials"] += 1
+            trial_flow["global_best_improved_trials"] += 1
 
         iteration_trace.append(
             {
@@ -310,12 +390,35 @@ def _solve_weighted_alns(
                 "destroy_operator": actual_d_name,
                 "insertion_operator": "kernel",
                 "accepted": bool(accepted),
-                "current_objective_keys": build_objective_keys(cur_ev, contract_objective_layers, global_objective_layers),
-                "action_best_objective_keys": None if action_best_feasible_ev is None else build_objective_keys(action_best_feasible_ev, contract_objective_layers, global_objective_layers),
-                "global_best_objective_keys": None if global_best_feasible_ev is None else build_objective_keys(global_best_feasible_ev, contract_objective_layers, global_objective_layers),
+                "current_objective_keys": build_objective_keys(
+                    cur_ev, contract_objective_layers, global_objective_layers
+                ),
+                "action_best_objective_keys": (
+                    None
+                    if action_best_feasible_ev is None
+                    else build_objective_keys(
+                        action_best_feasible_ev,
+                        contract_objective_layers,
+                        global_objective_layers,
+                    )
+                ),
+                "global_best_objective_keys": (
+                    None
+                    if global_best_feasible_ev is None
+                    else build_objective_keys(
+                        global_best_feasible_ev,
+                        contract_objective_layers,
+                        global_objective_layers,
+                    )
+                ),
                 "violation_total": float(ev_trial.get_metric("violation_total")),
-                "violation_ratio_by_type": dict(ev_trial.constraint_report.violation_ratio_by_type),
+                "violation_ratio_by_type": dict(
+                    ev_trial.constraint_report.violation_ratio_by_type
+                ),
                 "feasibility_reason": feasibility_decision.reason,
+                "protected_metric_passed": protected_check.passed,
+                "protected_metric_violations": list(protected_check.violations),
+                "rejection_reason": rejection_reason or None,
             }
         )
 
@@ -348,20 +451,42 @@ def _solve_weighted_alns(
         evaluate(action_best_feasible, instance, config, update_solution_schedule=True)
     if global_best_feasible is not None:
         evaluate(global_best_feasible, instance, config, update_solution_schedule=True)
-    working_solution = (
-        action_best_feasible.clone(deep=True)
-        if action_best_feasible is not None
-        else final_current.clone(deep=True)
+    if action_best_feasible is not None:
+        working_solution = action_best_feasible.clone(deep=True)
+        returned_source = "action_best_feasible"
+    elif protected_metric_bounds:
+        working_solution = contract_start_solution.clone(deep=True)
+        evaluate(working_solution, instance, config, update_solution_schedule=True)
+        returned_source = "contract_start_solution_due_to_protected_bounds"
+    else:
+        working_solution = final_current.clone(deep=True)
+        returned_source = "final_current_no_feasible"
+    returned_protected_check = check_protected_metrics(
+        evaluation_quality(working_solution.eval), protected_metric_bounds
     )
-    returned_source = "action_best_feasible" if action_best_feasible is not None else "final_current_no_feasible"
+    if not returned_protected_check.passed:
+        raise AssertionError(
+            "returned working solution violates protected metric bounds"
+        )
     actual_time_used_sec = max(0.0, time.perf_counter() - started_at)
     trace = _build_execution_trace(
         trace_id=trace_id,
         total_iters=iteration,
-        destroy_operator_summary=_finalize_destroy_operator_stats(destroy_operator_stats),
-        insertion_operator_summary=_finalize_insertion_operator_summary(insertion_operator_summary),
+        destroy_operator_summary=_finalize_destroy_operator_stats(
+            destroy_operator_stats
+        ),
+        insertion_operator_summary=_finalize_insertion_operator_summary(
+            insertion_operator_summary
+        ),
         trial_flow=trial_flow,
-        rejection_reasons=feasibility_rejection_reasons,
+        rejection_reasons={
+            **feasibility_rejection_reasons,
+            **(
+                {"protected_metric_violated": protected_metric_rejections}
+                if protected_metric_rejections
+                else {}
+            ),
+        },
         repair_failure_reasons=repair_failure_reasons,
         removed_task_count_sum=removed_task_count_sum,
     )
@@ -373,7 +498,9 @@ def _solve_weighted_alns(
         best_update_objective_keys=best_update_objective_keys,
         returned_solution_source=returned_source,
         initial_solution_feasible=initial_solution_feasible,
-        returned_solution_feasible=bool(getattr(working_solution.eval, "is_feasible", False)),
+        returned_solution_feasible=bool(
+            getattr(working_solution.eval, "is_feasible", False)
+        ),
         last_acceptance_decision=last_acceptance_decision,
         last_destroy_move=last_destroy_move,
         destroy_operator_summary=trace["destroy"]["selected_operator_counts"],
@@ -384,26 +511,45 @@ def _solve_weighted_alns(
             "destroy_operators": {
                 "adaptive": d_w,
                 "llm_score_prior": destroy_priors,
-                "fused_final": _blend_operator_weights(d_w, destroy_priors, prior_mix_lambda),
+                "fused_final": _blend_operator_weights(
+                    d_w, destroy_priors, prior_mix_lambda
+                ),
             },
-            "insertion_operators": {"llm_weights": policy.insertion_policy.operator_weights},
+            "insertion_operators": {
+                "llm_weights": policy.insertion_policy.operator_weights
+            },
         },
         feasibility_policy=feasibility_policy,
         final_constraint_report=working_solution.eval.constraint_report,
         feasibility_rejection_reasons=feasibility_rejection_reasons,
+        protected_metric_rejections=protected_metric_rejections,
+        protected_metric_rejection_reasons=protected_metric_rejection_reasons,
+        protected_metric_bounds=[bound.as_dict() for bound in protected_metric_bounds],
+        returned_protected_result=returned_protected_check.as_dict(),
         execution_trace=trace,
     )
     diagnostics["solution_flow"] = {
         "initial_working": {"objective_keys": initial_working_objective_keys},
         "final_current": {
-            "objective_keys": build_objective_keys(final_current.eval, contract_objective_layers, global_objective_layers),
+            "objective_keys": build_objective_keys(
+                final_current.eval, contract_objective_layers, global_objective_layers
+            ),
             "is_feasible": bool(final_current.eval.is_feasible),
         },
-        "action_best_feasible": None if action_best_feasible is None else {
-            "objective_keys": build_objective_keys(action_best_feasible.eval, contract_objective_layers, global_objective_layers),
-            "is_feasible": True,
-        },
+        "action_best_feasible": (
+            None
+            if action_best_feasible is None
+            else {
+                "objective_keys": build_objective_keys(
+                    action_best_feasible.eval,
+                    contract_objective_layers,
+                    global_objective_layers,
+                ),
+                "is_feasible": True,
+            }
+        ),
         "returned_solution_source": returned_source,
+        "protected_metric_result": returned_protected_check.as_dict(),
     }
     print(
         "[ALNS] done "
@@ -466,7 +612,9 @@ def select_destroy_move(
     if not moves:
         moves = enumerate_random_removal(sol, instance, config, policy, strength, rng)
     if not moves:
-        raise RuntimeError("destroy selection failed: random_removal produced no move for a non-empty solution")
+        raise RuntimeError(
+            "destroy selection failed: random_removal produced no move for a non-empty solution"
+        )
     moves = sorted(
         moves,
         key=lambda move: (-float(move.score), tuple(int(tid) for tid in move.task_ids)),
@@ -492,12 +640,14 @@ def _sample_rank_weighted_destroy_move(
     return moves[-1]
 
 
-def _init_destroy_operator_stats(operator_names: Sequence[str]) -> Dict[str, Dict[str, float]]:
+def _init_destroy_operator_stats(
+    operator_names: Sequence[str],
+) -> Dict[str, Dict[str, float]]:
     return {
         str(name): {
             "used": 0.0,
             "accepted": 0.0,
-            "best_improved": 0.0,
+            "global_best_improved": 0.0,
             "total_score": 0.0,
             "removed_count_sum": 0.0,
             "cost_pressure_sum": 0.0,
@@ -525,7 +675,7 @@ def _accumulate_destroy_operator_stats(
     features = move.features
     bucket["used"] += 1.0
     bucket["accepted"] += 1.0 if accepted else 0.0
-    bucket["best_improved"] += 1.0 if best_improved else 0.0
+    bucket["global_best_improved"] += 1.0 if best_improved else 0.0
     bucket["total_score"] += float(reward)
     bucket["removed_count_sum"] += float(len(move.task_ids))
     bucket["cost_pressure_sum"] += float(features.cost_pressure)
@@ -535,7 +685,9 @@ def _accumulate_destroy_operator_stats(
     bucket["route_balance_pressure_sum"] += float(features.route_balance_pressure)
 
 
-def _finalize_destroy_operator_stats(summary: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+def _finalize_destroy_operator_stats(
+    summary: Dict[str, Dict[str, float]],
+) -> Dict[str, Dict[str, float]]:
     out: Dict[str, Dict[str, float]] = {}
     for name, bucket in summary.items():
         used = int(bucket.get("used", 0.0))
@@ -543,24 +695,50 @@ def _finalize_destroy_operator_stats(summary: Dict[str, Dict[str, float]]) -> Di
         out[str(name)] = {
             "used": used,
             "accepted": int(bucket.get("accepted", 0.0)),
-            "best_improved": int(bucket.get("best_improved", 0.0)),
+            "global_best_improved": int(bucket.get("global_best_improved", 0.0)),
             "total_score": round(float(bucket.get("total_score", 0.0)), 6),
-            "mean_removed_count": round(float(bucket.get("removed_count_sum", 0.0)) / denom, 6) if used else 0.0,
-            "mean_cost_pressure": round(float(bucket.get("cost_pressure_sum", 0.0)) / denom, 6) if used else 0.0,
-            "mean_scarcity_pressure": round(float(bucket.get("scarcity_pressure_sum", 0.0)) / denom, 6) if used else 0.0,
-            "mean_coupling_pressure": round(float(bucket.get("coupling_pressure_sum", 0.0)) / denom, 6) if used else 0.0,
-            "mean_mobility_opportunity": round(float(bucket.get("mobility_opportunity_sum", 0.0)) / denom, 6) if used else 0.0,
-            "mean_route_balance_pressure": round(float(bucket.get("route_balance_pressure_sum", 0.0)) / denom, 6) if used else 0.0,
+            "mean_removed_count": (
+                round(float(bucket.get("removed_count_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
+            "mean_cost_pressure": (
+                round(float(bucket.get("cost_pressure_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
+            "mean_scarcity_pressure": (
+                round(float(bucket.get("scarcity_pressure_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
+            "mean_coupling_pressure": (
+                round(float(bucket.get("coupling_pressure_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
+            "mean_mobility_opportunity": (
+                round(float(bucket.get("mobility_opportunity_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
+            "mean_route_balance_pressure": (
+                round(float(bucket.get("route_balance_pressure_sum", 0.0)) / denom, 6)
+                if used
+                else 0.0
+            ),
         }
     return out
 
 
-def _init_insertion_operator_summary(operator_names: Sequence[str]) -> Dict[str, Dict[str, float]]:
+def _init_insertion_operator_summary(
+    operator_names: Sequence[str],
+) -> Dict[str, Dict[str, float]]:
     return {
         str(name): {
             "used": 0.0,
             "accepted": 0.0,
-            "best_improved": 0.0,
+            "global_best_improved": 0.0,
             "inserted_sum": 0.0,
             "unassigned_before_sum": 0.0,
             "unassigned_after_sum": 0.0,
@@ -587,22 +765,26 @@ def _accumulate_insertion_operator_summary(
     insertion = dict(last_insertion or {})
     bucket["used"] += 1.0
     bucket["accepted"] += 1.0 if accepted else 0.0
-    bucket["best_improved"] += 1.0 if best_improved else 0.0
+    bucket["global_best_improved"] += 1.0 if best_improved else 0.0
     bucket["inserted_sum"] += float(insertion.get("inserted_count", 0) or 0)
     bucket["unassigned_before_sum"] += float(insertion.get("unassigned_before", 0) or 0)
     bucket["unassigned_after_sum"] += float(insertion.get("unassigned_after", 0) or 0)
     bucket["tasks_analyzed_sum"] += float(insertion.get("tasks_analyzed", 0) or 0)
-    bucket["positions_checked_sum"] += float(insertion.get("positions_strict_checked", 0) or 0)
+    bucket["positions_checked_sum"] += float(
+        insertion.get("positions_strict_checked", 0) or 0
+    )
     bucket["time_ms_sum"] += float(insertion.get("time_ms", 0.0) or 0.0)
 
 
-def _finalize_insertion_operator_summary(summary: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, Any]]:
+def _finalize_insertion_operator_summary(
+    summary: Dict[str, Dict[str, float]],
+) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for name, bucket in summary.items():
         out[str(name)] = {
             "used": int(bucket.get("used", 0.0)),
             "accepted": int(bucket.get("accepted", 0.0)),
-            "best_improved": int(bucket.get("best_improved", 0.0)),
+            "global_best_improved": int(bucket.get("global_best_improved", 0.0)),
             "inserted_sum": int(bucket.get("inserted_sum", 0.0)),
             "unassigned_before_sum": int(bucket.get("unassigned_before_sum", 0.0)),
             "unassigned_after_sum": int(bucket.get("unassigned_after_sum", 0.0)),
@@ -624,7 +806,9 @@ def _remove_tasks(sol: AssignmentSolution, tids: Sequence[int]) -> None:
     sol.eval = None
 
 
-def _attach_solver_diagnostics(solution: AssignmentSolution, diagnostics: Dict[str, Any]) -> AssignmentSolution:
+def _attach_solver_diagnostics(
+    solution: AssignmentSolution, diagnostics: Dict[str, Any]
+) -> AssignmentSolution:
     solution.solver_diagnostics = diagnostics
     return solution
 
@@ -649,6 +833,10 @@ def _build_solver_diagnostics(
     feasibility_policy: Dict[str, Any],
     final_constraint_report: Any,
     feasibility_rejection_reasons: Dict[str, int],
+    protected_metric_rejections: int,
+    protected_metric_rejection_reasons: Dict[str, int],
+    protected_metric_bounds: List[Dict[str, Any]],
+    returned_protected_result: Dict[str, Any],
     execution_trace: Dict[str, Any],
 ) -> Dict[str, Any]:
     last_best_iter = best_update_iters[-1] if best_update_iters else None
@@ -663,7 +851,11 @@ def _build_solver_diagnostics(
         "best_update_objective_keys": list(best_update_objective_keys),
         "first_best_iter": int(best_update_iters[0]) if best_update_iters else None,
         "last_best_iter": int(last_best_iter) if last_best_iter is not None else None,
-        "plateau_iters_after_last_update": int(total_iters - last_best_iter) if last_best_iter is not None else int(total_iters),
+        "plateau_iters_after_last_update": (
+            int(total_iters - last_best_iter)
+            if last_best_iter is not None
+            else int(total_iters)
+        ),
         "initial_solution_feasible": bool(initial_solution_feasible),
         "returned_solution_source": returned_solution_source,
         "returned_solution_feasible": bool(returned_solution_feasible),
@@ -672,7 +864,9 @@ def _build_solver_diagnostics(
         "last_insertion": dict(last_insertion or {}),
         "iteration_trace": list(iteration_trace),
         "destroy_operator_summary": _numericize_weight_tree(destroy_operator_summary),
-        "insertion_operator_summary": _numericize_weight_tree(insertion_operator_summary),
+        "insertion_operator_summary": _numericize_weight_tree(
+            insertion_operator_summary
+        ),
         "operator_weights": _numericize_weight_tree(operator_weights),
         "feasibility_policy": _numericize_weight_tree(feasibility_policy),
         "violation_ratios": _violation_ratio_diagnostics(
@@ -683,6 +877,13 @@ def _build_solver_diagnostics(
             str(reason): int(count)
             for reason, count in feasibility_rejection_reasons.items()
         },
+        "protected_metric_rejections": int(protected_metric_rejections),
+        "protected_metric_rejection_reasons": {
+            str(metric): int(count)
+            for metric, count in protected_metric_rejection_reasons.items()
+        },
+        "protected_metric_bounds": list(protected_metric_bounds),
+        "protected_metric_result": dict(returned_protected_result),
         "execution_trace": dict(execution_trace),
     }
     return diagnostics
@@ -714,21 +915,29 @@ def _build_execution_trace(
         for values in insertion_operator_summary.values()
         if isinstance(values, dict)
     )
-    dominant_repair = max(repair_failure_reasons.items(), key=lambda item: int(item[1]), default=("none", 0))[0]
+    dominant_repair = max(
+        repair_failure_reasons.items(),
+        key=lambda item: int(item[1]),
+        default=("none", 0),
+    )[0]
     return {
         "trace_id": trace_id,
         "kind": "alns",
         "iters": int(total_iters),
         "destroy": {
             "selected_operator_counts": selected_counts,
-            "removed_task_count_avg": round(float(removed_task_count_sum) / candidate_trials, 6),
+            "removed_task_count_avg": round(
+                float(removed_task_count_sum) / candidate_trials, 6
+            ),
         },
         "repair": {
             "candidate_tasks_total": int(tasks_reinserted + tasks_left),
             "tasks_reinserted": int(tasks_reinserted),
             "tasks_left_unassigned": int(tasks_left),
             "dominant_repair_failure": str(dominant_repair),
-            "repair_failure_reasons": {str(k): int(v) for k, v in repair_failure_reasons.items()},
+            "repair_failure_reasons": {
+                str(k): int(v) for k, v in repair_failure_reasons.items()
+            },
         },
         "trial_flow": {str(k): int(v) for k, v in trial_flow.items()},
         "rejection_reasons": {str(k): int(v) for k, v in rejection_reasons.items()},
@@ -807,12 +1016,33 @@ def _alns_accept(
     # only consulted for worse moves (cmp > 0).
     cmp = compare_quality(trial_ev, cur_ev, objective_layers)
     if cmp < 0:
-        return _AcceptanceDecision(compare_result=cmp, accepted=True, accept_mode=mode, feasibility_admissible=feasibility_admissible, accept_scope=accept_scope, feasibility_reason=feasibility_reason)
+        return _AcceptanceDecision(
+            compare_result=cmp,
+            accepted=True,
+            accept_mode=mode,
+            feasibility_admissible=feasibility_admissible,
+            accept_scope=accept_scope,
+            feasibility_reason=feasibility_reason,
+        )
     if cmp == 0:
-        return _AcceptanceDecision(compare_result=cmp, accepted=True, accept_mode=mode, feasibility_admissible=feasibility_admissible, accept_scope=accept_scope, feasibility_reason=feasibility_reason)
+        return _AcceptanceDecision(
+            compare_result=cmp,
+            accepted=True,
+            accept_mode=mode,
+            feasibility_admissible=feasibility_admissible,
+            accept_scope=accept_scope,
+            feasibility_reason=feasibility_reason,
+        )
 
     if mode == "greedy":
-        return _AcceptanceDecision(compare_result=cmp, accepted=False, accept_mode=mode, feasibility_admissible=feasibility_admissible, accept_scope=accept_scope, feasibility_reason=feasibility_reason)
+        return _AcceptanceDecision(
+            compare_result=cmp,
+            accepted=False,
+            accept_mode=mode,
+            feasibility_admissible=feasibility_admissible,
+            accept_scope=accept_scope,
+            feasibility_reason=feasibility_reason,
+        )
 
     delta_soft = _acceptance_soft_delta(cur_ev, trial_ev, objective_layers)
     if mode == "threshold":
@@ -842,7 +1072,10 @@ def _alns_accept(
             temperature=float(temperature),
         )
 
-def _acceptance_soft_delta(cur_ev: EvalResult, trial_ev: EvalResult, objective_layers: List[Dict[str, Any]]) -> float:
+
+def _acceptance_soft_delta(
+    cur_ev: EvalResult, trial_ev: EvalResult, objective_layers: List[Dict[str, Any]]
+) -> float:
     """Auxiliary scalar for worse-move soft acceptance only."""
     eps = 1e-9
     for layer in objective_layers:
@@ -862,7 +1095,9 @@ def _oriented_metric_value(ev: EvalResult, metric: str, direction: str) -> float
     return -value if str(direction).lower() == "max" else value
 
 
-def _threshold_acceptance_limit(cur_ev: EvalResult, trial_ev: EvalResult, accept_level: float) -> float:
+def _threshold_acceptance_limit(
+    cur_ev: EvalResult, trial_ev: EvalResult, accept_level: float
+) -> float:
     cur_violation = float(cur_ev.get_metric("violation_total"))
     trial_violation = float(trial_ev.get_metric("violation_total"))
     if cur_violation <= 0.0 and trial_violation <= 0.0:
@@ -894,16 +1129,13 @@ def _blend_operator_weights(
     for name, rule_weight in rule_weights.items():
         rule = max(1e-9, float(rule_weight))
         prior = max(1e-9, float(llm_priors[str(name)]))
-        fused[str(name)] = (rule ** (1.0 - lam)) * (prior ** lam)
+        fused[str(name)] = (rule ** (1.0 - lam)) * (prior**lam)
     return fused
 
 
 def _numericize_weight_tree(node: Any) -> Any:
     if isinstance(node, dict):
-        return {
-            str(key): _numericize_weight_tree(value)
-            for key, value in node.items()
-        }
+        return {str(key): _numericize_weight_tree(value) for key, value in node.items()}
     if isinstance(node, (list, tuple)):
         return [_numericize_weight_tree(value) for value in node]
     if isinstance(node, (int, float)):
@@ -940,7 +1172,9 @@ def _update_weights(
         if used.get(name, 0) <= 0:
             continue
         avg = float(scores.get(name, 0.0)) / max(1, int(used.get(name, 0)))
-        weights[name] = (1.0 - float(reaction)) * float(weights[name]) + float(reaction) * max(0.0, avg)
+        weights[name] = (1.0 - float(reaction)) * float(weights[name]) + float(
+            reaction
+        ) * max(0.0, avg)
         weights[name] = max(1e-6, float(weights[name]))
 
 
@@ -951,7 +1185,9 @@ def _reset_segment_scores(scores: Dict[str, float], used: Dict[str, int]) -> Non
 
 
 def _budget_ok(budget: Budget, started_at: float, iteration: int) -> bool:
-    if budget.time_limit_sec is not None and (time.perf_counter() - started_at) >= float(budget.time_limit_sec):
+    if budget.time_limit_sec is not None and (
+        time.perf_counter() - started_at
+    ) >= float(budget.time_limit_sec):
         return False
     if budget.max_iters is not None and iteration >= int(budget.max_iters):
         return False

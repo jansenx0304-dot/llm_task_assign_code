@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from .models import Instance
 
-
 AgentID = int
 TaskID = int
 
@@ -72,7 +71,9 @@ class EvalResult:
 class AssignmentSolution:
     routes: Dict[AgentID, List[TaskID]] = field(default_factory=dict)
     unassigned: Set[TaskID] = field(default_factory=set)
-    schedule: Dict[Tuple[AgentID, TaskID], Tuple[float, float]] = field(default_factory=dict)
+    schedule: Dict[Tuple[AgentID, TaskID], Tuple[float, float]] = field(
+        default_factory=dict
+    )
     eval: Optional[EvalResult] = None
     solver_diagnostics: Dict[str, Any] = field(default_factory=dict)
     run_summary: Dict[str, Any] = field(default_factory=dict)
@@ -90,7 +91,9 @@ class AssignmentSolution:
                 run_artifact=self.run_artifact,
             )
         return AssignmentSolution(
-            routes={int(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()},
+            routes={
+                int(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()
+            },
             unassigned={int(tid) for tid in self.unassigned},
             schedule=dict(self.schedule),
             eval=self.eval,
@@ -100,8 +103,12 @@ class AssignmentSolution:
         )
 
     @staticmethod
-    def empty_from_instance(instance: Instance, put_all_unassigned: bool = True) -> "AssignmentSolution":
-        sol = AssignmentSolution(routes={int(aid): [] for aid in instance.all_agent_ids()})
+    def empty_from_instance(
+        instance: Instance, put_all_unassigned: bool = True
+    ) -> "AssignmentSolution":
+        sol = AssignmentSolution(
+            routes={int(aid): [] for aid in instance.all_agent_ids()}
+        )
         if put_all_unassigned:
             sol.unassigned = {int(tid) for tid in instance.all_task_ids()}
         return sol
@@ -112,7 +119,9 @@ class AssignmentSolution:
             out.update(int(tid) for tid in seq)
         return out
 
-    def add_task(self, agent_id: AgentID, task_id: TaskID, position: Optional[int] = None) -> None:
+    def add_task(
+        self, agent_id: AgentID, task_id: TaskID, position: Optional[int] = None
+    ) -> None:
         aid = int(agent_id)
         tid = int(task_id)
         self.routes.setdefault(aid, [])
@@ -123,7 +132,9 @@ class AssignmentSolution:
         self.unassigned.discard(tid)
         self.eval = None
 
-    def remove_task(self, agent_id: AgentID, task_id: TaskID, to_unassigned: bool = True) -> None:
+    def remove_task(
+        self, agent_id: AgentID, task_id: TaskID, to_unassigned: bool = True
+    ) -> None:
         aid = int(agent_id)
         tid = int(task_id)
         seq = self.routes.get(aid, [])
@@ -150,18 +161,29 @@ class AssignmentSolution:
         valid_tasks = {int(tid) for tid in instance.all_task_ids()}
         for aid, seq in list(self.routes.items()):
             self.routes[int(aid)] = [int(tid) for tid in seq if int(tid) in valid_tasks]
-        self.unassigned = {int(tid) for tid in self.unassigned if int(tid) in valid_tasks}
+        self.unassigned = {
+            int(tid) for tid in self.unassigned if int(tid) in valid_tasks
+        }
         self.unassigned.difference_update(self.all_assigned_tasks())
-        valid_pairs = {(int(aid), int(tid)) for aid, seq in self.routes.items() for tid in seq}
-        self.schedule = {pair: value for pair, value in self.schedule.items() if pair in valid_pairs}
+        valid_pairs = {
+            (int(aid), int(tid)) for aid, seq in self.routes.items() for tid in seq
+        }
+        self.schedule = {
+            pair: value for pair, value in self.schedule.items() if pair in valid_pairs
+        }
         self.eval = None
 
     def to_dict(self) -> Dict[str, Any]:
         ev_dict = _obj_to_dict(self.eval)
         return {
-            "routes": {str(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()},
+            "routes": {
+                str(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()
+            },
             "unassigned": [int(tid) for tid in sorted(self.unassigned)],
-            "schedule": {f"{aid}:{tid}": [float(st), float(en)] for (aid, tid), (st, en) in self.schedule.items()},
+            "schedule": {
+                f"{aid}:{tid}": [float(st), float(en)]
+                for (aid, tid), (st, en) in self.schedule.items()
+            },
             "eval": ev_dict,
             "solver_diagnostics": deepcopy(self.solver_diagnostics),
             "run_summary": deepcopy(self.run_summary),
@@ -169,7 +191,10 @@ class AssignmentSolution:
 
     @staticmethod
     def from_dict(data: Mapping[str, Any]) -> "AssignmentSolution":
-        routes = {int(aid): [int(tid) for tid in seq] for aid, seq in dict(data.get("routes", {}) or {}).items()}
+        routes = {
+            int(aid): [int(tid) for tid in seq]
+            for aid, seq in dict(data.get("routes", {}) or {}).items()
+        }
         unassigned = {int(tid) for tid in list(data.get("unassigned", []) or [])}
         schedule: Dict[Tuple[int, int], Tuple[float, float]] = {}
         for key, value in dict(data.get("schedule", {}) or {}).items():

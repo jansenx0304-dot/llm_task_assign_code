@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional
 
 from .config import Config
 
-
 DEFAULT_DELTA_RULES: Dict[str, Dict[str, float]] = {
     "time_window": {"delta_fraction": 0.5, "delta_cap": 0.05},
     "energy": {"delta_fraction": 0.5, "delta_cap": 0.03},
@@ -15,7 +14,9 @@ DEFAULT_DELTA_RULES: Dict[str, Dict[str, float]] = {
 
 def load_delta_rules(config: Optional[Config] = None) -> Dict[str, Dict[str, float]]:
     rules = deepcopy(DEFAULT_DELTA_RULES)
-    overrides = {} if config is None else config.extras.get("relaxation_delta_rules", {})
+    overrides = (
+        {} if config is None else config.extras.get("relaxation_delta_rules", {})
+    )
     if not isinstance(overrides, dict):
         raise ValueError("config.extras['relaxation_delta_rules'] must be an object")
     for violation_type, raw in overrides.items():
@@ -25,7 +26,9 @@ def load_delta_rules(config: Optional[Config] = None) -> Dict[str, Dict[str, flo
             if field in raw:
                 value = float(raw[field])
                 if not math.isfinite(value) or value < 0.0:
-                    raise ValueError(f"{violation_type}.{field} must be a non-negative finite number")
+                    raise ValueError(
+                        f"{violation_type}.{field} must be a non-negative finite number"
+                    )
                 rules[violation_type][field] = value
     return rules
 

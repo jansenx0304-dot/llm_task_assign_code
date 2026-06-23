@@ -43,12 +43,20 @@ def contract(
     return SearchContract(
         contract_id="C1",
         contract_type="alns_search",
-        objective_layers=[{"metric": name, "direction": "min"} for name in (objective or ["missed_priority", "energy_total"])],
+        objective_layers=[
+            {"metric": name, "direction": "min"}
+            for name in (objective or ["missed_priority", "energy_total"])
+        ],
         feasibility_control={"mode": "strict", "relaxation_ratios": []},
         feasibility_policy={"mode": "strict"},
         target_policy={"preferred_target_kinds": ["unassigned_priority"]},
         protected_metrics=[],
-        resource_policy={"min_actions": min_actions, "max_actions": max_actions, "max_iters": 100, "max_time_sec": 100.0},
+        resource_policy={
+            "min_actions": min_actions,
+            "max_actions": max_actions,
+            "max_iters": 100,
+            "max_time_sec": 100.0,
+        },
         exit_conditions={"success": success or [], "failure": failure or []},
     )
 
@@ -60,7 +68,10 @@ class Report:
     violation_ratio_by_type: Dict[str, float] | None = None
 
     def __post_init__(self) -> None:
-        self.violation_ratio_by_type = self.violation_ratio_by_type or {"time_window": 0.0, "energy": 0.0}
+        self.violation_ratio_by_type = self.violation_ratio_by_type or {
+            "time_window": 0.0,
+            "energy": 0.0,
+        }
 
 
 @dataclass

@@ -17,7 +17,10 @@ class ObservationTargetTests(unittest.TestCase):
         config = configured()
         landscape = build_insertion_landscape(solution, instance, config)
         return build_solver_observation(
-            active_contract={**contract().as_dict(), "contract_type": "initial_construction"},
+            active_contract={
+                **contract().as_dict(),
+                "contract_type": "initial_construction",
+            },
             contract_progress={},
             remaining_contract_resources={"actions": 1, "iters": 1, "time_sec": 1.0},
             working_summary=solution_summary(solution, instance, config),
@@ -28,16 +31,43 @@ class ObservationTargetTests(unittest.TestCase):
     def test_empty_scarce_bucket_is_not_selectable(self) -> None:
         solution = AssignmentSolution(routes={0: [1], 1: [2]}, unassigned=set())
         observation = self._observation(solution)
-        self.assertNotIn("T_scarce_unassigned", {item["target_id"] for item in observation["decision_targets"]})
+        self.assertNotIn(
+            "T_scarce_unassigned",
+            {item["target_id"] for item in observation["decision_targets"]},
+        )
 
-    def test_scarce_mass_is_bucket_mass_and_initial_has_no_destroy_recommendation(self) -> None:
+    def test_scarce_mass_is_bucket_mass_and_initial_has_no_destroy_recommendation(
+        self,
+    ) -> None:
         solution = AssignmentSolution(routes={0: [], 1: []}, unassigned={1, 2, 3})
         observation = self._observation(solution)
-        scarce = next(item for item in observation["task_buildability_view"]["target_buckets"] if item["target_id"] == "T_scarce_unassigned")
-        instance = tiny_instance()
-        expected = sum(instance.task_by_id(tid).priority for tid in scarce["task_ids"])
-        self.assertEqual(scarce["priority_mass"], expected)
-        self.assertNotIn("destroy_control.signal_scores", scarce["recommended_controls"])
+        scarce = next(
+            item
+            for item in observation["task_buildability_view"]["target_buckets"]
+            if item["target_id"] == "T_scarce_unassigned"
+        )
+        self.assertNotIn("task_ids", scarce)
+        self.assertEqual(scarce["kind"], "insertion_scarce_unassigned")
+        self.assertTrue(scarce["top_tasks"])
+        self.assertEqual(scarce["priority_mass"], 5.0)
+        self.assertNotIn(
+            "destroy_control.signal_scores", scarce["recommended_controls"]
+        )
+
+    def test_observation_does_not_expose_full_task_id_arrays(self) -> None:
+        solution = AssignmentSolution(routes={0: [], 1: []}, unassigned={1, 2, 3})
+        observation = self._observation(solution)
+
+        def assert_compact(value: object) -> None:
+            if isinstance(value, dict):
+                self.assertNotIn("task_ids", value)
+                for child in value.values():
+                    assert_compact(child)
+            elif isinstance(value, list):
+                for child in value:
+                    assert_compact(child)
+
+        assert_compact(observation)
 
 
 if __name__ == "__main__":

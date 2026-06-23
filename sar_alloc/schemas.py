@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """JSON-schema dictionaries for the executable LLM surface."""
+
+from __future__ import annotations
 
 import json
 from copy import deepcopy
@@ -37,7 +37,7 @@ SUPPORTED_CONDITION_SOURCES = (
     "progress.time_used_sec",
     "last.intent_status",
     "last.dominant_blocker",
-    "last.best_improved",
+    "last.improvement_flags.run_global_best_improved",
     "aggregate.achieved",
     "aggregate.partial",
     "aggregate.not_achieved",
@@ -111,7 +111,9 @@ def _score_item_schema(names: Iterable[str], description: str) -> Dict[str, Any]
         "type": "object",
         "description": description,
         "properties": {
-            "name": _enum_string(names, "Candidate name allowed for this exact score field."),
+            "name": _enum_string(
+                names, "Candidate name allowed for this exact score field."
+            ),
             "score": {
                 "type": "integer",
                 "minimum": 0,
@@ -124,7 +126,9 @@ def _score_item_schema(names: Iterable[str], description: str) -> Dict[str, Any]
     }
 
 
-def _score_array_for(names: Iterable[str], description: str, max_items: int = 3) -> Dict[str, Any]:
+def _score_array_for(
+    names: Iterable[str], description: str, max_items: int = 3
+) -> Dict[str, Any]:
     names = tuple(names)
     return {
         "type": "array",
@@ -139,9 +143,15 @@ INSERTION_CONTROL_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "description": "Executable insertion controls.",
     "properties": {
-        "operator_scores": _score_array("Sparse emphasis scores for insertion operators."),
-        "task_signal_scores": _score_array("Sparse emphasis scores for choosing the next task."),
-        "position_signal_scores": _score_array("Sparse emphasis scores for choosing an insertion position."),
+        "operator_scores": _score_array(
+            "Sparse emphasis scores for insertion operators."
+        ),
+        "task_signal_scores": _score_array(
+            "Sparse emphasis scores for choosing the next task."
+        ),
+        "position_signal_scores": _score_array(
+            "Sparse emphasis scores for choosing an insertion position."
+        ),
     },
     "required": ["operator_scores", "task_signal_scores", "position_signal_scores"],
     "additionalProperties": False,
@@ -151,7 +161,9 @@ DESTROY_CONTROL_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "description": "Executable destroy controls.",
     "properties": {
-        "operator_scores": _score_array("Sparse emphasis scores for destroy operators."),
+        "operator_scores": _score_array(
+            "Sparse emphasis scores for destroy operators."
+        ),
         "signal_scores": _score_array("Sparse emphasis scores for destroy signals."),
         "intensity_score": {
             "type": "integer",
@@ -247,7 +259,13 @@ TARGET_POLICY_SCHEMA: Dict[str, Any] = {
             "maxItems": 4,
             "items": {
                 "type": "string",
-                "enum": ["unassigned_priority", "scarce_unassigned", "energy_debt", "time_window_debt", "route_balance"],
+                "enum": [
+                    "unassigned_priority",
+                    "insertion_scarce_unassigned",
+                    "energy_debt",
+                    "time_window_debt",
+                    "route_balance",
+                ],
             },
         }
     },
@@ -257,7 +275,11 @@ TARGET_POLICY_SCHEMA: Dict[str, Any] = {
 
 PROTECTED_METRIC_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "description": "A metric that may not worsen beyond the provided amount.",
+    "description": (
+        "Hard non-worsening bound for this contract. max_worsen is measured "
+        "relative to contract_start_quality. A violating candidate is ineligible "
+        "for trial acceptance, action-best, returned-working, or best updates."
+    ),
     "properties": {
         "metric": {"type": "string", "enum": list(QUALITY_METRICS)},
         "max_worsen": {"type": "number", "minimum": 0.0},
@@ -393,7 +415,9 @@ SUPERVISOR_REVIEW_SCHEMA: Dict[str, Any] = {
                     "properties": {
                         "action": {"type": "string", "const": "stop_run"},
                         "contract_review": CONTRACT_REVIEW_SCHEMA,
-                        "stop_explanation": _string("Why the supervisor decides the run should stop."),
+                        "stop_explanation": _string(
+                            "Why the supervisor decides the run should stop."
+                        ),
                     },
                     "required": ["action", "contract_review", "stop_explanation"],
                     "additionalProperties": False,
@@ -444,8 +468,13 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                 {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "const": "request_supervisor_review"},
-                        "target_id": _string("Target id from decision_targets, usually contract_review."),
+                        "action": {
+                            "type": "string",
+                            "const": "request_supervisor_review",
+                        },
+                        "target_id": _string(
+                            "Target id from decision_targets, usually contract_review."
+                        ),
                         "explanation": EXPLANATION_SCHEMA,
                     },
                     "required": ["action", "target_id"],
@@ -459,22 +488,30 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
 }
 
 
-def solver_decision_schema_for_candidates(candidates: Any, observation: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+def solver_decision_schema_for_candidates(
+    candidates: Any, observation: Optional[Mapping[str, Any]] = None
+) -> Dict[str, Any]:
     """Build a Solver schema whose executable fields use their own candidate enums."""
-    action_space = observation.get("action_space") if isinstance(observation, Mapping) else None
+    action_space = (
+        observation.get("action_space") if isinstance(observation, Mapping) else None
+    )
 
     def allowed(action_key: str, candidate_key: str) -> tuple[str, ...]:
         if isinstance(action_space, Mapping) and action_key in action_space:
             values = action_space.get(action_key) or []
             return tuple(dict.fromkeys(str(value) for value in values))
         if candidates is not None and hasattr(candidates, "names"):
-            return tuple(dict.fromkeys(str(value) for value in candidates.names(candidate_key)))
+            return tuple(
+                dict.fromkeys(str(value) for value in candidates.names(candidate_key))
+            )
         if isinstance(candidates, Mapping):
             values = candidates.get(candidate_key) or []
-            return tuple(dict.fromkeys(
-                str(value.get("name")) if isinstance(value, Mapping) else str(value)
-                for value in values
-            ))
+            return tuple(
+                dict.fromkeys(
+                    str(value.get("name")) if isinstance(value, Mapping) else str(value)
+                    for value in values
+                )
+            )
         return ()
 
     insertion = deepcopy(INSERTION_CONTROL_SCHEMA)
@@ -511,9 +548,12 @@ def solver_decision_schema_for_candidates(candidates: Any, observation: Optional
     branches = schema["properties"]["solver_decision"]["oneOf"]
     allowed_actions = None
     if isinstance(action_space, Mapping) and "allowed_actions" in action_space:
-        allowed_actions = {str(value) for value in (action_space.get("allowed_actions") or [])}
+        allowed_actions = {
+            str(value) for value in (action_space.get("allowed_actions") or [])
+        }
         branches[:] = [
-            branch for branch in branches
+            branch
+            for branch in branches
             if branch["properties"]["action"].get("const") in allowed_actions
         ]
 
@@ -527,7 +567,9 @@ def solver_decision_schema_for_candidates(candidates: Any, observation: Optional
     for branch in branches:
         properties = branch["properties"]
         if target_ids:
-            properties["target_id"] = _enum_string(target_ids, "Target id from current decision_targets.")
+            properties["target_id"] = _enum_string(
+                target_ids, "Target id from current decision_targets."
+            )
         if "insertion_control" in properties:
             properties["insertion_control"] = deepcopy(insertion)
         if "destroy_control" in properties:
@@ -546,15 +588,21 @@ def schema_text(schema: Dict[str, Any]) -> str:
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
-def supervisor_kickoff_schema_for_limits(resource_limits: Dict[str, Any]) -> Dict[str, Any]:
+def supervisor_kickoff_schema_for_limits(
+    resource_limits: Dict[str, Any],
+) -> Dict[str, Any]:
     return _supervisor_schema_for_limits(SUPERVISOR_KICKOFF_SCHEMA, resource_limits)
 
 
-def supervisor_review_schema_for_limits(resource_limits: Dict[str, Any]) -> Dict[str, Any]:
+def supervisor_review_schema_for_limits(
+    resource_limits: Dict[str, Any],
+) -> Dict[str, Any]:
     return _supervisor_schema_for_limits(SUPERVISOR_REVIEW_SCHEMA, resource_limits)
 
 
-def _supervisor_schema_for_limits(schema: Dict[str, Any], resource_limits: Dict[str, Any]) -> Dict[str, Any]:
+def _supervisor_schema_for_limits(
+    schema: Dict[str, Any], resource_limits: Dict[str, Any]
+) -> Dict[str, Any]:
     out = deepcopy(schema)
     _apply_contract_limits(out, resource_limits)
     return out
@@ -565,16 +613,26 @@ def _apply_contract_limits(node: Any, resource_limits: Dict[str, Any]) -> None:
         properties = node.get("properties")
         if isinstance(properties, dict) and "resource_policy" in properties:
             policy = properties["resource_policy"]
-            policy_props = policy.get("properties", {}) if isinstance(policy, dict) else {}
+            policy_props = (
+                policy.get("properties", {}) if isinstance(policy, dict) else {}
+            )
             if isinstance(policy_props, dict):
                 if "max_actions" in policy_props:
-                    policy_props["max_actions"]["maximum"] = int(resource_limits["max_solver_actions_allowed"])
+                    policy_props["max_actions"]["maximum"] = int(
+                        resource_limits["max_solver_actions_allowed"]
+                    )
                 if "min_actions" in policy_props:
-                    policy_props["min_actions"]["maximum"] = min(20, int(resource_limits["max_solver_actions_allowed"]))
+                    policy_props["min_actions"]["maximum"] = min(
+                        20, int(resource_limits["max_solver_actions_allowed"])
+                    )
                 if "max_time_sec" in policy_props:
-                    policy_props["max_time_sec"]["maximum"] = float(resource_limits["max_time_sec_allowed"])
+                    policy_props["max_time_sec"]["maximum"] = float(
+                        resource_limits["max_time_sec_allowed"]
+                    )
                 if "max_iters" in policy_props:
-                    policy_props["max_iters"]["maximum"] = int(resource_limits["max_iters_allowed"])
+                    policy_props["max_iters"]["maximum"] = int(
+                        resource_limits["max_iters_allowed"]
+                    )
         for value in node.values():
             _apply_contract_limits(value, resource_limits)
     elif isinstance(node, list):

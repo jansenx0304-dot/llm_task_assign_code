@@ -133,7 +133,9 @@ class DummyLLMClient(BaseLLMClient):
         if "ROLE: SUPERVISOR_REVIEW" in prompt:
             self._supervisor_review_calls += 1
             return json.dumps(
-                demo_supervisor_review(observation, stop=self._supervisor_review_calls > 1),
+                demo_supervisor_review(
+                    observation, stop=self._supervisor_review_calls > 1
+                ),
                 ensure_ascii=True,
             )
         if "ROLE: SOLVER" in prompt:
@@ -165,7 +167,9 @@ def build_llm_client(
     if dummy:
         return DummyLLMClient()
 
-    final_base_url = base_url.strip() if isinstance(base_url, str) else _env("LLM_BASE_URL")
+    final_base_url = (
+        base_url.strip() if isinstance(base_url, str) else _env("LLM_BASE_URL")
+    )
     final_api_key = api_key.strip() if isinstance(api_key, str) else _env("LLM_API_KEY")
     final_model = model.strip() if isinstance(model, str) else _env("LLM_MODEL")
 

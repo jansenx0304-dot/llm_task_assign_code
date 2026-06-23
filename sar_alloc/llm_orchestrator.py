@@ -8,7 +8,11 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from .config import Budget, Config
 from .contract_monitor import check_contract_completion, update_contract_progress
-from .demo_policy import demo_solver_decision, demo_supervisor_kickoff, demo_supervisor_review
+from .demo_policy import (
+    demo_solver_decision,
+    demo_supervisor_kickoff,
+    demo_supervisor_review,
+)
 from .evaluator import compare_quality, evaluate
 from .llm_public_interface import build_public_candidates
 from .memory import RunMemory
@@ -20,13 +24,27 @@ from .observation import (
 )
 from .operators.destroy import build_destroy_landscape
 from .operators.insertion import build_insertion_landscape
-from .outcome_auditor import verify_alns_action, verify_initial_construction, verify_review_request
+from .outcome_auditor import (
+    verify_alns_action,
+    verify_initial_construction,
+    verify_review_request,
+)
 from .policy_validator import (
     validate_solver_decision,
     validate_supervisor_kickoff,
     validate_supervisor_review,
 )
-from .prompts import get_solver_prompt, get_supervisor_kickoff_prompt, get_supervisor_review_prompt, get_system_prompt
+from .protected_metrics import (
+    check_protected_metrics,
+    compile_protected_metric_bounds,
+    evaluation_quality,
+)
+from .prompts import (
+    get_solver_prompt,
+    get_supervisor_kickoff_prompt,
+    get_supervisor_review_prompt,
+    get_system_prompt,
+)
 from .schemas import (
     schema_text,
     solver_decision_schema_for_candidates,
@@ -145,7 +163,16 @@ def run_orchestrator(
     base_candidates = build_public_candidates(instance, cfg)
     inst_summary = instance_summary(instance, rng_seed=rng_seed)
     relaxation_context = dict(inst_summary.get("relaxation_scale_context", {}) or {})
-    _trace(state, "run_start", {"case_file": case_file, "llm_mode": llm_mode or "api", "run_config": run_config or {}, "global_budget": budgets.remaining()})
+    _trace(
+        state,
+        "run_start",
+        {
+            "case_file": case_file,
+            "llm_mode": llm_mode or "api",
+            "run_config": run_config or {},
+            "global_budget": budgets.remaining(),
+        },
+    )
     _trace(state, "public_candidates", base_candidates.as_dict())
 
     kickoff_observation = build_supervisor_kickoff_observation(
@@ -161,7 +188,11 @@ def run_orchestrator(
     kickoff_prompt = get_supervisor_kickoff_prompt(
         user_goal_text=user_goal_text,
         observation=kickoff_observation,
-        json_schema=schema_text(supervisor_kickoff_schema_for_limits(kickoff_observation["next_contract_resource_limits"])),
+        json_schema=schema_text(
+            supervisor_kickoff_schema_for_limits(
+                kickoff_observation["next_contract_resource_limits"]
+            )
+        ),
     )
     kickoff_payload = _call_validated(
         client,
@@ -169,15 +200,26 @@ def run_orchestrator(
         "supervisor_kickoff",
         kickoff_observation,
         kickoff_prompt,
-        lambda value: validate_supervisor_kickoff(value, kickoff_observation, base_candidates, cfg, budgets.remaining()),
+        lambda value: validate_supervisor_kickoff(
+            value, kickoff_observation, base_candidates, cfg, budgets.remaining()
+        ),
         demo_supervisor_kickoff,
         allow_llm_fallback,
     )
     kickoff_raw = kickoff_payload["supervisor_decision"]
-    state.global_objective_layers = compile_global_objective(cfg, kickoff_raw["global_objective"])
+    state.global_objective_layers = compile_global_objective(
+        cfg, kickoff_raw["global_objective"]
+    )
     _trace(state, "global_objective_applied", state.global_objective_layers)
     contract_seq = 1
-    state.active_contract = compile_contract(kickoff_raw["next_contract"], "C001", cfg, kickoff_observation)
+    contract_start_summary = _working_summary(state, instance, cfg)
+    state.active_contract = compile_contract(
+        kickoff_raw["next_contract"],
+        "C001",
+        cfg,
+        kickoff_observation,
+        protected_metric_baseline=contract_start_summary["quality_summary"],
+    )
     state.contract_progress = ContractProgress("C001")
     _trace_contract_compile(state, state.active_contract)
 
@@ -207,7 +249,9 @@ def run_orchestrator(
             step_index=solver_action_index,
         )
         state.memory.record_observation(solver_observation)
-        solver_schema = solver_decision_schema_for_candidates(candidates, solver_observation)
+        solver_schema = solver_decision_schema_for_candidates(
+            candidates, solver_observation
+        )
         solver_prompt = get_solver_prompt(
             user_goal_text=user_goal_text,
             observation=solver_observation,
@@ -219,7 +263,9 @@ def run_orchestrator(
             "solver",
             solver_observation,
             solver_prompt,
-            lambda value: validate_solver_decision(value, solver_observation, candidates=candidates),
+            lambda value: validate_solver_decision(
+                value, solver_observation, candidates=candidates
+            ),
             demo_solver_decision,
             allow_llm_fallback,
             step_index=solver_action_index,
@@ -237,7 +283,13 @@ def run_orchestrator(
             manifest_id=f"R{solver_action_index + 1}",
             trace_id=trace_id,
         )
-        _trace(state, "runtime_control_manifest", manifest.as_dict(), solver_action_index, contract.contract_id)
+        _trace(
+            state,
+            "runtime_control_manifest",
+            manifest.as_dict(),
+            solver_action_index,
+            contract.contract_id,
+        )
         decision = solver_payload["solver_decision"]
         action = decision["action"]
 
@@ -281,24 +333,62 @@ def run_orchestrator(
         else:
             raise OrchestratorError(f"unsupported solver action: {action}")
 
-        _trace(state, "execution_trace", trace, solver_action_index, contract.contract_id)
-        memory_item = state.memory.record_verified_action(solver_observation, solver_payload, manifest, trace, verification)
+        _trace(
+            state, "execution_trace", trace, solver_action_index, contract.contract_id
+        )
+        memory_item = state.memory.record_verified_action(
+            solver_observation, solver_payload, manifest, trace, verification
+        )
         verification = dict(memory_item["verification"])
-        _trace(state, "outcome_verification", verification, solver_action_index, contract.contract_id)
-        _trace(state, "memory_update", memory_item, solver_action_index, contract.contract_id)
+        _trace(
+            state,
+            "outcome_verification",
+            verification,
+            solver_action_index,
+            contract.contract_id,
+        )
+        _trace(
+            state,
+            "memory_update",
+            memory_item,
+            solver_action_index,
+            contract.contract_id,
+        )
         update_contract_progress(progress, verification)
         completion = check_contract_completion(
             contract,
             progress,
             state.memory.recent_verifications(contract.contract_id, limit=20),
-            {"working": _working_summary(state, instance, cfg), "best_feasible": _best_summary(state, instance, cfg)},
+            {
+                "working": _working_summary(state, instance, cfg),
+                "best_feasible": _best_summary(state, instance, cfg),
+            },
         )
-        _trace(state, "contract_progress", progress.as_dict(), solver_action_index, contract.contract_id)
-        _trace(state, "contract_completion_check", completion, solver_action_index, contract.contract_id)
+        _trace(
+            state,
+            "contract_progress",
+            progress.as_dict(),
+            solver_action_index,
+            contract.contract_id,
+        )
+        _trace(
+            state,
+            "contract_completion_check",
+            completion,
+            solver_action_index,
+            contract.contract_id,
+        )
 
         if completion["completed"]:
-            contract_memory = state.memory.record_contract_summary(contract, progress, completion)
-            _trace(state, "contract_end", {"completion": completion, "memory_update": contract_memory}, contract_id=contract.contract_id)
+            contract_memory = state.memory.record_contract_summary(
+                contract, progress, completion
+            )
+            _trace(
+                state,
+                "contract_end",
+                {"completion": completion, "memory_update": contract_memory},
+                contract_id=contract.contract_id,
+            )
             review_decision = _call_supervisor_review(
                 client,
                 state,
@@ -318,7 +408,13 @@ def run_orchestrator(
                 break
             contract_seq += 1
             next_contract_id = f"C{contract_seq:03d}"
-            state.active_contract = compile_contract(review_decision["next_contract"], next_contract_id, cfg)
+            contract_start_summary = _working_summary(state, instance, cfg)
+            state.active_contract = compile_contract(
+                review_decision["next_contract"],
+                next_contract_id,
+                cfg,
+                protected_metric_baseline=contract_start_summary["quality_summary"],
+            )
             state.contract_progress = ContractProgress(next_contract_id)
             _trace_contract_compile(state, state.active_contract)
         solver_action_index += 1
@@ -327,8 +423,14 @@ def run_orchestrator(
     if final_solution is None:
         raise OrchestratorError("orchestrator produced no solution")
     final_summary = solution_summary(
-        final_solution, instance, cfg,
-        contract_objective_layers=(state.active_contract.objective_layers if state.active_contract else state.global_objective_layers),
+        final_solution,
+        instance,
+        cfg,
+        contract_objective_layers=(
+            state.active_contract.objective_layers
+            if state.active_contract
+            else state.global_objective_layers
+        ),
         global_objective_layers=state.global_objective_layers,
     )
     run_summary = {
@@ -338,9 +440,15 @@ def run_orchestrator(
         "llm_fallback_used": state.llm_fallback_used,
         "elapsed_sec": round(time.time() - started_at, 6),
     }
-    _trace(state, "final_result", {"summary": final_summary, "run_summary": run_summary})
+    _trace(
+        state, "final_result", {"summary": final_summary, "run_summary": run_summary}
+    )
     final_solution.run_summary = run_summary
-    final_solution.run_artifact = {"trace_events": state.trace_events, "memory": state.memory.as_dict(), "final_result": final_summary}
+    final_solution.run_artifact = {
+        "trace_events": state.trace_events,
+        "memory": state.memory.as_dict(),
+        "final_result": final_summary,
+    }
     return final_solution
 
 
@@ -357,13 +465,43 @@ def _execute_initial_action(
     trace_id: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     insertion_policy = insertion_policy_from_manifest(manifest)
-    _trace(state, "compiled_initial_policy", insertion_policy.as_dict(), solver_action_index, contract.contract_id)
-    result = build_initial_solution_with_insertion(instance, cfg, insertion_policy, rng_seed, manifest=manifest.as_dict())
-    state.working_solution = result.solution
-    state.best_solution = result.solution.clone(deep=True) if result.evaluation.is_feasible else None
+    _trace(
+        state,
+        "compiled_initial_policy",
+        insertion_policy.as_dict(),
+        solver_action_index,
+        contract.contract_id,
+    )
+    contract_start_solution = (
+        state.working_solution.clone(deep=True)
+        if state.working_solution is not None
+        else AssignmentSolution.empty_from_instance(instance, put_all_unassigned=True)
+    )
+    result = build_initial_solution_with_insertion(
+        instance, cfg, insertion_policy, rng_seed, manifest=manifest.as_dict()
+    )
+    protected_check = check_protected_metrics(
+        evaluation_quality(result.evaluation),
+        compile_protected_metric_bounds(
+            contract.protected_metrics,
+            contract.protected_metric_baseline,
+        ),
+    )
+    if protected_check.passed:
+        state.working_solution = result.solution
+        state.best_solution = (
+            result.solution.clone(deep=True) if result.evaluation.is_feasible else None
+        )
+    else:
+        state.working_solution = contract_start_solution
+        state.best_solution = None
     budgets.solver_calls += 1
     trace = dict(result.trace)
     trace["trace_id"] = trace_id
+    trace["protected_metric_passed"] = protected_check.passed
+    trace["protected_metric_violations"] = list(protected_check.violations)
+    if not protected_check.passed:
+        trace["rejection_reason"] = "protected_metric_violated"
     result.trace["trace_id"] = trace_id
     verification = verify_initial_construction(
         result,
@@ -372,7 +510,22 @@ def _execute_initial_action(
         decision_id=decision_id,
         verification_id=f"V{solver_action_index + 1}",
     )
-    _trace(state, "initial_insertion_result", {"result": solution_summary(result.solution, instance, cfg, contract_objective_layers=contract.objective_layers, global_objective_layers=state.global_objective_layers), "trace": trace}, solver_action_index, contract.contract_id)
+    _trace(
+        state,
+        "initial_insertion_result",
+        {
+            "result": solution_summary(
+                result.solution,
+                instance,
+                cfg,
+                contract_objective_layers=contract.objective_layers,
+                global_objective_layers=state.global_objective_layers,
+            ),
+            "trace": trace,
+        },
+        solver_action_index,
+        contract.contract_id,
+    )
     return trace, verification
 
 
@@ -391,37 +544,88 @@ def _execute_alns_action(
     if state.working_solution is None:
         raise OrchestratorError("run_alns requested before a working solution exists")
     compiled_policy = alns_policy_from_manifest(manifest)
-    solver_request = derive_solver_request(contract, state.contract_progress or ContractProgress(contract.contract_id))
-    _trace(state, "compiled_solver_policy", compiled_policy.as_dict(), solver_action_index, contract.contract_id)
-    _trace(state, "solver_request", solver_request.as_dict(), solver_action_index, contract.contract_id)
+    solver_request = derive_solver_request(
+        contract, state.contract_progress or ContractProgress(contract.contract_id)
+    )
+    _trace(
+        state,
+        "compiled_solver_policy",
+        compiled_policy.as_dict(),
+        solver_action_index,
+        contract.contract_id,
+    )
+    _trace(
+        state,
+        "solver_request",
+        solver_request.as_dict(),
+        solver_action_index,
+        contract.contract_id,
+    )
     before_working_eval = _eval(state.working_solution, instance, cfg)
-    before_global_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
+    before_global_best_eval = (
+        None
+        if state.best_solution is None
+        else _eval(state.best_solution, instance, cfg)
+    )
     result = solve_assignment(
         instance=instance,
         init_solution=state.working_solution,
         config=cfg,
-        budget=Budget(time_limit_sec=solver_request.time_limit_sec, max_iters=solver_request.max_iters),
+        budget=Budget(
+            time_limit_sec=solver_request.time_limit_sec,
+            max_iters=solver_request.max_iters,
+        ),
         policy=compiled_policy,
         rng_seed=rng_seed + solver_action_index + 1,
         contract_objective_layers=contract.objective_layers,
         feasibility_policy=contract.feasibility_policy,
         global_objective_layers=state.global_objective_layers,
         trace_id=trace_id,
+        protected_metric_bounds=compile_protected_metric_bounds(
+            contract.protected_metrics,
+            contract.protected_metric_baseline,
+        ),
     )
     result.trace["trace_id"] = trace_id
     state.working_solution = result.working_solution
     after_working_eval = _eval(state.working_solution, instance, cfg)
-    action_best_eval = None if result.action_best_feasible is None else _eval(result.action_best_feasible, instance, cfg)
+    action_best_eval = (
+        None
+        if result.action_best_feasible is None
+        else _eval(result.action_best_feasible, instance, cfg)
+    )
     candidate_global = result.global_best_feasible
     if candidate_global is not None:
         candidate_global_eval = _eval(candidate_global, instance, cfg)
-        if before_global_best_eval is None or compare_quality(candidate_global_eval, before_global_best_eval, state.global_objective_layers) < 0:
+        protected_check = check_protected_metrics(
+            evaluation_quality(candidate_global_eval),
+            compile_protected_metric_bounds(
+                contract.protected_metrics,
+                contract.protected_metric_baseline,
+            ),
+        )
+        if protected_check.passed and (
+            before_global_best_eval is None
+            or compare_quality(
+                candidate_global_eval,
+                before_global_best_eval,
+                state.global_objective_layers,
+            )
+            < 0
+        ):
             state.best_solution = candidate_global.clone(deep=True)
-    after_global_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
+    after_global_best_eval = (
+        None
+        if state.best_solution is None
+        else _eval(state.best_solution, instance, cfg)
+    )
     diagnostics = dict(result.diagnostics)
     diagnostics["accepted_trial_count"] = int(result.accepted_trial_count)
     diagnostics["rejected_trial_count"] = int(result.rejected_trial_count)
-    used_time = min(float(diagnostics.get("actual_time_used_sec", 0.0) or 0.0), float(solver_request.time_limit_sec))
+    used_time = min(
+        float(diagnostics.get("actual_time_used_sec", 0.0) or 0.0),
+        float(solver_request.time_limit_sec),
+    )
     used_iters = int(diagnostics.get("actual_iters_used", 0) or 0)
     budgets.solver_calls += 1
     budgets.time_used_sec += used_time
@@ -431,7 +635,9 @@ def _execute_alns_action(
     verification = verify_alns_action(
         before_working_eval=before_working_eval,
         after_working_eval=after_working_eval,
-        before_best_feasible_eval=before_working_eval if before_working_eval.is_feasible else None,
+        before_best_feasible_eval=(
+            before_working_eval if before_working_eval.is_feasible else None
+        ),
         after_action_best_eval=action_best_eval,
         before_global_best_eval=before_global_best_eval,
         after_global_best_eval=after_global_best_eval,
@@ -442,7 +648,22 @@ def _execute_alns_action(
         verification_id=f"V{solver_action_index + 1}",
         global_objective_layers=state.global_objective_layers,
     )
-    _trace(state, "solver_result", {"working_solution": solution_summary(state.working_solution, instance, cfg, contract_objective_layers=contract.objective_layers, global_objective_layers=state.global_objective_layers), "diagnostics": diagnostics}, solver_action_index, contract.contract_id)
+    _trace(
+        state,
+        "solver_result",
+        {
+            "working_solution": solution_summary(
+                state.working_solution,
+                instance,
+                cfg,
+                contract_objective_layers=contract.objective_layers,
+                global_objective_layers=state.global_objective_layers,
+            ),
+            "diagnostics": diagnostics,
+        },
+        solver_action_index,
+        contract.contract_id,
+    )
     return dict(result.trace), verification
 
 
@@ -479,7 +700,11 @@ def _call_supervisor_review(
     prompt = get_supervisor_review_prompt(
         user_goal_text=user_goal_text,
         observation=observation,
-        json_schema=schema_text(supervisor_review_schema_for_limits(observation["next_contract_resource_limits"])),
+        json_schema=schema_text(
+            supervisor_review_schema_for_limits(
+                observation["next_contract_resource_limits"]
+            )
+        ),
     )
     payload = _call_validated(
         client,
@@ -487,7 +712,9 @@ def _call_supervisor_review(
         "supervisor_review",
         observation,
         prompt,
-        lambda value: validate_supervisor_review(value, observation, candidates, cfg, budgets.remaining()),
+        lambda value: validate_supervisor_review(
+            value, observation, candidates, cfg, budgets.remaining()
+        ),
         demo_supervisor_review,
         allow_llm_fallback,
         contract_id=contract.contract_id,
@@ -508,11 +735,26 @@ def _call_validated(
     contract_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     _trace(state, f"{role}_observation", observation, step_index, contract_id)
-    _trace(state, f"{role}_prompt", prompt, step_index, contract_id, payload_type="text")
+    _trace(
+        state, f"{role}_prompt", prompt, step_index, contract_id, payload_type="text"
+    )
     raw = ""
     try:
-        raw = client.chat([{"role": "system", "content": get_system_prompt()}, {"role": "user", "content": prompt}], temperature=0.0)
-        _trace(state, f"{role}_raw_output", raw, step_index, contract_id, payload_type="text")
+        raw = client.chat(
+            [
+                {"role": "system", "content": get_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+        )
+        _trace(
+            state,
+            f"{role}_raw_output",
+            raw,
+            step_index,
+            contract_id,
+            payload_type="text",
+        )
         parsed = _parse_json(raw, role)
         validator(parsed)
     except Exception as first_exc:
@@ -520,15 +762,38 @@ def _call_validated(
         if raw:
             try:
                 repair_prompt = _repair_prompt(prompt, raw, first_exc)
-                _trace(state, f"{role}_repair_prompt", repair_prompt, step_index, contract_id, payload_type="text")
+                _trace(
+                    state,
+                    f"{role}_repair_prompt",
+                    repair_prompt,
+                    step_index,
+                    contract_id,
+                    payload_type="text",
+                )
                 repaired_raw = client.chat(
-                    [{"role": "system", "content": get_system_prompt()}, {"role": "user", "content": repair_prompt}],
+                    [
+                        {"role": "system", "content": get_system_prompt()},
+                        {"role": "user", "content": repair_prompt},
+                    ],
                     temperature=0.0,
                 )
-                _trace(state, f"{role}_repair_raw_output", repaired_raw, step_index, contract_id, payload_type="text")
+                _trace(
+                    state,
+                    f"{role}_repair_raw_output",
+                    repaired_raw,
+                    step_index,
+                    contract_id,
+                    payload_type="text",
+                )
                 parsed = _parse_json(repaired_raw, f"{role}_repair")
                 validator(parsed)
-                _trace(state, f"{role}_repair_validated_payload", parsed, step_index, contract_id)
+                _trace(
+                    state,
+                    f"{role}_repair_validated_payload",
+                    parsed,
+                    step_index,
+                    contract_id,
+                )
             except Exception as exc:
                 repair_exc = exc
                 _trace(
@@ -544,16 +809,26 @@ def _call_validated(
         if repair_exc is not None:
             reason = f"first attempt: {first_exc}; repair attempt: {repair_exc}"
             if not allow_fallback:
-                raise LLMOutputError(f"{role} output failed validation after repair: {reason}") from repair_exc
+                raise LLMOutputError(
+                    f"{role} output failed validation after repair: {reason}"
+                ) from repair_exc
             parsed = fallback_factory(observation)
             validator(parsed)
             state.llm_fallback_used = True
-            _trace(state, f"{role}_fallback", {"reason": reason, "payload": parsed}, step_index, contract_id)
+            _trace(
+                state,
+                f"{role}_fallback",
+                {"reason": reason, "payload": parsed},
+                step_index,
+                contract_id,
+            )
     _trace(state, f"{role}_validated_payload", parsed, step_index, contract_id)
     return parsed
 
 
-def _repair_prompt(original_prompt: str, original_raw: str, validation_error: Exception) -> str:
+def _repair_prompt(
+    original_prompt: str, original_raw: str, validation_error: Exception
+) -> str:
     return (
         f"{original_prompt}\n\n"
         "REPAIR REQUEST:\n"
@@ -574,49 +849,104 @@ def _parse_json(raw: str, role: str) -> Dict[str, Any]:
     return value
 
 
-def _contract_remaining(contract: SearchContract, progress: ContractProgress) -> Dict[str, Any]:
+def _contract_remaining(
+    contract: SearchContract, progress: ContractProgress
+) -> Dict[str, Any]:
     policy = contract.resource_policy
     return {
         "actions": max(0, int(policy["max_actions"]) - progress.solver_actions),
         "time_sec": max(0.0, float(policy["max_time_sec"]) - progress.time_used_sec),
         "iters": max(0, int(policy["max_iters"]) - progress.iters_used),
-        "min_actions_remaining": max(0, int(policy["min_actions"]) - progress.solver_actions),
+        "min_actions_remaining": max(
+            0, int(policy["min_actions"]) - progress.solver_actions
+        ),
     }
 
 
 def _trace_contract_compile(state: AgentState, contract: SearchContract) -> None:
-    _trace(state, "validated_feasibility_control", contract.feasibility_control, contract_id=contract.contract_id)
-    _trace(state, "compiled_feasibility_policy", contract.feasibility_policy, contract_id=contract.contract_id)
-    _trace(state, "compiled_contract", contract.as_dict(), contract_id=contract.contract_id)
+    _trace(
+        state,
+        "validated_feasibility_control",
+        contract.feasibility_control,
+        contract_id=contract.contract_id,
+    )
+    _trace(
+        state,
+        "compiled_feasibility_policy",
+        contract.feasibility_policy,
+        contract_id=contract.contract_id,
+    )
+    _trace(
+        state, "compiled_contract", contract.as_dict(), contract_id=contract.contract_id
+    )
 
 
-def _working_summary(state: AgentState, instance: Instance, cfg: Config) -> Dict[str, Any]:
-    contract_layers = state.active_contract.objective_layers if state.active_contract else state.global_objective_layers
+def _working_summary(
+    state: AgentState, instance: Instance, cfg: Config
+) -> Dict[str, Any]:
+    contract_layers = (
+        state.active_contract.objective_layers
+        if state.active_contract
+        else state.global_objective_layers
+    )
     if state.working_solution is None:
-        empty = AssignmentSolution.empty_from_instance(instance, put_all_unassigned=True)
-        return solution_summary(empty, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
-    return solution_summary(state.working_solution, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
+        empty = AssignmentSolution.empty_from_instance(
+            instance, put_all_unassigned=True
+        )
+        return solution_summary(
+            empty,
+            instance,
+            cfg,
+            contract_objective_layers=contract_layers,
+            global_objective_layers=state.global_objective_layers,
+        )
+    return solution_summary(
+        state.working_solution,
+        instance,
+        cfg,
+        contract_objective_layers=contract_layers,
+        global_objective_layers=state.global_objective_layers,
+    )
 
 
-def _best_summary(state: AgentState, instance: Instance, cfg: Config) -> Optional[Dict[str, Any]]:
+def _best_summary(
+    state: AgentState, instance: Instance, cfg: Config
+) -> Optional[Dict[str, Any]]:
     if state.best_solution is None:
         return None
-    contract_layers = state.active_contract.objective_layers if state.active_contract else state.global_objective_layers
-    return solution_summary(state.best_solution, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
+    contract_layers = (
+        state.active_contract.objective_layers
+        if state.active_contract
+        else state.global_objective_layers
+    )
+    return solution_summary(
+        state.best_solution,
+        instance,
+        cfg,
+        contract_objective_layers=contract_layers,
+        global_objective_layers=state.global_objective_layers,
+    )
 
 
 def _landscape(state: AgentState, instance: Instance, cfg: Config) -> Dict[str, Any]:
     sol = state.working_solution
     if sol is None:
         sol = AssignmentSolution.empty_from_instance(instance, put_all_unassigned=True)
-    return _public_landscape(build_destroy_landscape(sol, instance, cfg), build_insertion_landscape(sol, instance, cfg))
+    return _public_landscape(
+        build_destroy_landscape(sol, instance, cfg),
+        build_insertion_landscape(sol, instance, cfg),
+    )
 
 
-def _eval(solution: AssignmentSolution, instance: Instance, config: Config) -> EvalResult:
+def _eval(
+    solution: AssignmentSolution, instance: Instance, config: Config
+) -> EvalResult:
     return evaluate(solution, instance, config, update_solution_schedule=True)
 
 
-def _public_landscape(destroy: Dict[str, Any], insertion: Dict[str, Any]) -> Dict[str, Any]:
+def _public_landscape(
+    destroy: Dict[str, Any], insertion: Dict[str, Any]
+) -> Dict[str, Any]:
     candidate_stats = dict(insertion.get("candidate_stats", {}) or {})
     route_structure = dict(destroy.get("route_structure", {}) or {})
     return {
@@ -625,12 +955,22 @@ def _public_landscape(destroy: Dict[str, Any], insertion: Dict[str, Any]) -> Dic
         "candidate_stats": candidate_stats,
         "task_pressure": dict(insertion.get("task_pressure", {}) or {}),
         "target_buckets": dict(insertion.get("target_buckets", {}) or {}),
-        "average_candidate_positions": float(candidate_stats.get("avg_candidate_positions", 0.0) or 0.0),
-        "average_feasible_positions": float(candidate_stats.get("avg_feasible_positions", 0.0) or 0.0),
+        "average_candidate_positions": float(
+            candidate_stats.get("avg_candidate_positions", 0.0) or 0.0
+        ),
+        "average_feasible_positions": float(
+            candidate_stats.get("avg_feasible_positions", 0.0) or 0.0
+        ),
         "hard_to_insert_tasks": int(candidate_stats.get("no_feasible_tasks", 0) or 0),
-        "zero_candidate_tasks": int(candidate_stats.get("zero_candidate_tasks", 0) or 0),
-        "route_imbalance_level": str(route_structure.get("route_load_imbalance_level", "unknown")),
-        "route_cost_imbalance_level": str(route_structure.get("route_cost_imbalance_level", "unknown")),
+        "zero_candidate_tasks": int(
+            candidate_stats.get("zero_candidate_tasks", 0) or 0
+        ),
+        "route_imbalance_level": str(
+            route_structure.get("route_load_imbalance_level", "unknown")
+        ),
+        "route_cost_imbalance_level": str(
+            route_structure.get("route_cost_imbalance_level", "unknown")
+        ),
     }
 
 
@@ -658,4 +998,10 @@ def _trace(
             pass
 
 
-__all__ = ["AgentState", "GlobalBudgetState", "LLMOutputError", "OrchestratorError", "run_orchestrator"]
+__all__ = [
+    "AgentState",
+    "GlobalBudgetState",
+    "LLMOutputError",
+    "OrchestratorError",
+    "run_orchestrator",
+]

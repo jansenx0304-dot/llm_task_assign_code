@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Unified feature computation for weighted ALNS destroy/insertion decisions.
 
 All local value judgments flow through this module. Task-level reinsertion
 features drive only task ordering, while insert-candidate features drive only
 filtered position ranking before ranked strict feasibility checks.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -15,8 +15,9 @@ from ..models import Agent, Instance, Location, Task
 from ..solution import AssignmentSolution
 from .types import InsertPosition
 
-
 _EPS = 1e-9
+
+
 @dataclass(frozen=True, slots=True)
 class _RouteStop:
     start_time: float
@@ -48,7 +49,11 @@ def basic_insertion_feasibility_filter(
     reachability, or trivial route-independent energy lower bounds.
     """
     task = instance.task_by_id(int(tid))
-    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    positions = (
+        _all_insert_positions(sol, instance)
+        if candidate_positions is None
+        else list(candidate_positions)
+    )
     if not positions:
         return []
     out: List[InsertPosition] = []
@@ -60,9 +65,13 @@ def basic_insertion_feasibility_filter(
         if not _agent_basic_reach(instance, agent, task):
             continue
 
-        depot_lb_energy = _travel_energy(config, instance, agent, instance.depot.loc, task.loc) + _service_energy(agent, task)
+        depot_lb_energy = _travel_energy(
+            config, instance, agent, instance.depot.loc, task.loc
+        ) + _service_energy(agent, task)
         if bool(config.eval.include_depot_legs):
-            depot_lb_energy += _travel_energy(config, instance, agent, task.loc, instance.depot.loc)
+            depot_lb_energy += _travel_energy(
+                config, instance, agent, task.loc, instance.depot.loc
+            )
         if depot_lb_energy - float(agent.init_energy) > _EPS:
             continue
 
@@ -85,7 +94,11 @@ def insertion_lower_bound_filter(
     candidates or smuggle in extra heuristics.
     """
     task = instance.task_by_id(int(tid))
-    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    positions = (
+        _all_insert_positions(sol, instance)
+        if candidate_positions is None
+        else list(candidate_positions)
+    )
     if not positions:
         return []
     survivors: List[InsertPosition] = []
@@ -126,7 +139,9 @@ def insertion_lower_bound_filter(
         if int(position.position) < len(route):
             next_task = instance.task_by_id(int(route[int(position.position)]))
             finish_tid = start_tid + float(task.service_time)
-            arr_next = finish_tid + float(instance.travel_time(agent, task.loc, next_task.loc))
+            arr_next = finish_tid + float(
+                instance.travel_time(agent, task.loc, next_task.loc)
+            )
             next_start_lb = max(arr_next, float(next_task.tw_start))
             if next_start_lb - float(latest[int(position.position)]) > _EPS:
                 continue
@@ -150,7 +165,11 @@ def dominated_position_filter(
     affected suffix ratio, and reachable slack lower bound, with at least one strict
     improvement. No learned or weighted score is used here.
     """
-    positions = _all_insert_positions(sol, instance) if candidate_positions is None else list(candidate_positions)
+    positions = (
+        _all_insert_positions(sol, instance)
+        if candidate_positions is None
+        else list(candidate_positions)
+    )
     if not positions:
         return []
     lower_bounds = _lower_bounds_by_position(
@@ -183,13 +202,19 @@ def enumerate_filtered_insert_positions(
     config: Config,
 ) -> List[InsertPosition]:
     """Enumerate loosely filtered insertion positions before insert-score ranking."""
-    positions = basic_insertion_feasibility_filter(sol, tid, instance, config, candidate_positions=None)
+    positions = basic_insertion_feasibility_filter(
+        sol, tid, instance, config, candidate_positions=None
+    )
     if not positions:
         return []
-    positions = insertion_lower_bound_filter(sol, tid, instance, config, candidate_positions=positions)
+    positions = insertion_lower_bound_filter(
+        sol, tid, instance, config, candidate_positions=positions
+    )
     if not positions:
         return []
-    positions = dominated_position_filter(sol, tid, instance, config, candidate_positions=positions)
+    positions = dominated_position_filter(
+        sol, tid, instance, config, candidate_positions=positions
+    )
     return positions
 
 
@@ -201,14 +226,18 @@ def _task_assignment_index(sol: AssignmentSolution) -> Dict[int, Tuple[int, int]
     return out
 
 
-def _build_route_timing_cache(sol: AssignmentSolution, instance: Instance) -> Dict[int, List[_RouteStop]]:
+def _build_route_timing_cache(
+    sol: AssignmentSolution, instance: Instance
+) -> Dict[int, List[_RouteStop]]:
     return {
         int(aid): _simulate_route(instance, int(aid), list(route))
         for aid, route in sol.routes.items()
     }
 
 
-def _simulate_route(instance: Instance, aid: int, route: Sequence[int]) -> List[_RouteStop]:
+def _simulate_route(
+    instance: Instance, aid: int, route: Sequence[int]
+) -> List[_RouteStop]:
     agent = instance.agent_by_id(int(aid))
     current_loc = instance.depot.loc
     current_time = 0.0
@@ -277,7 +306,11 @@ def _route_timewindow_bounds(
     for index in range(len(route) - 2, -1, -1):
         cur = instance.task_by_id(int(route[index]))
         nxt = instance.task_by_id(int(route[index + 1]))
-        bound = latest[index + 1] - float(cur.service_time) - float(instance.travel_time(agent, cur.loc, nxt.loc))
+        bound = (
+            latest[index + 1]
+            - float(cur.service_time)
+            - float(instance.travel_time(agent, cur.loc, nxt.loc))
+        )
         latest[index] = min(float(cur.tw_end), float(bound))
         if latest[index] + _EPS < float(cur.tw_start):
             feasible = False
@@ -308,14 +341,20 @@ def _lower_bounds_by_position(
             prev_loc = instance.task_by_id(prev_tid).loc
 
         agent = instance.agent_by_id(aid)
-        arrival_lb = prev_finish + float(instance.travel_time(agent, prev_loc, task.loc))
+        arrival_lb = prev_finish + float(
+            instance.travel_time(agent, prev_loc, task.loc)
+        )
         start_lb = max(arrival_lb, float(task.tw_start))
 
         out[position] = _InsertionLowerBound(
             position=position,
             slack_lb=float(task.tw_end) - start_lb,
-            detour_delta=_insert_distance_delta(instance, config, aid, route, int(position.position), task),
-            energy_delta=_insert_energy_delta(instance, config, aid, route, int(position.position), task),
+            detour_delta=_insert_distance_delta(
+                instance, config, aid, route, int(position.position), task
+            ),
+            energy_delta=_insert_energy_delta(
+                instance, config, aid, route, int(position.position), task
+            ),
             affected_suffix_ratio=_affected_suffix_ratio(route, int(position.position)),
         )
 
@@ -338,7 +377,9 @@ def _dominates(lhs: _InsertionLowerBound, rhs: _InsertionLowerBound) -> bool:
     return no_worse and strictly_better
 
 
-def _all_insert_positions(sol: AssignmentSolution, instance: Instance) -> List[InsertPosition]:
+def _all_insert_positions(
+    sol: AssignmentSolution, instance: Instance
+) -> List[InsertPosition]:
     out: List[InsertPosition] = []
     for aid in instance.all_agent_ids():
         route_len = len(sol.routes.get(int(aid), []))
@@ -366,7 +407,9 @@ def _insert_distance_delta(
     task: Task,
 ) -> float:
     del aid
-    prev_loc, next_loc = _insertion_neighbor_locs(instance, config, route, int(insert_pos))
+    prev_loc, next_loc = _insertion_neighbor_locs(
+        instance, config, route, int(insert_pos)
+    )
     base = 0.0 if next_loc is None else float(instance.distance(prev_loc, next_loc))
     added = float(instance.distance(prev_loc, task.loc)) + (
         0.0 if next_loc is None else float(instance.distance(task.loc, next_loc))
@@ -383,10 +426,18 @@ def _insert_energy_delta(
     task: Task,
 ) -> float:
     agent = instance.agent_by_id(int(aid))
-    prev_loc, next_loc = _insertion_neighbor_locs(instance, config, route, int(insert_pos))
-    base = 0.0 if next_loc is None else _travel_energy(config, instance, agent, prev_loc, next_loc)
+    prev_loc, next_loc = _insertion_neighbor_locs(
+        instance, config, route, int(insert_pos)
+    )
+    base = (
+        0.0
+        if next_loc is None
+        else _travel_energy(config, instance, agent, prev_loc, next_loc)
+    )
     added = _travel_energy(config, instance, agent, prev_loc, task.loc) + (
-        0.0 if next_loc is None else _travel_energy(config, instance, agent, task.loc, next_loc)
+        0.0
+        if next_loc is None
+        else _travel_energy(config, instance, agent, task.loc, next_loc)
     )
     return added - base + _service_energy(agent, task)
 
@@ -397,9 +448,15 @@ def _insertion_neighbor_locs(
     route: Sequence[int],
     insert_pos: int,
 ) -> Tuple[Location, Optional[Location]]:
-    prev_loc = instance.depot.loc if int(insert_pos) <= 0 else instance.task_by_id(int(route[int(insert_pos) - 1])).loc
+    prev_loc = (
+        instance.depot.loc
+        if int(insert_pos) <= 0
+        else instance.task_by_id(int(route[int(insert_pos) - 1])).loc
+    )
     if int(insert_pos) < len(route):
-        next_loc: Optional[Location] = instance.task_by_id(int(route[int(insert_pos)])).loc
+        next_loc: Optional[Location] = instance.task_by_id(
+            int(route[int(insert_pos)])
+        ).loc
     elif bool(config.eval.include_depot_legs):
         next_loc = instance.depot.loc
     else:
@@ -411,14 +468,20 @@ def _affected_suffix_ratio(route: Sequence[int], insert_pos: int) -> float:
     return float(len(route) - int(insert_pos) + 1) / max(1.0, float(len(route) + 1))
 
 
-def _travel_energy(config: Config, instance: Instance, agent: Agent, a: Location, b: Location) -> float:
+def _travel_energy(
+    config: Config, instance: Instance, agent: Agent, a: Location, b: Location
+) -> float:
     if float(config.extras.get("travel_energy_per_time", 0.0)) > 0.5:
-        return float(agent.travel_energy_rate) * float(instance.travel_time(agent, a, b))
+        return float(agent.travel_energy_rate) * float(
+            instance.travel_time(agent, a, b)
+        )
     return float(agent.travel_energy_rate) * float(instance.distance(a, b))
 
 
 def _service_energy(agent: Agent, task: Task) -> float:
     total = 0.0
     for skill in set(task.skill_req) & set(agent.skills):
-        total += float(task.service_time) * float(agent.skill_energy_rate.get(skill, 1.0))
+        total += float(task.service_time) * float(
+            agent.skill_energy_rate.get(skill, 1.0)
+        )
     return total

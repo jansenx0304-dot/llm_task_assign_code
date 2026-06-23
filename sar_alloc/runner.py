@@ -16,7 +16,6 @@ from .models import Agent, Depot, Instance, Task
 from .reporting import RunReporter
 from .tools import solution_summary
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GOAL = "Prioritize valuable task coverage, then reduce resource use."
 
@@ -24,7 +23,9 @@ DEFAULT_GOAL = "Prioritize valuable task coverage, then reduce resource use."
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m sar_alloc.runner")
     parser.add_argument("--instance", default="T100")
-    parser.add_argument("--time-limit", "--time-limit-sec", dest="time_limit", default=300.0, type=float)
+    parser.add_argument(
+        "--time-limit", "--time-limit-sec", dest="time_limit", default=300.0, type=float
+    )
     parser.add_argument("--iterations", default=2000, type=int)
     parser.add_argument("--max-step-calls", default=10, type=int)
     parser.add_argument("--max-solver-calls", default=20, type=int)
@@ -32,9 +33,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dummy-llm", action="store_true")
     parser.add_argument("--allow-llm-fallback", action="store_true")
     parser.add_argument("--output-dir", default="runs")
-    parser.add_argument("--save-log", action="store_true", help="Accepted for CLI compatibility.")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors in terminal trace.")
-    parser.add_argument("--no-emoji", action="store_true", help="Disable emoji in terminal trace.")
+    parser.add_argument(
+        "--save-log", action="store_true", help="Accepted for CLI compatibility."
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI colors in terminal trace."
+    )
+    parser.add_argument(
+        "--no-emoji", action="store_true", help="Disable emoji in terminal trace."
+    )
     return parser
 
 
@@ -85,7 +92,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             trace_callback=reporter.on_trace_event,
         )
         elapsed = time.time() - started_at
-        summary = build_summary(solution, instance, config, args.instance, mode, elapsed)
+        summary = build_summary(
+            solution, instance, config, args.instance, mode, elapsed
+        )
         reporter.finish(solution, summary)
     except Exception as exc:
         try:
@@ -114,19 +123,28 @@ def build_result_text(solution: Any, summary: Dict[str, Any]) -> str:
         if event.get("payload_type") == "text":
             lines.extend(["```text", str(payload), "```", ""])
         else:
-            lines.extend(["```json", json.dumps(payload, ensure_ascii=False, indent=2), "```", ""])
-    lines.extend([
-        "## [FINAL SOLUTION]",
-        "```json",
-        json.dumps(_solution_json(solution), ensure_ascii=False, indent=2),
-        "```",
-        "",
-        "## [FINAL SUMMARY]",
-        "```json",
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        "```",
-        "",
-    ])
+            lines.extend(
+                [
+                    "```json",
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    "```",
+                    "",
+                ]
+            )
+    lines.extend(
+        [
+            "## [FINAL SOLUTION]",
+            "```json",
+            json.dumps(_solution_json(solution), ensure_ascii=False, indent=2),
+            "```",
+            "",
+            "## [FINAL SUMMARY]",
+            "```json",
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            "```",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -162,7 +180,14 @@ def resolve_instance_path(instance: str) -> Path:
     direct = Path(instance)
     if direct.exists():
         return direct
-    demo = PROJECT_ROOT / "sar_alloc" / "data" / "instances" / "demo" / f"seed42_{instance}_A6.json"
+    demo = (
+        PROJECT_ROOT
+        / "sar_alloc"
+        / "data"
+        / "instances"
+        / "demo"
+        / f"seed42_{instance}_A6.json"
+    )
     if instance in {"T50", "T100", "T300"} and demo.exists():
         return demo
     raise FileNotFoundError(f"Unknown instance: {instance}")
@@ -175,27 +200,33 @@ def load_instance_from_json(path: Path) -> Instance:
     agents = []
     for index, value in enumerate(_list(_required(data, "agents"), "agents")):
         raw = _mapping(value, f"agents[{index}]")
-        agents.append(Agent(
-            id=int(_required(raw, "id")),
-            init_energy=float(_required(raw, "init_energy")),
-            skills=set(_list(_required(raw, "skills"), "skills")),
-            speed=float(_required(raw, "speed")),
-            travel_energy_rate=float(_required(raw, "travel_energy_rate")),
-            standby_power=float(_required(raw, "standby_power")),
-            skill_energy_rate=dict(_mapping(_required(raw, "skill_energy_rate"), "skill_energy_rate")),
-        ))
+        agents.append(
+            Agent(
+                id=int(_required(raw, "id")),
+                init_energy=float(_required(raw, "init_energy")),
+                skills=set(_list(_required(raw, "skills"), "skills")),
+                speed=float(_required(raw, "speed")),
+                travel_energy_rate=float(_required(raw, "travel_energy_rate")),
+                standby_power=float(_required(raw, "standby_power")),
+                skill_energy_rate=dict(
+                    _mapping(_required(raw, "skill_energy_rate"), "skill_energy_rate")
+                ),
+            )
+        )
     tasks = []
     for index, value in enumerate(_list(_required(data, "tasks"), "tasks")):
         raw = _mapping(value, f"tasks[{index}]")
-        tasks.append(Task(
-            id=int(_required(raw, "id")),
-            loc=_location(raw, f"tasks[{index}]"),
-            tw_start=float(_required(raw, "tw_start")),
-            tw_end=float(_required(raw, "tw_end")),
-            service_time=float(_required(raw, "service_time")),
-            skill_req=set(_list(_required(raw, "skill_req"), "skill_req")),
-            priority=float(_required(raw, "priority")),
-        ))
+        tasks.append(
+            Task(
+                id=int(_required(raw, "id")),
+                loc=_location(raw, f"tasks[{index}]"),
+                tw_start=float(_required(raw, "tw_start")),
+                tw_end=float(_required(raw, "tw_end")),
+                service_time=float(_required(raw, "service_time")),
+                skill_req=set(_list(_required(raw, "skill_req"), "skill_req")),
+                priority=float(_required(raw, "priority")),
+            )
+        )
     return Instance(
         tasks=tuple(tasks),
         agents=tuple(agents),
@@ -242,7 +273,10 @@ def build_case_payload(name: str, instance: Instance) -> Dict[str, Any]:
 def prepare_run_dir(output_dir: str, instance_name: str) -> Path:
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
-    run_dir = root / f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{Path(instance_name).stem}"
+    run_dir = (
+        root
+        / f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{Path(instance_name).stem}"
+    )
     try:
         run_dir.mkdir(parents=False, exist_ok=False)
     except PermissionError:
@@ -250,7 +284,10 @@ def prepare_run_dir(output_dir: str, instance_name: str) -> Path:
             raise
         root = Path("runs_generated")
         root.mkdir(parents=True, exist_ok=True)
-        run_dir = root / f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{Path(instance_name).stem}"
+        run_dir = (
+            root
+            / f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{Path(instance_name).stem}"
+        )
         run_dir.mkdir(parents=False, exist_ok=False)
     return run_dir
 

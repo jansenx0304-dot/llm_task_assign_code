@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .evaluator import build_objective_keys, compare_quality
+from .protected_metrics import check_protected_metrics, compile_protected_metric_bounds
 from .solution import EvalResult
-
 
 EVENT_TAGS = (
     "initial_feasible",
@@ -14,6 +14,7 @@ EVENT_TAGS = (
     "working_quality_improved",
     "best_feasible_improved",
     "protected_metric_violated",
+    "trial_rejected_by_protection",
     "hard_filter_blocked",
     "feasibility_rejected_trials",
     "acceptance_rejected_trials",
@@ -33,7 +34,9 @@ def verify_initial_construction(
     verification_id: str = "",
 ) -> Dict[str, Any]:
     trace = dict(getattr(result, "trace", {}) or {})
-    trace["trace_id"] = str(trace.get("trace_id") or f"X_{verification_id or 'initial'}")
+    trace["trace_id"] = str(
+        trace.get("trace_id") or f"X_{verification_id or 'initial'}"
+    )
     evaluation = getattr(result, "evaluation", None)
     inserted = int(trace.get("inserted_task_count", 0) or 0)
     if result is None or evaluation is None:
@@ -43,7 +46,11 @@ def verify_initial_construction(
     elif inserted == 0:
         tag = "initial_empty"
         status = "not_achieved"
-        blocker = "no_candidate_position" if int(trace.get("zero_candidate_task_count", 0) or 0) else "initial_empty"
+        blocker = (
+            "no_candidate_position"
+            if int(trace.get("zero_candidate_task_count", 0) or 0)
+            else "initial_empty"
+        )
     elif bool(evaluation.is_feasible):
         tag = "initial_feasible"
         status = "achieved"
@@ -53,6 +60,15 @@ def verify_initial_construction(
         status = "partial"
         blocker = _initial_blocker(trace)
     trace.setdefault("kind", "initial_insertion")
+    protected = (
+        {"passed": True, "violations": []}
+        if evaluation is None
+        else _protected_metric_result(evaluation, evaluation, contract)
+    )
+    if not protected["passed"]:
+        status = "regressed"
+        blocker = "protected_metric_violated"
+        tag = "protected_metric_violated"
     verification = _base_verification(
         verification_id=verification_id,
         contract=contract,
@@ -62,20 +78,39 @@ def verify_initial_construction(
         action="construct_initial",
         target_id=_manifest_target(manifest),
     )
-    verification.update({
-        "intent_status": status,
-        "metric_delta": {
-            "working": _metric_values(evaluation, _contract_metrics(contract)) if evaluation is not None else {},
-            "best_feasible": _metric_values(evaluation, _contract_metrics(contract)) if evaluation is not None and evaluation.is_feasible else {},
-        },
-        "debt_delta": {},
-        "protected_metric_result": {"passed": True, "violations": []},
-        "dominant_blocker": blocker,
-        "flow_diagnosis": _flow_diagnosis(blocker),
-        "event_tags": [tag],
-        "objective_keys": _verification_objective_keys(evaluation, _contract_metrics(contract)),
-        "trace": trace,
-    })
+    verification.update(
+        {
+            "intent_status": status,
+            "metric_delta": {
+                "working": (
+                    _metric_values(evaluation, _contract_metrics(contract))
+                    if evaluation is not None
+                    else {}
+                ),
+                "best_feasible": (
+                    _metric_values(evaluation, _contract_metrics(contract))
+                    if evaluation is not None and evaluation.is_feasible
+                    else {}
+                ),
+            },
+            "debt_delta": {},
+            "protected_metric_result": protected,
+            "protected_metric_baseline": _protected_metric_baseline(contract),
+            "dominant_blocker": blocker,
+            "flow_diagnosis": _flow_diagnosis(blocker, status),
+            "event_tags": [tag],
+            "improvement_flags": {
+                "working_contract_improved": False,
+                "action_best_contract_improved": False,
+                "run_global_best_improved": False,
+                "protected_metrics_passed": bool(protected["passed"]),
+            },
+            "objective_keys": _verification_objective_keys(
+                evaluation, _contract_metrics(contract)
+            ),
+            "trace": trace,
+        }
+    )
     return verification
 
 
@@ -96,12 +131,52 @@ def verify_alns_action(
 ) -> Dict[str, Any]:
     metrics = _contract_metrics(contract)
     working_delta = _metric_delta(before_working_eval, after_working_eval, metrics)
-    best_delta = _metric_delta(before_best_feasible_eval, after_action_best_eval, metrics)
+    best_delta = _metric_delta(
+        before_best_feasible_eval, after_action_best_eval, metrics
+    )
     debt_delta = _debt_delta(before_working_eval, after_working_eval)
-    protected = _protected_metric_result(before_working_eval, after_working_eval, _protected_metrics(contract))
+    protected = _protected_metric_result(
+        before_working_eval, after_working_eval, contract
+    )
     chosen_after = _better_eval(after_working_eval, after_action_best_eval, metrics)
-    status = _intent_status(before_working_eval, chosen_after, metrics, debt_delta)
-    blocker = _dominant_blocker_from_trace(trace, status)
+    status = (
+        "regressed"
+        if not protected["passed"]
+        else _intent_status(before_working_eval, chosen_after, metrics, debt_delta)
+    )
+    blocker = (
+        "protected_metric_violated"
+        if not protected["passed"]
+        else _dominant_blocker_from_trace(trace, status)
+    )
+    working_contract_improved = bool(
+        protected["passed"]
+        and compare_quality(after_working_eval, before_working_eval, metrics) < 0
+    )
+    action_best_contract_improved = bool(
+        protected["passed"]
+        and after_action_best_eval is not None
+        and (
+            before_best_feasible_eval is None
+            or compare_quality(
+                after_action_best_eval, before_best_feasible_eval, metrics
+            )
+            < 0
+        )
+    )
+    run_global_best_improved = bool(
+        protected["passed"]
+        and after_global_best_eval is not None
+        and (
+            before_global_best_eval is None
+            or compare_quality(
+                after_global_best_eval,
+                before_global_best_eval,
+                global_objective_layers or metrics,
+            )
+            < 0
+        )
+    )
     tags = _event_tags(
         before_working_eval,
         after_working_eval,
@@ -125,25 +200,30 @@ def verify_alns_action(
         action="run_alns",
         target_id=_manifest_target(manifest),
     )
-    verification.update({
-        "intent_status": status,
-        "metric_delta": {"working": working_delta, "best_feasible": best_delta},
-        "debt_delta": debt_delta,
-        "protected_metric_result": protected,
-        "dominant_blocker": blocker,
-        "flow_diagnosis": _flow_diagnosis(blocker, status),
-        "event_tags": tags,
-        "best_improved": bool(after_global_best_eval is not None and (
-            before_global_best_eval is None
-            or compare_quality(after_global_best_eval, before_global_best_eval, global_objective_layers or metrics) < 0
-        )),
-        "objective_keys": build_objective_keys(
-            chosen_after,
-            metrics,
-            global_objective_layers or metrics,
-        ),
-        "trace": trace,
-    })
+    verification.update(
+        {
+            "intent_status": status,
+            "metric_delta": {"working": working_delta, "best_feasible": best_delta},
+            "debt_delta": debt_delta,
+            "protected_metric_result": protected,
+            "protected_metric_baseline": _protected_metric_baseline(contract),
+            "dominant_blocker": blocker,
+            "flow_diagnosis": _flow_diagnosis(blocker, status),
+            "event_tags": tags,
+            "improvement_flags": {
+                "working_contract_improved": working_contract_improved,
+                "action_best_contract_improved": action_best_contract_improved,
+                "run_global_best_improved": run_global_best_improved,
+                "protected_metrics_passed": bool(protected["passed"]),
+            },
+            "objective_keys": build_objective_keys(
+                chosen_after,
+                metrics,
+                global_objective_layers or metrics,
+            ),
+            "trace": trace,
+        }
+    )
     return verification
 
 
@@ -160,7 +240,9 @@ def verify_review_request(
     trace = {
         "trace_id": trace_id,
         "kind": "review_request",
-        "recent_verification_ids": [item.get("verification_id") for item in recent_verifications],
+        "recent_verification_ids": [
+            item.get("verification_id") for item in recent_verifications
+        ],
     }
     verification = _base_verification(
         verification_id=verification_id,
@@ -169,26 +251,45 @@ def verify_review_request(
         manifest=manifest,
         trace=trace,
         action="request_supervisor_review",
-        target_id=(decision.get("solver_decision", decision)).get("target_id", "contract_review"),
+        target_id=(decision.get("solver_decision", decision)).get(
+            "target_id", "contract_review"
+        ),
     )
-    verification.update({
-        "intent_status": "not_applicable",
-        "metric_delta": {"working": {}, "best_feasible": {}},
-        "debt_delta": {},
-        "protected_metric_result": {"passed": True, "violations": []},
-        "dominant_blocker": "solver_requested_review",
-        "flow_diagnosis": _flow_diagnosis("solver_requested_review", "not_applicable"),
-        "event_tags": [],
-        "trace": trace,
-    })
+    verification.update(
+        {
+            "intent_status": "not_applicable",
+            "metric_delta": {"working": {}, "best_feasible": {}},
+            "debt_delta": {},
+            "protected_metric_result": {"passed": True, "violations": []},
+            "protected_metric_baseline": _protected_metric_baseline(contract),
+            "dominant_blocker": "solver_requested_review",
+            "flow_diagnosis": _flow_diagnosis(
+                "solver_requested_review", "not_applicable"
+            ),
+            "event_tags": [],
+            "improvement_flags": {
+                "working_contract_improved": False,
+                "action_best_contract_improved": False,
+                "run_global_best_improved": False,
+                "protected_metrics_passed": True,
+            },
+            "trace": trace,
+        }
+    )
     return verification
 
 
 def audit_initial_result(*, initial_eval: Optional[EvalResult]) -> Dict[str, Any]:
     class _Result:
         evaluation = initial_eval
-        trace = {"inserted_task_count": 1 if initial_eval is not None else 0, "kind": "initial_insertion"}
-    return verify_initial_construction(_Result(), {"contract_id": "", "objective_layers": []})
+        trace = {
+            "inserted_task_count": 1 if initial_eval is not None else 0,
+            "kind": "initial_insertion",
+        }
+
+    return verify_initial_construction(
+        _Result(), {"contract_id": "", "objective_layers": []}
+    )
 
 
 def audit_outcome(**kwargs: Any) -> Dict[str, Any]:
@@ -198,7 +299,11 @@ def audit_outcome(**kwargs: Any) -> Dict[str, Any]:
         before_best_feasible_eval=kwargs.get("before_best_eval"),
         after_action_best_eval=kwargs.get("after_best_eval"),
         trace=kwargs.get("solver_diagnostics", {}).get("execution_trace", {}),
-        contract={"contract_id": "", "objective_layers": kwargs.get("contract_objective_layers", []), "protected_metrics": []},
+        contract={
+            "contract_id": "",
+            "objective_layers": kwargs.get("contract_objective_layers", []),
+            "protected_metrics": [],
+        },
         manifest=None,
         global_objective_layers=kwargs.get("global_objective_layers"),
     )
@@ -214,7 +319,9 @@ def _base_verification(
     action: str,
     target_id: str,
 ) -> Dict[str, Any]:
-    manifest_dict = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
+    manifest_dict = (
+        manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
+    )
     return {
         "verification_id": verification_id,
         "contract_id": _contract_id(contract),
@@ -223,24 +330,36 @@ def _base_verification(
         "trace_id": trace.get("trace_id", ""),
         "action": action,
         "target_id": target_id,
+        "protected_metric_baseline": _protected_metric_baseline(contract),
     }
 
 
-def _metric_delta(before: Optional[EvalResult], after: Optional[EvalResult], metrics: List[Dict[str, Any]]) -> Dict[str, float]:
+def _metric_delta(
+    before: Optional[EvalResult],
+    after: Optional[EvalResult],
+    metrics: List[Dict[str, Any]],
+) -> Dict[str, float]:
     if before is None or after is None:
         return {}
     return {
-        str(layer.get("metric", layer.get("name", ""))): float(after.get_metric(str(layer.get("metric", layer.get("name", ""))))) - float(before.get_metric(str(layer.get("metric", layer.get("name", "")))))
+        str(layer.get("metric", layer.get("name", ""))): float(
+            after.get_metric(str(layer.get("metric", layer.get("name", ""))))
+        )
+        - float(before.get_metric(str(layer.get("metric", layer.get("name", "")))))
         for layer in metrics
         if str(layer.get("metric", layer.get("name", "")))
     }
 
 
-def _metric_values(evaluation: Optional[EvalResult], metrics: List[Dict[str, Any]]) -> Dict[str, float]:
+def _metric_values(
+    evaluation: Optional[EvalResult], metrics: List[Dict[str, Any]]
+) -> Dict[str, float]:
     if evaluation is None:
         return {}
     return {
-        str(layer.get("metric", layer.get("name", ""))): float(evaluation.get_metric(str(layer.get("metric", layer.get("name", "")))))
+        str(layer.get("metric", layer.get("name", ""))): float(
+            evaluation.get_metric(str(layer.get("metric", layer.get("name", ""))))
+        )
         for layer in metrics
         if str(layer.get("metric", layer.get("name", "")))
     }
@@ -250,20 +369,31 @@ def _debt_delta(before: EvalResult, after: EvalResult) -> Dict[str, float]:
     out: Dict[str, float] = {}
     before_ratios = before.constraint_report.violation_ratio_by_type
     after_ratios = after.constraint_report.violation_ratio_by_type
-    for name in sorted(set(before_ratios) | set(after_ratios) | {"time_window", "energy"}):
-        out[str(name)] = float(after_ratios.get(name, 0.0)) - float(before_ratios.get(name, 0.0))
+    for name in sorted(
+        set(before_ratios) | set(after_ratios) | {"time_window", "energy"}
+    ):
+        out[str(name)] = float(after_ratios.get(name, 0.0)) - float(
+            before_ratios.get(name, 0.0)
+        )
     return out
 
 
-def _protected_metric_result(before_eval: EvalResult, after_eval: EvalResult, protected_metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
-    violations = []
+def _protected_metric_result(
+    before_eval: EvalResult,
+    after_eval: EvalResult,
+    contract: Any,
+) -> Dict[str, Any]:
+    protected_metrics = _protected_metrics(contract)
+    baseline = _protected_metric_baseline(contract)
     for item in protected_metrics:
-        metric = str(item.get("metric", ""))
-        max_worsen = float(item.get("max_worsen", 0.0) or 0.0)
-        delta = float(after_eval.get_metric(metric)) - float(before_eval.get_metric(metric))
-        if delta > max_worsen + 1e-9:
-            violations.append({"metric": metric, "delta": delta, "max_worsen": max_worsen})
-    return {"passed": not violations, "violations": violations}
+        metric = str(item["metric"])
+        baseline.setdefault(metric, float(before_eval.get_metric(metric)))
+    bounds = compile_protected_metric_bounds(protected_metrics, baseline)
+    quality = {
+        str(item["metric"]): float(after_eval.get_metric(str(item["metric"])))
+        for item in protected_metrics
+    }
+    return check_protected_metrics(quality, bounds).as_dict()
 
 
 def _dominant_blocker_from_trace(trace: Dict[str, Any], status: str) -> str:
@@ -271,12 +401,15 @@ def _dominant_blocker_from_trace(trace: Dict[str, Any], status: str) -> str:
     candidate_trials = int(flow.get("candidate_trials", 0) or 0)
     hard_filter_failed = int(flow.get("hard_filter_failed", 0) or 0)
     feasibility_rejected = int(flow.get("feasibility_rejected", 0) or 0)
+    protected_rejected = int(flow.get("protected_metric_rejected", 0) or 0)
     admissible = int(flow.get("admissible_trials", 0) or 0)
     accepted = int(flow.get("accepted_trials", 0) or 0)
     if candidate_trials == 0:
         return "no_candidate_position"
     if feasibility_rejected / max(1, candidate_trials) >= 0.7:
         return "feasibility_rejected_trials"
+    if protected_rejected / max(1, candidate_trials) >= 0.7:
+        return "protected_metric_violated"
     if hard_filter_failed / max(1, candidate_trials) >= 0.7:
         return "hard_filter_blocked"
     if admissible > 0 and accepted == 0:
@@ -330,12 +463,32 @@ def _event_tags(
     tags: List[str] = []
     if any(value < -1e-9 for value in working_delta.values()):
         tags.append("working_quality_improved")
-    global_improved = bool(after_best_eval is not None and (before_best_eval is None or compare_quality(after_best_eval, before_best_eval, global_layers) < 0))
+    global_improved = bool(
+        after_best_eval is not None
+        and (
+            before_best_eval is None
+            or compare_quality(after_best_eval, before_best_eval, global_layers) < 0
+        )
+    )
     if global_improved or any(value < -1e-9 for value in best_delta.values()):
         tags.append("best_feasible_improved")
     if not protected.get("passed", False):
+        tags = [
+            tag
+            for tag in tags
+            if tag not in {"working_quality_improved", "best_feasible_improved"}
+        ]
         tags.append("protected_metric_violated")
-    if blocker in {"hard_filter_blocked", "feasibility_rejected_trials", "acceptance_rejected_trials", "no_quality_gain"}:
+        tags.append("trial_rejected_by_protection")
+    elif blocker == "protected_metric_violated":
+        tags.append("protected_metric_violated")
+        tags.append("trial_rejected_by_protection")
+    if blocker in {
+        "hard_filter_blocked",
+        "feasibility_rejected_trials",
+        "acceptance_rejected_trials",
+        "no_quality_gain",
+    }:
         tags.append(blocker)
     if blocker in {"feasibility_rejected_trials", "acceptance_rejected_trials"}:
         tags.append("no_accepted_trial")
@@ -352,11 +505,22 @@ def _flow_diagnosis(blocker: str, status: str = "") -> Dict[str, bool]:
         "hard_filter_problem": blocker == "hard_filter_blocked",
         "feasibility_problem": blocker == "feasibility_rejected_trials",
         "acceptance_problem": blocker == "acceptance_rejected_trials",
-        "quality_problem": status in {"not_achieved", "regressed"} and blocker in {"no_quality_gain", "objective_regressed"},
+        "quality_problem": (
+            status in {"not_achieved", "regressed"}
+            and blocker
+            in {
+                "no_quality_gain",
+                "objective_regressed",
+                "protected_metric_violated",
+            }
+        ),
+        "protected_metric_problem": blocker == "protected_metric_violated",
     }
 
 
-def _better_eval(first: EvalResult, second: Optional[EvalResult], layers: List[Dict[str, Any]]) -> EvalResult:
+def _better_eval(
+    first: EvalResult, second: Optional[EvalResult], layers: List[Dict[str, Any]]
+) -> EvalResult:
     if second is None:
         return first
     return second if compare_quality(second, first, layers) < 0 else first
@@ -379,6 +543,16 @@ def _contract_metrics(contract: Any) -> List[Dict[str, Any]]:
 def _protected_metrics(contract: Any) -> List[Dict[str, Any]]:
     raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract or {})
     return [dict(item) for item in raw.get("protected_metrics", [])]
+
+
+def _protected_metric_baseline(contract: Any) -> Dict[str, float]:
+    raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract or {})
+    return {
+        str(metric): float(value)
+        for metric, value in dict(
+            raw.get("protected_metric_baseline", {}) or {}
+        ).items()
+    }
 
 
 def _contract_id(contract: Any) -> str:

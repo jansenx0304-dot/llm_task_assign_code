@@ -1,11 +1,21 @@
-from __future__ import annotations
-
 """Move-level destroy operators for weighted ALNS."""
+
+from __future__ import annotations
 
 import math
 import random
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from ..config import Config
 from ..constraint_checker import check_constraints
@@ -18,12 +28,17 @@ from .types import (
     LandscapeFeatures,
 )
 
-
 _EPS = 1e-9
 LANDSCAPE_METRIC_FIELDS = (
-    "cost_pressure", "priority_loss", "scarcity_pressure", "coupling_pressure",
-    "mobility_opportunity", "route_balance_pressure", "violation_pressure",
-    "regret_pressure", "bottleneck_pressure",
+    "cost_pressure",
+    "priority_loss",
+    "scarcity_pressure",
+    "coupling_pressure",
+    "mobility_opportunity",
+    "route_balance_pressure",
+    "violation_pressure",
+    "regret_pressure",
+    "bottleneck_pressure",
 )
 
 
@@ -57,16 +72,27 @@ class DestroyMove:
 
 
 DestroyOperator = Callable[
-    [AssignmentSolution, Instance, Config, DestroyPolicy, DestroyStrength, random.Random],
+    [
+        AssignmentSolution,
+        Instance,
+        Config,
+        DestroyPolicy,
+        DestroyStrength,
+        random.Random,
+    ],
     List[DestroyMove],
 ]
 
 
-def compute_destroy_strength(sol: AssignmentSolution, strength_ratio: float) -> DestroyStrength:
+def compute_destroy_strength(
+    sol: AssignmentSolution, strength_ratio: float
+) -> DestroyStrength:
     assigned_count = len(sol.all_assigned_tasks())
     if assigned_count <= 0:
         return DestroyStrength(min_k=0, target_k=0, max_k=0)
-    target_k = _clamp_int(round(float(strength_ratio) * assigned_count), 1, assigned_count)
+    target_k = _clamp_int(
+        round(float(strength_ratio) * assigned_count), 1, assigned_count
+    )
     min_k = _clamp_int(math.floor(0.7 * target_k), 1, assigned_count)
     max_k = _clamp_int(math.ceil(1.3 * target_k), min_k, assigned_count)
     return DestroyStrength(min_k=int(min_k), target_k=int(target_k), max_k=int(max_k))
@@ -120,7 +146,10 @@ def enumerate_worst_task_removal(
     ]
     scored_single = _score_moves(single_moves, sol, instance, config, policy)
     scored_single.sort(key=lambda move: (-float(move.score), int(move.task_ids[0])))
-    top_task_ids = tuple(int(move.task_ids[0]) for move in scored_single[: min(int(strength.target_k), len(scored_single))])
+    top_task_ids = tuple(
+        int(move.task_ids[0])
+        for move in scored_single[: min(int(strength.target_k), len(scored_single))]
+    )
     if not top_task_ids:
         return []
     final = _make_move(
@@ -152,7 +181,10 @@ def enumerate_related_cluster_removal(
             shape="cluster",
             task_ids=tuple(assigned),
             affected_routes=_affected_routes_for_tasks(sol, assigned),
-            metadata={"target_k": int(strength.target_k), "seed_task": int(assigned[0])},
+            metadata={
+                "target_k": int(strength.target_k),
+                "seed_task": int(assigned[0]),
+            },
         )
         return _scored_moves([move], sol, instance, config, policy)
 
@@ -176,12 +208,20 @@ def enumerate_related_cluster_removal(
     for seed_move in seed_moves:
         seed = int(seed_move.task_ids[0])
         related = [
-            (_relatedness(seed, other, sol, instance, assignment, distance_scale, time_scale), int(other))
+            (
+                _relatedness(
+                    seed, other, sol, instance, assignment, distance_scale, time_scale
+                ),
+                int(other),
+            )
             for other in assigned
             if int(other) != seed
         ]
         related.sort(key=lambda item: (-float(item[0]), int(item[1])))
-        cluster = tuple([seed] + [int(tid) for _, tid in related[: max(0, int(strength.target_k) - 1)]])
+        cluster = tuple(
+            [seed]
+            + [int(tid) for _, tid in related[: max(0, int(strength.target_k) - 1)]]
+        )
         moves.append(
             _make_move(
                 operator_name="related_cluster_removal",
@@ -210,7 +250,9 @@ def enumerate_critical_block_removal(
         route = [int(tid) for tid in route_raw]
         if not route:
             continue
-        for length in range(int(strength.min_k), min(int(strength.max_k), len(route)) + 1):
+        for length in range(
+            int(strength.min_k), min(int(strength.max_k), len(route)) + 1
+        ):
             for start in range(0, len(route) - length + 1):
                 end = start + length
                 block = tuple(route[start:end])
@@ -245,7 +287,11 @@ def enumerate_route_rebalance_removal(
     for aid, route_raw in sol.routes.items():
         route = tuple(int(tid) for tid in route_raw)
         route_len = len(route)
-        if route_len <= 0 or route_len < int(strength.min_k) or route_len > int(strength.max_k):
+        if (
+            route_len <= 0
+            or route_len < int(strength.min_k)
+            or route_len > int(strength.max_k)
+        ):
             continue
         moves.append(
             _make_move(
@@ -281,13 +327,19 @@ def enumerate_violation_removal(
     contributions.sort(key=lambda item: (-float(item[0]), int(item[1])))
     if not contributions or strength.target_k <= 0:
         return []
-    selected = tuple(tid for _, tid in contributions[: min(int(strength.target_k), len(contributions))])
+    selected = tuple(
+        tid
+        for _, tid in contributions[: min(int(strength.target_k), len(contributions))]
+    )
     move = _make_move(
         operator_name="violation_removal",
         shape="violation_task_set",
         task_ids=selected,
         affected_routes=_affected_routes_for_tasks(sol, selected),
-        metadata={"target_k": int(strength.target_k), "source": "constraint_report.violation_by_task"},
+        metadata={
+            "target_k": int(strength.target_k),
+            "source": "constraint_report.violation_by_task",
+        },
     )
     return _score_moves([move], sol, instance, config, policy)
 
@@ -346,7 +398,9 @@ def build_destroy_landscape(
             "available": bool(top is not None),
             "candidate_count_preview": int(len(moves)),
             "top_pattern": "none" if top is None else _top_pattern(top.features),
-            "top_signal_levels": {} if top is None else _public_destroy_signal_levels(top.features),
+            "top_signal_levels": (
+                {} if top is None else _public_destroy_signal_levels(top.features)
+            ),
         }
 
     return {
@@ -362,17 +416,25 @@ def build_destroy_landscape(
         "route_structure": {
             "nonempty_route_count": int(len(route_lengths)),
             "route_len_min": int(min(route_lengths)) if route_lengths else 0,
-            "route_len_mean": _round(sum(route_lengths) / max(1, len(route_lengths))) if route_lengths else 0.0,
+            "route_len_mean": (
+                _round(sum(route_lengths) / max(1, len(route_lengths)))
+                if route_lengths
+                else 0.0
+            ),
             "route_len_max": int(max(route_lengths)) if route_lengths else 0,
             "route_cost_imbalance_level": _cv_level(route_costs),
             "route_load_imbalance_level": _cv_level([float(x) for x in route_lengths]),
         },
         "candidate_move_landscape": candidate_landscape,
-        "recent_destroy_feedback": _compact_recent_destroy_feedback(recent_destroy_summary or {}),
+        "recent_destroy_feedback": _compact_recent_destroy_feedback(
+            recent_destroy_summary or {}
+        ),
     }
 
 
-def route_cost(instance: Instance, config: Config, aid: int, route: Sequence[int]) -> float:
+def route_cost(
+    instance: Instance, config: Config, aid: int, route: Sequence[int]
+) -> float:
     if not route:
         return 0.0
     agent = instance.agent_by_id(int(aid))
@@ -387,7 +449,9 @@ def route_cost(instance: Instance, config: Config, aid: int, route: Sequence[int
     return float(total)
 
 
-def _arc_cost(instance: Instance, config: Config, aid: int, loc_a: Location, loc_b: Location) -> float:
+def _arc_cost(
+    instance: Instance, config: Config, aid: int, loc_a: Location, loc_b: Location
+) -> float:
     agent = instance.agent_by_id(int(aid))
     travel_distance = float(instance.distance(loc_a, loc_b))
     travel_time = float(instance.travel_time(agent, loc_a, loc_b))
@@ -406,7 +470,9 @@ def _scored_moves(
     policy: DestroyPolicy,
 ) -> List[DestroyMove]:
     scored = _score_moves(moves, sol, instance, config, policy)
-    scored.sort(key=lambda move: (-float(move.score), tuple(int(tid) for tid in move.task_ids)))
+    scored.sort(
+        key=lambda move: (-float(move.score), tuple(int(tid) for tid in move.task_ids))
+    )
     return scored
 
 
@@ -432,11 +498,16 @@ def _score_moves(
                 affected_routes=tuple(int(aid) for aid in move.affected_routes),
                 features=features,
                 score=(
-                    policy.signal_weights.get("cost_pressure", 0) * features.cost_pressure
-                    + policy.signal_weights.get("coupling_pressure", 0) * features.coupling_pressure
-                    + policy.signal_weights.get("route_balance_pressure", 0) * features.route_balance_pressure
-                    + policy.signal_weights.get("mobility_opportunity", 0) * features.mobility_opportunity
-                    - policy.signal_weights.get("scarcity_protection", 0) * features.scarcity_pressure
+                    policy.signal_weights.get("cost_pressure", 0)
+                    * features.cost_pressure
+                    + policy.signal_weights.get("coupling_pressure", 0)
+                    * features.coupling_pressure
+                    + policy.signal_weights.get("route_balance_pressure", 0)
+                    * features.route_balance_pressure
+                    + policy.signal_weights.get("mobility_opportunity", 0)
+                    * features.mobility_opportunity
+                    - policy.signal_weights.get("scarcity_protection", 0)
+                    * features.scarcity_pressure
                 ),
                 metadata=dict(move.metadata),
             )
@@ -459,11 +530,21 @@ def _compute_raw_move_feature_rows(
     rows: Dict[int, Dict[str, float]] = {}
     for index, move in enumerate(moves):
         rows[index] = {
-            "cost_pressure": _group_removal_cost_release(sol, instance, config, move.task_ids),
-            "priority_loss": sum(float(instance.task_by_id(int(tid)).priority) for tid in move.task_ids),
-            "mobility_opportunity": _move_mobility_opportunity(sol, instance, config, move.task_ids, assignment, relocation_cache),
-            "coupling_pressure": _coupling_pressure(move, sol, instance, assignment, distance_scale, time_scale),
-            "scarcity_pressure": _scarcity_pressure(sol, instance, config, move.task_ids, assignment, relocation_cache),
+            "cost_pressure": _group_removal_cost_release(
+                sol, instance, config, move.task_ids
+            ),
+            "priority_loss": sum(
+                float(instance.task_by_id(int(tid)).priority) for tid in move.task_ids
+            ),
+            "mobility_opportunity": _move_mobility_opportunity(
+                sol, instance, config, move.task_ids, assignment, relocation_cache
+            ),
+            "coupling_pressure": _coupling_pressure(
+                move, sol, instance, assignment, distance_scale, time_scale
+            ),
+            "scarcity_pressure": _scarcity_pressure(
+                sol, instance, config, move.task_ids, assignment, relocation_cache
+            ),
             "route_balance_pressure": _move_balance_pressure(move, route_pressure),
             "violation_pressure": 0.0,
             "regret_pressure": 0.0,
@@ -485,7 +566,9 @@ def _group_removal_cost_release(
         if not route or not any(tid in remove_set for tid in route):
             continue
         new_route = [int(tid) for tid in route if int(tid) not in remove_set]
-        release = route_cost(instance, config, int(aid), route) - route_cost(instance, config, int(aid), new_route)
+        release = route_cost(instance, config, int(aid), route) - route_cost(
+            instance, config, int(aid), new_route
+        )
         total_release += float(release)
     return max(0.0, float(total_release))
 
@@ -521,7 +604,9 @@ def _task_mobility_opportunity(
     aid, _ = assignment[int(tid)]
     old_route = [int(x) for x in sol.routes.get(int(aid), [])]
     route_without_tid = [int(x) for x in old_route if int(x) != int(tid)]
-    current_single_cost = route_cost(instance, config, int(aid), old_route) - route_cost(instance, config, int(aid), route_without_tid)
+    current_single_cost = route_cost(
+        instance, config, int(aid), old_route
+    ) - route_cost(instance, config, int(aid), route_without_tid)
 
     tmp_sol = sol.clone(deep=True)
     tmp_sol.remove_task(int(aid), int(tid), to_unassigned=True)
@@ -541,7 +626,11 @@ def _task_mobility_opportunity(
         if best_delta is None or insert_delta < best_delta:
             best_delta = float(insert_delta)
 
-    value = max(0.0, float(current_single_cost) - float(best_delta if best_delta is not None else 0.0))
+    value = max(
+        0.0,
+        float(current_single_cost)
+        - float(best_delta if best_delta is not None else 0.0),
+    )
     cache[int(tid)] = value
     return value
 
@@ -558,13 +647,21 @@ def _coupling_pressure(
     if len(tids) <= 1:
         return 0.0
     pairs = list(_pairs(tids))
-    spatial = sum(_spatial_similarity(instance, a, b, distance_scale) for a, b in pairs) / max(1, len(pairs))
-    tw = sum(_time_window_similarity(instance, a, b, time_scale) for a, b in pairs) / max(1, len(pairs))
-    skill = sum(_skill_similarity(instance, a, b) for a, b in pairs) / max(1, len(pairs))
+    spatial = sum(
+        _spatial_similarity(instance, a, b, distance_scale) for a, b in pairs
+    ) / max(1, len(pairs))
+    tw = sum(
+        _time_window_similarity(instance, a, b, time_scale) for a, b in pairs
+    ) / max(1, len(pairs))
+    skill = sum(_skill_similarity(instance, a, b) for a, b in pairs) / max(
+        1, len(pairs)
+    )
     if move.shape in ("block", "route"):
         route_structure = 1.0
     elif move.shape == "cluster":
-        route_structure = sum(1.0 for a, b in pairs if _same_route(assignment, a, b)) / max(1, len(pairs))
+        route_structure = sum(
+            1.0 for a, b in pairs if _same_route(assignment, a, b)
+        ) / max(1, len(pairs))
     else:
         route_structure = 0.0
     return (float(spatial) + float(tw) + float(skill) + float(route_structure)) / 4.0
@@ -581,17 +678,23 @@ def _scarcity_pressure(
     values: List[float] = []
     for tid in task_ids:
         task = instance.task_by_id(int(tid))
-        mobility = _task_mobility_opportunity(sol, instance, config, int(tid), assignment, relocation_cache)
+        mobility = _task_mobility_opportunity(
+            sol, instance, config, int(tid), assignment, relocation_cache
+        )
         values.append(float(task.priority) + 1.0 / (1.0 + float(mobility)))
     return sum(values) / max(1, len(values))
 
 
-def _route_pressure_by_aid(sol: AssignmentSolution, instance: Instance, config: Config) -> Dict[int, float]:
+def _route_pressure_by_aid(
+    sol: AssignmentSolution, instance: Instance, config: Config
+) -> Dict[int, float]:
     entries: List[Tuple[int, float, int]] = []
     for aid, route_raw in sol.routes.items():
         route = [int(tid) for tid in route_raw]
         if route:
-            entries.append((int(aid), route_cost(instance, config, int(aid), route), len(route)))
+            entries.append(
+                (int(aid), route_cost(instance, config, int(aid), route), len(route))
+            )
     if not entries:
         return {}
     mean_cost = sum(cost for _, cost, _ in entries) / max(1, len(entries))
@@ -604,7 +707,9 @@ def _route_pressure_by_aid(sol: AssignmentSolution, instance: Instance, config: 
     return out
 
 
-def _move_balance_pressure(move: DestroyMove, route_pressure: Mapping[int, float]) -> float:
+def _move_balance_pressure(
+    move: DestroyMove, route_pressure: Mapping[int, float]
+) -> float:
     if move.shape != "route" or not move.affected_routes:
         return 0.0
     return float(route_pressure.get(int(move.affected_routes[0]), 0.0))
@@ -629,14 +734,18 @@ def _relatedness(
     ) / 4.0
 
 
-def _spatial_similarity(instance: Instance, a: int, b: int, distance_scale: float) -> float:
+def _spatial_similarity(
+    instance: Instance, a: int, b: int, distance_scale: float
+) -> float:
     task_a = instance.task_by_id(int(a))
     task_b = instance.task_by_id(int(b))
     d = float(instance.distance(task_a.loc, task_b.loc))
     return 1.0 / (1.0 + d / max(_EPS, float(distance_scale)))
 
 
-def _time_window_similarity(instance: Instance, a: int, b: int, time_scale: float) -> float:
+def _time_window_similarity(
+    instance: Instance, a: int, b: int, time_scale: float
+) -> float:
     task_a = instance.task_by_id(int(a))
     task_b = instance.task_by_id(int(b))
     mid_a = 0.5 * (float(task_a.tw_start) + float(task_a.tw_end))
@@ -655,12 +764,20 @@ def _skill_similarity(instance: Instance, a: int, b: int) -> float:
 
 
 def _same_route(assignment: Mapping[int, Tuple[int, int]], a: int, b: int) -> bool:
-    return int(a) in assignment and int(b) in assignment and int(assignment[int(a)][0]) == int(assignment[int(b)][0])
+    return (
+        int(a) in assignment
+        and int(b) in assignment
+        and int(assignment[int(a)][0]) == int(assignment[int(b)][0])
+    )
 
 
 def _distance_scale(instance: Instance, assigned: Sequence[int]) -> float:
     values = [
-        float(instance.distance(instance.task_by_id(int(a)).loc, instance.task_by_id(int(b)).loc))
+        float(
+            instance.distance(
+                instance.task_by_id(int(a)).loc, instance.task_by_id(int(b)).loc
+            )
+        )
         for a, b in _pairs([int(tid) for tid in assigned])
     ]
     return _positive_median_or_one(values)
@@ -668,7 +785,11 @@ def _distance_scale(instance: Instance, assigned: Sequence[int]) -> float:
 
 def _time_scale(instance: Instance, assigned: Sequence[int]) -> float:
     values = [
-        max(0.0, float(instance.task_by_id(int(tid)).tw_end) - float(instance.task_by_id(int(tid)).tw_start))
+        max(
+            0.0,
+            float(instance.task_by_id(int(tid)).tw_end)
+            - float(instance.task_by_id(int(tid)).tw_start),
+        )
         for tid in assigned
     ]
     return _positive_median_or_one(values)
@@ -686,7 +807,9 @@ def _positive_median_or_one(values: Sequence[float]) -> float:
     return float(value) if value > _EPS else 1.0
 
 
-def _normalize_rows(rows: Mapping[int, Mapping[str, float]]) -> Dict[int, Dict[str, float]]:
+def _normalize_rows(
+    rows: Mapping[int, Mapping[str, float]],
+) -> Dict[int, Dict[str, float]]:
     if not rows:
         return {}
     mins: Dict[str, float] = {}
@@ -701,7 +824,11 @@ def _normalize_rows(rows: Mapping[int, Mapping[str, float]]) -> Dict[int, Dict[s
         for name in LANDSCAPE_METRIC_FIELDS:
             lo = mins[name]
             hi = maxs[name]
-            current[name] = 0.0 if hi - lo <= _EPS else max(0.0, min(1.0, (float(row[name]) - lo) / (hi - lo)))
+            current[name] = (
+                0.0
+                if hi - lo <= _EPS
+                else max(0.0, min(1.0, (float(row[name]) - lo) / (hi - lo)))
+            )
         normalized[int(key)] = current
     return normalized
 
@@ -747,7 +874,9 @@ def _task_assignment_index(sol: AssignmentSolution) -> Dict[int, Tuple[int, int]
     return out
 
 
-def _affected_routes_for_tasks(sol: AssignmentSolution, task_ids: Iterable[int]) -> Tuple[int, ...]:
+def _affected_routes_for_tasks(
+    sol: AssignmentSolution, task_ids: Iterable[int]
+) -> Tuple[int, ...]:
     wanted = {int(tid) for tid in task_ids}
     routes: List[int] = []
     for aid, route in sol.routes.items():
@@ -763,7 +892,10 @@ def _pairs(values: Sequence[int]) -> Iterable[Tuple[int, int]]:
 
 
 def _feature_levels(features: LandscapeFeatures) -> Dict[str, str]:
-    return {name: _normalized_level(float(getattr(features, name))) for name in LANDSCAPE_METRIC_FIELDS}
+    return {
+        name: _normalized_level(float(getattr(features, name)))
+        for name in LANDSCAPE_METRIC_FIELDS
+    }
 
 
 def _public_destroy_signal_levels(features: LandscapeFeatures) -> Dict[str, str]:
@@ -824,8 +956,10 @@ def _compact_recent_destroy_feedback(summary: Mapping[str, Any]) -> Dict[str, An
         out[name] = {
             "used": int(raw.get("used", 0) or 0),
             "accepted": int(raw.get("accepted", 0) or 0),
-            "best_improved": int(raw.get("best_improved", 0) or 0),
-            "mean_removed_count": _round(float(raw.get("mean_removed_count", 0.0) or 0.0)),
+            "global_best_improved": int(raw.get("global_best_improved", 0) or 0),
+            "mean_removed_count": _round(
+                float(raw.get("mean_removed_count", 0.0) or 0.0)
+            ),
         }
     return out
 

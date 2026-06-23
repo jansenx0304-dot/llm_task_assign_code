@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 from .schemas import SUPPORTED_CONDITION_SOURCES
 from .tools.llm_utils import ContractProgress, SearchContract
 
-
 OPS = {
     "<": operator.lt,
     "<=": operator.le,
@@ -17,15 +16,21 @@ OPS = {
 }
 
 
-def update_contract_progress(progress: ContractProgress, verification: Dict[str, Any]) -> ContractProgress:
+def update_contract_progress(
+    progress: ContractProgress, verification: Dict[str, Any]
+) -> ContractProgress:
     progress.solver_actions += 1
     vid = str(verification.get("verification_id", ""))
     if vid:
         progress.verification_ids.append(vid)
     status = str(verification.get("intent_status", ""))
     blocker = str(verification.get("dominant_blocker", "none"))
-    progress.intent_status_counts[status] = progress.intent_status_counts.get(status, 0) + 1
-    progress.dominant_blocker_counts[blocker] = progress.dominant_blocker_counts.get(blocker, 0) + 1
+    progress.intent_status_counts[status] = (
+        progress.intent_status_counts.get(status, 0) + 1
+    )
+    progress.dominant_blocker_counts[blocker] = (
+        progress.dominant_blocker_counts.get(blocker, 0) + 1
+    )
     trace = verification.get("trace", {}) or {}
     progress.iters_used += int(trace.get("iters", 0) or 0)
     return progress
@@ -45,34 +50,58 @@ def check_contract_completion(
         str(last.get("action", "")) == "request_supervisor_review"
         or str(last.get("dominant_blocker", "")) == "solver_requested_review"
     ):
-        return _completion("solver_requested_review", "solver_requested_review", progress.condition_report)
+        return _completion(
+            "solver_requested_review",
+            "solver_requested_review",
+            progress.condition_report,
+        )
 
     condition_report: List[Dict[str, Any]] = []
     if progress.solver_actions >= int(policy["min_actions"]):
         success_report = _evaluate_conditions(
-            contract.exit_conditions.get("success", []), progress, verifications, solution_state or {}
+            contract.exit_conditions.get("success", []),
+            progress,
+            verifications,
+            solution_state or {},
         )
         failure_report = _evaluate_conditions(
-            contract.exit_conditions.get("failure", []), progress, verifications, solution_state or {}
+            contract.exit_conditions.get("failure", []),
+            progress,
+            verifications,
+            solution_state or {},
         )
         condition_report = success_report + failure_report
         progress.condition_report = condition_report
         for item in success_report:
             if item["passed"]:
-                return _completion("success", f"success_condition_passed:{item['condition_id']}", condition_report)
+                return _completion(
+                    "success",
+                    f"success_condition_passed:{item['condition_id']}",
+                    condition_report,
+                )
         for item in failure_report:
             if item["passed"]:
-                return _completion("failure", f"failure_condition_passed:{item['condition_id']}", condition_report)
+                return _completion(
+                    "failure",
+                    f"failure_condition_passed:{item['condition_id']}",
+                    condition_report,
+                )
     else:
         progress.condition_report = []
 
     if progress.solver_actions >= int(policy["max_actions"]):
-        return _completion("resource_exhausted", "max_actions_reached", condition_report)
+        return _completion(
+            "resource_exhausted", "max_actions_reached", condition_report
+        )
     if progress.time_used_sec >= float(policy["max_time_sec"]):
         return _completion("resource_exhausted", "max_time_reached", condition_report)
     if progress.iters_used >= int(policy["max_iters"]):
         return _completion("resource_exhausted", "max_iters_reached", condition_report)
-    reason = "min_actions_not_reached" if progress.solver_actions < int(policy["min_actions"]) else "conditions_not_met"
+    reason = (
+        "min_actions_not_reached"
+        if progress.solver_actions < int(policy["min_actions"])
+        else "conditions_not_met"
+    )
     return _completion("continue", reason, condition_report)
 
 
@@ -95,11 +124,9 @@ def resolve_condition_source(
         return _required_value(last, "intent_status", source)
     if source == "last.dominant_blocker":
         return _required_value(last, "dominant_blocker", source)
-    if source == "last.best_improved":
-        if "best_improved" in last:
-            return bool(last["best_improved"])
-        flow = ((last.get("trace", {}) or {}).get("trial_flow", {}) or {})
-        return int(flow.get("best_improved_trials", 0) or 0) > 0
+    if source == "last.improvement_flags.run_global_best_improved":
+        flags = dict(last.get("improvement_flags", {}) or {})
+        return bool(_required_value(flags, "run_global_best_improved", source))
     if source.startswith("aggregate."):
         name = source.split(".", 1)[1]
         if name == "solver_requested_review":
@@ -116,7 +143,9 @@ def resolve_condition_source(
         return bool(feasibility.get("is_feasible", summary.get("is_feasible", False)))
     quality = summary.get("quality_summary", {}) or {}
     if metric not in quality:
-        raise RuntimeError(f"condition source {source} is missing from solution summary")
+        raise RuntimeError(
+            f"condition source {source} is missing from solution summary"
+        )
     return float(quality[metric])
 
 
@@ -126,7 +155,10 @@ def _evaluate_conditions(
     verifications: List[Dict[str, Any]],
     solution_state: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    return [_evaluate_condition(item, progress, verifications, solution_state) for item in conditions]
+    return [
+        _evaluate_condition(item, progress, verifications, solution_state)
+        for item in conditions
+    ]
 
 
 def _evaluate_condition(
@@ -163,7 +195,9 @@ def _required_value(mapping: Dict[str, Any], key: str, source: str) -> Any:
     return mapping[key]
 
 
-def _completion(status: str, reason: str, condition_report: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _completion(
+    status: str, reason: str, condition_report: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     return {
         "completion_status": status,
         "completion_reason": reason,
@@ -172,4 +206,8 @@ def _completion(status: str, reason: str, condition_report: List[Dict[str, Any]]
     }
 
 
-__all__ = ["update_contract_progress", "check_contract_completion", "resolve_condition_source"]
+__all__ = [
+    "update_contract_progress",
+    "check_contract_completion",
+    "resolve_condition_source",
+]

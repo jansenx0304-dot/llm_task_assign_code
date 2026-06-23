@@ -19,7 +19,10 @@ def event_category(event_type: str) -> str:
         return "validated"
     if normalized.startswith("compiled_") or normalized == "runtime_control_manifest":
         return "compiled"
-    if normalized.startswith("solver_") or normalized in {"solver_request", "solver_result"}:
+    if normalized.startswith("solver_") or normalized in {
+        "solver_request",
+        "solver_result",
+    }:
         return "solver"
     if normalized in {"outcome_audit", "outcome_verification"}:
         return "audit"
@@ -132,7 +135,9 @@ class MarkdownTraceWriter:
 
     def append_error(self, exc: BaseException) -> None:
         self._file.write("\n---\n\n## Runtime Error\n\n```text\n")
-        self._file.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        self._file.write(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        )
         self._file.write("```\n")
         self._set_status("failed")
         self.flush()
@@ -176,7 +181,8 @@ class MarkdownTraceWriter:
             normalized.endswith("_validated_payload")
             or normalized.startswith("validated_")
             or normalized.startswith("compiled_")
-            or normalized in {
+            or normalized
+            in {
                 "initial_insertion_result",
                 "runtime_control_manifest",
                 "execution_trace",
@@ -217,7 +223,9 @@ class ConsoleTracePrinter:
         color = COLOR.get(category, "") if self.use_color else ""
         reset = RESET if self.use_color else ""
         label = self._label(event)
-        text = f"{marker + ' ' if marker else ''}{label:<28} {self._event_summary(event)}"
+        text = (
+            f"{marker + ' ' if marker else ''}{label:<28} {self._event_summary(event)}"
+        )
         print(self._sanitize(color + text + reset), flush=True)
 
     def print_final(self, summary: Dict[str, Any]) -> None:
@@ -247,7 +255,12 @@ class ConsoleTracePrinter:
             step = int(event["step_index"])
             if event_type.startswith("solver_"):
                 return f"SOLVER {step:03d}"
-            if event_type in {"solver_request", "solver_result", "outcome_audit", "contract_completion_check"}:
+            if event_type in {
+                "solver_request",
+                "solver_result",
+                "outcome_audit",
+                "contract_completion_check",
+            }:
                 return f"{event_type.upper()} {step:03d}"
         if event.get("contract_id") is not None:
             return f"{event_type.upper()} {event['contract_id']}"
@@ -285,7 +298,11 @@ class ConsoleTracePrinter:
         if event_type in {"outcome_audit", "outcome_verification"}:
             if isinstance(payload, dict) and "intent_status" in payload:
                 return f"status={payload.get('intent_status')} blocker={payload.get('dominant_blocker')}"
-            return f"events={payload.get('events', [])}" if isinstance(payload, dict) else "audit recorded"
+            return (
+                f"events={payload.get('events', [])}"
+                if isinstance(payload, dict)
+                else "audit recorded"
+            )
         if event_type == "contract_completion_check":
             if isinstance(payload, dict):
                 return f"completed={payload.get('completed')} reason={payload.get('completion_reason')}"
@@ -312,7 +329,10 @@ class ConsoleTracePrinter:
             return "validated"
         if event_type == "solver_validated_payload":
             return f"action={(payload.get('solver_decision') or {}).get('action', 'unknown')}"
-        if event_type in {"supervisor_kickoff_validated_payload", "supervisor_review_validated_payload"}:
+        if event_type in {
+            "supervisor_kickoff_validated_payload",
+            "supervisor_review_validated_payload",
+        }:
             return f"action={(payload.get('supervisor_decision') or {}).get('action', 'unknown')}"
         return "validated"
 
@@ -320,7 +340,11 @@ class ConsoleTracePrinter:
         if not isinstance(payload, dict):
             return "contract compiled"
         policy = payload.get("resource_policy", {}) or {}
-        objective = [item.get("metric") for item in payload.get("objective_layers", []) if isinstance(item, dict)]
+        objective = [
+            item.get("metric")
+            for item in payload.get("objective_layers", [])
+            if isinstance(item, dict)
+        ]
         return (
             f"type={payload.get('contract_type')} objective={objective} "
             f"actions={policy.get('min_actions')}..{policy.get('max_actions')}"
@@ -334,7 +358,9 @@ class ConsoleTracePrinter:
         target = payload.get("target_id")
         if action == "run_alns":
             destroy = (compiled.get("destroy", {}) or {}).get("operator_weights", {})
-            insertion = (compiled.get("insertion", {}) or {}).get("operator_weights", {})
+            insertion = (compiled.get("insertion", {}) or {}).get(
+                "operator_weights", {}
+            )
             return f"action={action} target={target} destroy={self._format_operator_weights(destroy)} insertion={self._format_operator_weights(insertion)}"
         return f"action={action} target={target}"
 
@@ -343,8 +369,10 @@ class ConsoleTracePrinter:
             return "execution trace recorded"
         flow = payload.get("trial_flow", {}) or {}
         if flow:
-            return f"trials={flow.get('candidate_trials')} accepted={flow.get('accepted_trials')} best={flow.get('best_improved_trials')}"
-        return f"kind={payload.get('kind')} inserted={payload.get('inserted_task_count')}"
+            return f"trials={flow.get('candidate_trials')} accepted={flow.get('accepted_trials')} global_best_updates={flow.get('global_best_improved_trials')}"
+        return (
+            f"kind={payload.get('kind')} inserted={payload.get('inserted_task_count')}"
+        )
 
     def _compiled_solver_summary(self, payload: Any) -> str:
         if not isinstance(payload, dict):
@@ -368,7 +396,9 @@ class ConsoleTracePrinter:
         return f"time={payload.get('time_limit_sec')}s iters={payload.get('max_iters')}"
 
     def _solver_result_summary(self, payload: Any) -> str:
-        diagnostics = payload.get("diagnostics", {}) if isinstance(payload, dict) else {}
+        diagnostics = (
+            payload.get("diagnostics", {}) if isinstance(payload, dict) else {}
+        )
         return (
             f"accepted={diagnostics.get('accepted_trial_count')} "
             f"rejected={diagnostics.get('rejected_trial_count')} "
@@ -387,21 +417,29 @@ class ConsoleTracePrinter:
     def _format_operator_weights(self, weights: Any) -> str:
         if not isinstance(weights, dict) or not weights:
             return "unknown"
-        ordered = sorted(weights.items(), key=lambda item: (-float(item[1]), str(item[0])))
+        ordered = sorted(
+            weights.items(), key=lambda item: (-float(item[1]), str(item[0]))
+        )
         return "[" + ", ".join(f"{name}:{weight}" for name, weight in ordered) + "]"
 
     def _format_operator_scores(self, scores: Any) -> str:
         if not isinstance(scores, list) or not scores:
             return "[]"
-        return "[" + ", ".join(
-            f"{item.get('name')}:{item.get('score')}"
-            for item in scores
-            if isinstance(item, dict)
-        ) + "]"
+        return (
+            "["
+            + ", ".join(
+                f"{item.get('name')}:{item.get('score')}"
+                for item in scores
+                if isinstance(item, dict)
+            )
+            + "]"
+        )
 
     def _sanitize(self, text: str) -> str:
         encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
-        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        return text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
 
 
 class RunReporter:
@@ -430,4 +468,9 @@ class RunReporter:
         self.markdown.close()
 
 
-__all__ = ["ConsoleTracePrinter", "MarkdownTraceWriter", "RunReporter", "event_category"]
+__all__ = [
+    "ConsoleTracePrinter",
+    "MarkdownTraceWriter",
+    "RunReporter",
+    "event_category",
+]

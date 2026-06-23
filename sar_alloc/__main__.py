@@ -10,6 +10,5 @@ The actual command-line logic is kept in runner.py.
 
 from .runner import main
 
-
 if __name__ == "__main__":
     main()
