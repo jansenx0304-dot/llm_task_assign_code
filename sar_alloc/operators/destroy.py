@@ -346,7 +346,7 @@ def build_destroy_landscape(
             "available": bool(top is not None),
             "candidate_count_preview": int(len(moves)),
             "top_pattern": "none" if top is None else _top_pattern(top.features),
-            "top_feature_levels": {} if top is None else _feature_levels(top.features),
+            "top_signal_levels": {} if top is None else _public_destroy_signal_levels(top.features),
         }
 
     return {
@@ -764,6 +764,16 @@ def _pairs(values: Sequence[int]) -> Iterable[Tuple[int, int]]:
 
 def _feature_levels(features: LandscapeFeatures) -> Dict[str, str]:
     return {name: _normalized_level(float(getattr(features, name))) for name in LANDSCAPE_METRIC_FIELDS}
+
+
+def _public_destroy_signal_levels(features: LandscapeFeatures) -> Dict[str, str]:
+    return {
+        "cost_pressure": _normalized_level(features.cost_pressure),
+        "coupling_pressure": _normalized_level(features.coupling_pressure),
+        "route_balance_pressure": _normalized_level(features.route_balance_pressure),
+        "mobility_opportunity": _normalized_level(features.mobility_opportunity),
+        "scarcity_protection": _normalized_level(features.scarcity_pressure),
+    }
 
 
 def _top_pattern(features: LandscapeFeatures) -> str:

@@ -6,5 +6,3 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-runs/
-sar_alloc/data/runs/

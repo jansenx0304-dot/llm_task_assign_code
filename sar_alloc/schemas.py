@@ -6,15 +6,8 @@ import json
 from copy import deepcopy
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from .control_surface import QUALITY_METRICS
 
-QUALITY_METRICS = (
-    "missed_priority",
-    "unassigned_count",
-    "energy_total",
-    "total_distance",
-    "makespan",
-    "route_balance",
-)
 CONSTRAINT_METRICS = (
     "violation_total",
     "violation_capability",
@@ -398,7 +391,7 @@ SUPERVISOR_REVIEW_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
 }
 
-SOLVER_DECISION_SCHEMA: Dict[str, Any] = {
+_SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
     "type": "object",
     "description": "One Solver decision under the active supervisor contract.",
     "properties": {
@@ -500,7 +493,7 @@ def solver_decision_schema_for_candidates(candidates: Any, observation: Optional
         "Acceptance mode allowed for the current action space.",
     )
 
-    schema = deepcopy(SOLVER_DECISION_SCHEMA)
+    schema = deepcopy(_SOLVER_DECISION_SCHEMA_TEMPLATE)
     branches = schema["properties"]["solver_decision"]["oneOf"]
     allowed_actions = None
     if isinstance(action_space, Mapping) and "allowed_actions" in action_space:
@@ -528,6 +521,11 @@ def solver_decision_schema_for_candidates(candidates: Any, observation: Optional
         if "acceptance_control" in properties:
             properties["acceptance_control"] = deepcopy(acceptance)
     return schema
+
+
+# Compatibility export only. Runtime Solver calls must use
+# solver_decision_schema_for_candidates().
+SOLVER_DECISION_SCHEMA = deepcopy(_SOLVER_DECISION_SCHEMA_TEMPLATE)
 
 
 def schema_text(schema: Dict[str, Any]) -> str:

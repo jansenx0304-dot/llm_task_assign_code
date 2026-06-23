@@ -59,13 +59,23 @@ def demo_supervisor_review(observation: Optional[Dict[str, Any]] = None, *, stop
 
 
 def demo_solver_decision(observation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    action_space = (observation or {}).get("action_space", {}) or {}
+    allowed_actions = [str(value) for value in action_space.get("allowed_actions", [])]
+    if allowed_actions == ["request_supervisor_review"]:
+        return {
+            "solver_decision": {
+                "action": "request_supervisor_review",
+                "target_id": _review_target(observation),
+                "explanation": {"reason_summary": "No executable search action is available."},
+            }
+        }
     contract = (observation or {}).get("contract_view", {}) or (observation or {}).get("active_contract", {}) or {}
     if contract.get("contract_type") == "initial_construction":
         return {
             "solver_decision": {
                 "action": "construct_initial",
                 "target_id": _first_target(observation, "T_unassigned_priority"),
-                "insertion_control": _insertion_control(),
+                "insertion_control": _insertion_control(action_space),
                 "explanation": {"reason_summary": "Use priority and scarcity aware construction."},
             }
         }
@@ -74,12 +84,19 @@ def demo_solver_decision(observation: Optional[Dict[str, Any]] = None) -> Dict[s
             "action": "run_alns",
             "target_id": _first_target(observation, "T_unassigned_priority"),
             "destroy_control": {
-                "operator_scores": [{"name": "related_cluster_removal", "score": 8}],
-                "signal_scores": [{"name": "coupling_pressure", "score": 8}],
+                "operator_scores": _preferred_scores(
+                    action_space, "allowed_destroy_operators", ["related_cluster_removal"], 8
+                ),
+                "signal_scores": _preferred_scores(
+                    action_space, "allowed_destroy_signals", ["coupling_pressure"], 8
+                ),
                 "intensity_score": 5,
             },
-            "insertion_control": _insertion_control(),
-            "acceptance_control": {"mode": "threshold", "intensity_score": 4},
+            "insertion_control": _insertion_control(action_space),
+            "acceptance_control": {
+                "mode": _preferred_name(action_space, "allowed_acceptance_modes", "threshold"),
+                "intensity_score": 4,
+            },
             "explanation": {"reason_summary": "Run one bounded local rebuild."},
         }
     }
@@ -114,21 +131,38 @@ def _contract(
     }
 
 
-def _insertion_control() -> Dict[str, Any]:
+def _insertion_control(action_space: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "operator_scores": [
-            {"name": "scarcity_first_insertion", "score": 8},
-            {"name": "regret_insertion", "score": 7},
-        ],
-        "task_signal_scores": [
-            {"name": "priority_loss", "score": 9},
-            {"name": "scarcity_pressure", "score": 8},
-        ],
-        "position_signal_scores": [
-            {"name": "insert_cost", "score": 8},
-            {"name": "future_slack", "score": 7},
-        ],
+        "operator_scores": _preferred_scores(
+            action_space, "allowed_insertion_operators",
+            ["scarcity_first_insertion", "regret_insertion"], 8,
+        ),
+        "task_signal_scores": _preferred_scores(
+            action_space, "allowed_task_signals", ["priority_loss", "scarcity_pressure"], 9,
+        ),
+        "position_signal_scores": _preferred_scores(
+            action_space, "allowed_position_signals", ["insert_cost", "future_slack"], 8,
+        ),
     }
+
+
+def _preferred_scores(
+    action_space: Dict[str, Any], key: str, preferred: list[str], score: int
+) -> list[Dict[str, Any]]:
+    allowed = [str(value) for value in action_space.get(key, [])]
+    selected = [name for name in preferred if name in allowed]
+    if not selected and allowed:
+        selected = allowed[:1]
+    return [{"name": name, "score": max(0, int(score) - index)} for index, name in enumerate(selected[:3])]
+
+
+def _preferred_name(action_space: Dict[str, Any], key: str, preferred: str) -> str:
+    allowed = [str(value) for value in action_space.get(key, [])]
+    if preferred in allowed:
+        return preferred
+    if allowed:
+        return allowed[0]
+    raise ValueError(f"demo policy requires at least one candidate in action_space.{key}")
 
 
 def _contract_review(summary: str) -> Dict[str, str]:
@@ -162,6 +196,13 @@ def _first_target(observation: Optional[Dict[str, Any]], fallback: str) -> str:
         if isinstance(item, dict) and item.get("kind") != "contract_review":
             return str(item.get("target_id", fallback))
     return fallback
+
+
+def _review_target(observation: Optional[Dict[str, Any]]) -> str:
+    for item in (observation or {}).get("decision_targets", []) or []:
+        if isinstance(item, dict) and item.get("kind") == "contract_review":
+            return str(item.get("target_id", "contract_review"))
+    return "contract_review"
 
 
 def _cap_time(remaining: Dict[str, float], desired: float) -> float:

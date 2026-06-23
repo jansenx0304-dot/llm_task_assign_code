@@ -497,15 +497,53 @@ def _call_validated(
         _trace(state, f"{role}_raw_output", raw, step_index, contract_id, payload_type="text")
         parsed = _parse_json(raw, role)
         validator(parsed)
-    except Exception as exc:
-        if not allow_fallback:
-            raise LLMOutputError(f"{role} output failed validation: {exc}") from exc
-        parsed = fallback_factory(observation)
-        validator(parsed)
-        state.llm_fallback_used = True
-        _trace(state, f"{role}_fallback", {"reason": str(exc), "payload": parsed}, step_index, contract_id)
+    except Exception as first_exc:
+        repair_exc: Optional[Exception] = None
+        if raw:
+            try:
+                repair_prompt = _repair_prompt(prompt, raw, first_exc)
+                _trace(state, f"{role}_repair_prompt", repair_prompt, step_index, contract_id, payload_type="text")
+                repaired_raw = client.chat(
+                    [{"role": "system", "content": get_system_prompt()}, {"role": "user", "content": repair_prompt}],
+                    temperature=0.0,
+                )
+                _trace(state, f"{role}_repair_raw_output", repaired_raw, step_index, contract_id, payload_type="text")
+                parsed = _parse_json(repaired_raw, f"{role}_repair")
+                validator(parsed)
+                _trace(state, f"{role}_repair_validated_payload", parsed, step_index, contract_id)
+            except Exception as exc:
+                repair_exc = exc
+                _trace(
+                    state,
+                    f"{role}_repair_failed",
+                    {"first_error": str(first_exc), "repair_error": str(exc)},
+                    step_index,
+                    contract_id,
+                )
+        else:
+            repair_exc = first_exc
+
+        if repair_exc is not None:
+            reason = f"first attempt: {first_exc}; repair attempt: {repair_exc}"
+            if not allow_fallback:
+                raise LLMOutputError(f"{role} output failed validation after repair: {reason}") from repair_exc
+            parsed = fallback_factory(observation)
+            validator(parsed)
+            state.llm_fallback_used = True
+            _trace(state, f"{role}_fallback", {"reason": reason, "payload": parsed}, step_index, contract_id)
     _trace(state, f"{role}_validated_payload", parsed, step_index, contract_id)
     return parsed
+
+
+def _repair_prompt(original_prompt: str, original_raw: str, validation_error: Exception) -> str:
+    return (
+        f"{original_prompt}\n\n"
+        "REPAIR REQUEST:\n"
+        "Your previous JSON failed parsing or validation. Return one corrected JSON object only. "
+        "Keep the same observation and obey the exact output schema above.\n"
+        f"VALIDATION ERROR:\n{validation_error}\n\n"
+        f"PREVIOUS OUTPUT:\n{original_raw}"
+    )
 
 
 def _parse_json(raw: str, role: str) -> Dict[str, Any]:

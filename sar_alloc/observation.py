@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence
 
+from .control_surface import FIELD_CANDIDATES
 from .llm_public_interface import PublicCandidates
 from .models import Agent, Instance, Task
 
@@ -205,16 +206,22 @@ def _task_buildability_view(working_summary: Dict[str, Any], landscape: Dict[str
                 "kind": "unassigned_priority",
                 "task_count": unassigned,
                 "priority_mass": missed,
-                "recommended_control_axis": ["task_order", "position_choice"],
-                "usable_signals": ["priority_loss", "scarcity_pressure", "future_slack"],
+                "recommended_controls": {
+                    "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
+                    "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
+                    "destroy_control.signal_scores": ["mobility_opportunity", "scarcity_protection"],
+                },
             },
             {
                 "target_id": "T_scarce_unassigned",
                 "kind": "scarce_unassigned",
                 "task_count": int(task_pressure.get("skill_scarce_unassigned", 0) or 0),
                 "priority_mass": missed,
-                "recommended_control_axis": ["task_order"],
-                "usable_signals": ["scarcity_pressure", "priority_loss"],
+                "recommended_controls": {
+                    "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
+                    "insertion_control.position_signal_scores": ["future_slack"],
+                    "destroy_control.signal_scores": ["scarcity_protection", "mobility_opportunity"],
+                },
             },
         ],
         "zero_capable_task_count": int(task_pressure.get("zero_capable_task_count", 0) or 0),
@@ -240,7 +247,8 @@ def _insertion_position_landscape(landscape: Dict[str, Any]) -> Dict[str, Any]:
 
 def _initial_targets(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
     targets = list(_task_buildability_view(working_summary, landscape)["target_buckets"])
-    targets.append({"target_id": "contract_review", "kind": "contract_review", "recommended_control_axis": []})
+    targets.append({"target_id": "contract_review", "kind": "contract_review", "recommended_controls": {}})
+    _validate_recommended_controls(targets)
     return targets
 
 
@@ -260,16 +268,22 @@ def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any],
                     "missed_priority": float(quality.get("missed_priority", 0.0) or 0.0),
                     "unassigned_count": float(quality.get("unassigned_count", 0.0) or 0.0),
                 },
-                "recommended_control_axis": ["insertion_task", "insertion_position"],
-                "usable_signals": ["priority_loss", "scarcity_pressure", "future_slack"],
+                "recommended_controls": {
+                    "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
+                    "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
+                    "destroy_control.signal_scores": ["mobility_opportunity", "scarcity_protection"],
+                },
             })
         elif kind == "scarce_unassigned":
             out.append({
                 "target_id": "T_scarce_unassigned",
                 "kind": kind,
                 "metric_pressure": {"count": int((landscape.get("task_pressure", {}) or {}).get("skill_scarce_unassigned", 0) or 0)},
-                "recommended_control_axis": ["insertion_task"],
-                "usable_signals": ["scarcity_pressure", "priority_loss"],
+                "recommended_controls": {
+                    "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
+                    "insertion_control.position_signal_scores": ["future_slack"],
+                    "destroy_control.signal_scores": ["scarcity_protection", "mobility_opportunity"],
+                },
             })
         elif kind == "time_window_debt":
             out.append(_debt_target("T_time_window_debt", kind, "time_window", feasibility))
@@ -278,12 +292,15 @@ def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any],
                 "target_id": "T_route_balance",
                 "kind": kind,
                 "metric_pressure": {"route_balance": float(quality.get("route_balance", 0.0) or 0.0)},
-                "recommended_control_axis": ["destroy", "position"],
-                "usable_signals": ["route_balance_pressure", "route_balance_gain"],
+                "recommended_controls": {
+                    "destroy_control.signal_scores": ["route_balance_pressure"],
+                    "insertion_control.position_signal_scores": ["route_balance_gain"],
+                },
             })
         else:
             out.append(_debt_target("T_energy_debt", "energy_debt", "energy", feasibility))
-    out.append({"target_id": "contract_review", "kind": "contract_review", "recommended_control_axis": []})
+    out.append({"target_id": "contract_review", "kind": "contract_review", "recommended_controls": {}})
+    _validate_recommended_controls(out)
     return out
 
 
@@ -293,9 +310,32 @@ def _debt_target(target_id: str, kind: str, debt_type: str, feasibility: Dict[st
         "target_id": target_id,
         "kind": kind,
         "metric_pressure": {f"{debt_type}_ratio": float(ratios.get(debt_type, 0.0) or 0.0)},
-        "recommended_control_axis": ["destroy", "position", "acceptance"],
-        "usable_signals": ["cost_pressure", "future_slack", "threshold"],
+        "recommended_controls": {
+            "destroy_control.signal_scores": ["cost_pressure", "mobility_opportunity"],
+            "insertion_control.position_signal_scores": (
+                ["future_slack", "local_coupling_penalty"]
+                if debt_type == "time_window" else ["insert_cost", "future_slack"]
+            ),
+            "acceptance_control.mode": ["threshold"],
+        },
     }
+
+
+def _validate_recommended_controls(targets: List[Dict[str, Any]]) -> None:
+    for target in targets:
+        controls = target.get("recommended_controls", {})
+        if not isinstance(controls, dict):
+            raise ValueError(f"{target.get('target_id')}.recommended_controls must be an object")
+        for field_path, names in controls.items():
+            if field_path not in FIELD_CANDIDATES:
+                raise ValueError(f"unknown recommended control field: {field_path}")
+            allowed = set(FIELD_CANDIDATES[field_path])
+            for name in names:
+                if name not in allowed:
+                    raise ValueError(
+                        f"{target.get('target_id')}.recommended_controls[{field_path}] "
+                        f"contains invalid candidate {name}; allowed={sorted(allowed)}"
+                    )
 
 
 def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
