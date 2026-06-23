@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 
 QUALITY_METRICS = (
@@ -91,6 +91,44 @@ def _score_array(description: str) -> Dict[str, Any]:
         "minItems": 0,
         "maxItems": 3,
         "items": deepcopy(SPARSE_SCORE_ITEM_SCHEMA),
+    }
+
+
+def _enum_string(names: Iterable[str], description: str) -> Dict[str, Any]:
+    """Return a string schema restricted to the supplied candidate names."""
+    return {
+        "type": "string",
+        "enum": list(dict.fromkeys(str(name) for name in names)),
+        "description": description,
+    }
+
+
+def _score_item_schema(names: Iterable[str], description: str) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "name": _enum_string(names, "Candidate name allowed for this exact score field."),
+            "score": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "Executable emphasis score from 0 to 10.",
+            },
+        },
+        "required": ["name", "score"],
+        "additionalProperties": False,
+    }
+
+
+def _score_array_for(names: Iterable[str], description: str, max_items: int = 3) -> Dict[str, Any]:
+    names = tuple(names)
+    return {
+        "type": "array",
+        "description": description,
+        "minItems": 0,
+        "maxItems": max_items,
+        "items": _score_item_schema(names, description),
     }
 
 
@@ -414,6 +452,84 @@ SOLVER_DECISION_SCHEMA: Dict[str, Any] = {
 }
 
 
+def solver_decision_schema_for_candidates(candidates: Any, observation: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Build a Solver schema whose executable fields use their own candidate enums."""
+    action_space = observation.get("action_space") if isinstance(observation, Mapping) else None
+
+    def allowed(action_key: str, candidate_key: str) -> tuple[str, ...]:
+        if isinstance(action_space, Mapping) and action_key in action_space:
+            values = action_space.get(action_key) or []
+            return tuple(dict.fromkeys(str(value) for value in values))
+        if candidates is not None and hasattr(candidates, "names"):
+            return tuple(dict.fromkeys(str(value) for value in candidates.names(candidate_key)))
+        if isinstance(candidates, Mapping):
+            values = candidates.get(candidate_key) or []
+            return tuple(dict.fromkeys(
+                str(value.get("name")) if isinstance(value, Mapping) else str(value)
+                for value in values
+            ))
+        return ()
+
+    insertion = deepcopy(INSERTION_CONTROL_SCHEMA)
+    insertion["properties"]["operator_scores"] = _score_array_for(
+        allowed("allowed_insertion_operators", "insertion_operator_candidates"),
+        "Sparse emphasis scores for insertion operators.",
+    )
+    insertion["properties"]["task_signal_scores"] = _score_array_for(
+        allowed("allowed_task_signals", "insertion_task_signal_candidates"),
+        "Sparse emphasis scores for choosing the next task.",
+    )
+    insertion["properties"]["position_signal_scores"] = _score_array_for(
+        allowed("allowed_position_signals", "insertion_position_signal_candidates"),
+        "Sparse emphasis scores for choosing an insertion position.",
+    )
+
+    destroy = deepcopy(DESTROY_CONTROL_SCHEMA)
+    destroy["properties"]["operator_scores"] = _score_array_for(
+        allowed("allowed_destroy_operators", "destroy_operator_candidates"),
+        "Sparse emphasis scores for destroy operators.",
+    )
+    destroy["properties"]["signal_scores"] = _score_array_for(
+        allowed("allowed_destroy_signals", "destroy_signal_candidates"),
+        "Sparse emphasis scores for destroy signals.",
+    )
+
+    acceptance = deepcopy(ACCEPTANCE_CONTROL_SCHEMA)
+    acceptance["properties"]["mode"] = _enum_string(
+        allowed("allowed_acceptance_modes", "acceptance_candidates"),
+        "Acceptance mode allowed for the current action space.",
+    )
+
+    schema = deepcopy(SOLVER_DECISION_SCHEMA)
+    branches = schema["properties"]["solver_decision"]["oneOf"]
+    allowed_actions = None
+    if isinstance(action_space, Mapping) and "allowed_actions" in action_space:
+        allowed_actions = {str(value) for value in (action_space.get("allowed_actions") or [])}
+        branches[:] = [
+            branch for branch in branches
+            if branch["properties"]["action"].get("const") in allowed_actions
+        ]
+
+    target_ids = []
+    if isinstance(observation, Mapping):
+        target_ids = [
+            str(item["target_id"])
+            for item in (observation.get("decision_targets") or [])
+            if isinstance(item, Mapping) and item.get("target_id") is not None
+        ]
+    for branch in branches:
+        properties = branch["properties"]
+        if target_ids:
+            properties["target_id"] = _enum_string(target_ids, "Target id from current decision_targets.")
+        if "insertion_control" in properties:
+            properties["insertion_control"] = deepcopy(insertion)
+        if "destroy_control" in properties:
+            properties["destroy_control"] = deepcopy(destroy)
+        if "acceptance_control" in properties:
+            properties["acceptance_control"] = deepcopy(acceptance)
+    return schema
+
+
 def schema_text(schema: Dict[str, Any]) -> str:
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
@@ -462,6 +578,7 @@ __all__ = [
     "SOLVER_DECISION_SCHEMA",
     "CONTRACT_SCHEMA",
     "schema_text",
+    "solver_decision_schema_for_candidates",
     "supervisor_kickoff_schema_for_limits",
     "supervisor_review_schema_for_limits",
 ]

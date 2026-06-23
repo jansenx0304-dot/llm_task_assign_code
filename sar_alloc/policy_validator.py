@@ -52,7 +52,10 @@ def validate_sparse_score_items(
         _exact(item, {"name", "score"}, f"{field_name}[{index}]")
         name = _string(item, "name", f"{field_name}[{index}]")
         if name not in allowed:
-            raise ValueError(f"{field_name}[{index}].name is not allowed: {name}")
+            raise ValueError(
+                f"{field_name}[{index}].name is not allowed: {name}. "
+                f"allowed={sorted(allowed)}"
+            )
         if name in seen:
             raise ValueError(f"duplicate name in {field_name}: {name}")
         seen.add(name)

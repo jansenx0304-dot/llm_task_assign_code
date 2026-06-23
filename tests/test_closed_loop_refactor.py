@@ -19,7 +19,12 @@ from sar_alloc.observation import (
 )
 from sar_alloc.outcome_auditor import verify_alns_action, verify_initial_construction
 from sar_alloc.policy_validator import validate_solver_decision, validate_supervisor_kickoff, validate_supervisor_review
-from sar_alloc.schemas import SOLVER_DECISION_SCHEMA, SUPERVISOR_KICKOFF_SCHEMA, SUPERVISOR_REVIEW_SCHEMA
+from sar_alloc.schemas import (
+    SOLVER_DECISION_SCHEMA,
+    SUPERVISOR_KICKOFF_SCHEMA,
+    SUPERVISOR_REVIEW_SCHEMA,
+    solver_decision_schema_for_candidates,
+)
 from sar_alloc.tools import (
     ContractProgress,
     SearchContract,
@@ -113,6 +118,69 @@ class ClosedLoopRefactorTests(unittest.TestCase):
 
         for schema in (SUPERVISOR_KICKOFF_SCHEMA, SUPERVISOR_REVIEW_SCHEMA, SOLVER_DECISION_SCHEMA):
             walk(schema)
+
+    def test_solver_schema_separates_field_candidate_enums(self) -> None:
+        observation = {
+            "action_space": {
+                "allowed_actions": ["run_alns"],
+                "allowed_insertion_operators": list(self.candidates.names("insertion_operator_candidates")),
+                "allowed_task_signals": list(self.candidates.names("insertion_task_signal_candidates")),
+                "allowed_position_signals": list(self.candidates.names("insertion_position_signal_candidates")),
+                "allowed_destroy_operators": list(self.candidates.names("destroy_operator_candidates")),
+                "allowed_destroy_signals": list(self.candidates.names("destroy_signal_candidates")),
+                "allowed_acceptance_modes": list(self.candidates.names("acceptance_candidates")),
+            },
+            "decision_targets": [{"target_id": "T1"}],
+        }
+        schema = solver_decision_schema_for_candidates(self.candidates, observation)
+        branches = schema["properties"]["solver_decision"]["oneOf"]
+        self.assertEqual(len(branches), 1)
+        properties = branches[0]["properties"]
+        task_names = properties["insertion_control"]["properties"]["task_signal_scores"]["items"]["properties"]["name"]["enum"]
+        destroy_names = properties["destroy_control"]["properties"]["signal_scores"]["items"]["properties"]["name"]["enum"]
+        self.assertIn("priority_loss", task_names)
+        self.assertNotIn("priority_loss", destroy_names)
+        self.assertEqual(properties["target_id"]["enum"], ["T1"])
+
+    def test_validator_rejects_cross_field_signal_and_accepts_correct_field(self) -> None:
+        action_space = {
+            "allowed_actions": ["run_alns"],
+            "allowed_insertion_operators": list(self.candidates.names("insertion_operator_candidates")),
+            "allowed_task_signals": list(self.candidates.names("insertion_task_signal_candidates")),
+            "allowed_position_signals": list(self.candidates.names("insertion_position_signal_candidates")),
+            "allowed_destroy_operators": list(self.candidates.names("destroy_operator_candidates")),
+            "allowed_destroy_signals": list(self.candidates.names("destroy_signal_candidates")),
+            "allowed_acceptance_modes": list(self.candidates.names("acceptance_candidates")),
+        }
+        observation = {
+            "action_space": action_space,
+            "decision_targets": [{"target_id": "T1"}],
+            "contract_view": {"contract_type": "alns_search"},
+        }
+        decision = {
+            "solver_decision": {
+                "action": "run_alns",
+                "target_id": "T1",
+                "destroy_control": {
+                    "operator_scores": [],
+                    "signal_scores": [{"name": "priority_loss", "score": 8}],
+                    "intensity_score": 5,
+                },
+                "insertion_control": {
+                    "operator_scores": [],
+                    "task_signal_scores": [],
+                    "position_signal_scores": [],
+                },
+                "acceptance_control": {"mode": "greedy", "intensity_score": 5},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "priority_loss"):
+            validate_solver_decision(decision, observation, candidates=self.candidates)
+        decision["solver_decision"]["destroy_control"]["signal_scores"] = []
+        decision["solver_decision"]["insertion_control"]["task_signal_scores"] = [
+            {"name": "priority_loss", "score": 8}
+        ]
+        validate_solver_decision(decision, observation, candidates=self.candidates)
 
     def test_observation_minimality(self) -> None:
         kickoff = build_supervisor_kickoff_observation(

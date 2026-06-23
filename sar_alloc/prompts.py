@@ -46,7 +46,10 @@ def get_solver_prompt(*, user_goal_text: str, observation: Dict[str, Any], json_
         (
             "Choose one allowed action. If executing a solver action, choose one target_id "
             "from decision_targets and choose controls only from action_space. Every "
-            "operational field will be compiled and executed exactly."
+            "operational field will be compiled and executed exactly. Each score name "
+            "must be selected from the enum of that exact output field. Do not move names "
+            "between destroy operator, destroy signal, insertion operator, task signal, "
+            "and position signal fields."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,

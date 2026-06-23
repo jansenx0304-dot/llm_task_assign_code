@@ -28,8 +28,8 @@ from .policy_validator import (
 )
 from .prompts import get_solver_prompt, get_supervisor_kickoff_prompt, get_supervisor_review_prompt, get_system_prompt
 from .schemas import (
-    SOLVER_DECISION_SCHEMA,
     schema_text,
+    solver_decision_schema_for_candidates,
     supervisor_kickoff_schema_for_limits,
     supervisor_review_schema_for_limits,
 )
@@ -207,10 +207,11 @@ def run_orchestrator(
             step_index=solver_action_index,
         )
         state.memory.record_observation(solver_observation)
+        solver_schema = solver_decision_schema_for_candidates(candidates, solver_observation)
         solver_prompt = get_solver_prompt(
             user_goal_text=user_goal_text,
             observation=solver_observation,
-            json_schema=schema_text(SOLVER_DECISION_SCHEMA),
+            json_schema=schema_text(solver_schema),
         )
         solver_payload = _call_validated(
             client,
