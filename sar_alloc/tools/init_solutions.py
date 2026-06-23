@@ -26,7 +26,6 @@ def build_initial_solution_with_insertion(
     rng_seed: int = 0,
     manifest: Optional[Dict[str, Any]] = None,
 ) -> InitialConstructionResult:
-    del manifest
     empty_solution = AssignmentSolution.empty_from_instance(instance, put_all_unassigned=False)
     solution = run_insertion_kernel(
         partial_solution=empty_solution,
@@ -39,15 +38,15 @@ def build_initial_solution_with_insertion(
     )
     solution.normalize(instance)
     evaluation = evaluate(solution, instance, config, update_solution_schedule=True)
-    trace = _initial_trace(solution, instance)
+    trace = _initial_trace(solution, instance, str((manifest or {}).get("trace_id", "X_initial")))
     print(
         f"[INITIAL INSERTION] assigned={len(solution.all_assigned_tasks())} "
-        f"unassigned={len(solution.unassigned)} lex_key={list(evaluation.lex_key or ())}"
+        f"unassigned={len(solution.unassigned)}"
     )
     return InitialConstructionResult(solution=solution, evaluation=evaluation, trace=trace)
 
 
-def _initial_trace(solution: AssignmentSolution, instance: Instance) -> Dict[str, Any]:
+def _initial_trace(solution: AssignmentSolution, instance: Instance, trace_id: str) -> Dict[str, Any]:
     diagnostics = dict((solution.solver_diagnostics or {}).get("last_insertion", {}) or {})
     candidate_count = len(instance.all_task_ids())
     failure_breakdown = dict(diagnostics.get("failure_breakdown", {}) or {})
@@ -57,7 +56,7 @@ def _initial_trace(solution: AssignmentSolution, instance: Instance) -> Dict[str
     if failure_breakdown:
         dominant = max(failure_breakdown.items(), key=lambda item: int(item[1]))[0]
     return {
-        "trace_id": "",
+        "trace_id": trace_id,
         "kind": "initial_insertion",
         "candidate_task_count": int(candidate_count),
         "attempted_task_count": int(diagnostics.get("tasks_analyzed", candidate_count) or 0),

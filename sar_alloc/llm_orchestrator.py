@@ -227,6 +227,7 @@ def run_orchestrator(
         )
         budgets.step_calls += 1
         decision_id = state.memory.record_decision(solver_payload, solver_observation)
+        trace_id = f"X{solver_action_index + 1}"
         manifest = compile_solver_control(
             solver_payload,
             contract,
@@ -234,13 +235,14 @@ def run_orchestrator(
             solver_observation,
             decision_id=decision_id,
             manifest_id=f"R{solver_action_index + 1}",
+            trace_id=trace_id,
         )
         _trace(state, "runtime_control_manifest", manifest.as_dict(), solver_action_index, contract.contract_id)
         decision = solver_payload["solver_decision"]
         action = decision["action"]
 
         if action == "request_supervisor_review":
-            trace = {"trace_id": "", "kind": "review_request"}
+            trace = {"trace_id": trace_id, "kind": "review_request"}
             verification = verify_review_request(
                 solver_payload,
                 contract,
@@ -248,6 +250,7 @@ def run_orchestrator(
                 manifest=manifest,
                 decision_id=decision_id,
                 verification_id=f"V{solver_action_index + 1}",
+                trace_id=trace_id,
             )
         elif action == "construct_initial":
             trace, verification = _execute_initial_action(
@@ -260,6 +263,7 @@ def run_orchestrator(
                 solver_action_index,
                 contract,
                 decision_id,
+                trace_id,
             )
         elif action == "run_alns":
             trace, verification = _execute_alns_action(
@@ -272,6 +276,7 @@ def run_orchestrator(
                 solver_action_index,
                 contract,
                 decision_id,
+                trace_id,
             )
         else:
             raise OrchestratorError(f"unsupported solver action: {action}")
@@ -286,7 +291,7 @@ def run_orchestrator(
             contract,
             progress,
             state.memory.recent_verifications(contract.contract_id, limit=20),
-            budgets.as_dict(),
+            {"working": _working_summary(state, instance, cfg), "best_feasible": _best_summary(state, instance, cfg)},
         )
         _trace(state, "contract_progress", progress.as_dict(), solver_action_index, contract.contract_id)
         _trace(state, "contract_completion_check", completion, solver_action_index, contract.contract_id)
@@ -321,7 +326,11 @@ def run_orchestrator(
     final_solution = state.best_solution or state.working_solution
     if final_solution is None:
         raise OrchestratorError("orchestrator produced no solution")
-    final_summary = solution_summary(final_solution, instance, cfg)
+    final_summary = solution_summary(
+        final_solution, instance, cfg,
+        contract_objective_layers=(state.active_contract.objective_layers if state.active_contract else state.global_objective_layers),
+        global_objective_layers=state.global_objective_layers,
+    )
     run_summary = {
         "stop_reason": stop_reason,
         "objective_tiers": state.global_objective_layers,
@@ -345,6 +354,7 @@ def _execute_initial_action(
     solver_action_index: int,
     contract: SearchContract,
     decision_id: str,
+    trace_id: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     insertion_policy = insertion_policy_from_manifest(manifest)
     _trace(state, "compiled_initial_policy", insertion_policy.as_dict(), solver_action_index, contract.contract_id)
@@ -353,6 +363,8 @@ def _execute_initial_action(
     state.best_solution = result.solution.clone(deep=True) if result.evaluation.is_feasible else None
     budgets.solver_calls += 1
     trace = dict(result.trace)
+    trace["trace_id"] = trace_id
+    result.trace["trace_id"] = trace_id
     verification = verify_initial_construction(
         result,
         contract,
@@ -360,7 +372,7 @@ def _execute_initial_action(
         decision_id=decision_id,
         verification_id=f"V{solver_action_index + 1}",
     )
-    _trace(state, "initial_insertion_result", {"result": solution_summary(result.solution, instance, cfg), "trace": trace}, solver_action_index, contract.contract_id)
+    _trace(state, "initial_insertion_result", {"result": solution_summary(result.solution, instance, cfg, contract_objective_layers=contract.objective_layers, global_objective_layers=state.global_objective_layers), "trace": trace}, solver_action_index, contract.contract_id)
     return trace, verification
 
 
@@ -374,6 +386,7 @@ def _execute_alns_action(
     solver_action_index: int,
     contract: SearchContract,
     decision_id: str,
+    trace_id: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     if state.working_solution is None:
         raise OrchestratorError("run_alns requested before a working solution exists")
@@ -382,7 +395,7 @@ def _execute_alns_action(
     _trace(state, "compiled_solver_policy", compiled_policy.as_dict(), solver_action_index, contract.contract_id)
     _trace(state, "solver_request", solver_request.as_dict(), solver_action_index, contract.contract_id)
     before_working_eval = _eval(state.working_solution, instance, cfg)
-    before_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
+    before_global_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
     result = solve_assignment(
         instance=instance,
         init_solution=state.working_solution,
@@ -393,15 +406,18 @@ def _execute_alns_action(
         contract_objective_layers=contract.objective_layers,
         feasibility_policy=contract.feasibility_policy,
         global_objective_layers=state.global_objective_layers,
+        trace_id=trace_id,
     )
-    state.working_solution = result.final_current
+    result.trace["trace_id"] = trace_id
+    state.working_solution = result.working_solution
     after_working_eval = _eval(state.working_solution, instance, cfg)
-    candidate_best = result.best_feasible
-    if candidate_best is not None:
-        candidate_best_eval = _eval(candidate_best, instance, cfg)
-        if before_best_eval is None or compare_quality(candidate_best_eval, before_best_eval, state.global_objective_layers) < 0:
-            state.best_solution = candidate_best.clone(deep=True)
-    after_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
+    action_best_eval = None if result.action_best_feasible is None else _eval(result.action_best_feasible, instance, cfg)
+    candidate_global = result.global_best_feasible
+    if candidate_global is not None:
+        candidate_global_eval = _eval(candidate_global, instance, cfg)
+        if before_global_best_eval is None or compare_quality(candidate_global_eval, before_global_best_eval, state.global_objective_layers) < 0:
+            state.best_solution = candidate_global.clone(deep=True)
+    after_global_best_eval = None if state.best_solution is None else _eval(state.best_solution, instance, cfg)
     diagnostics = dict(result.diagnostics)
     diagnostics["accepted_trial_count"] = int(result.accepted_trial_count)
     diagnostics["rejected_trial_count"] = int(result.rejected_trial_count)
@@ -415,8 +431,10 @@ def _execute_alns_action(
     verification = verify_alns_action(
         before_working_eval=before_working_eval,
         after_working_eval=after_working_eval,
-        before_best_eval=before_best_eval,
-        after_best_eval=after_best_eval,
+        before_best_feasible_eval=before_working_eval if before_working_eval.is_feasible else None,
+        after_action_best_eval=action_best_eval,
+        before_global_best_eval=before_global_best_eval,
+        after_global_best_eval=after_global_best_eval,
         trace=dict(result.trace),
         contract=contract,
         manifest=manifest,
@@ -424,7 +442,7 @@ def _execute_alns_action(
         verification_id=f"V{solver_action_index + 1}",
         global_objective_layers=state.global_objective_layers,
     )
-    _trace(state, "solver_result", {"working_solution": solution_summary(state.working_solution, instance, cfg), "diagnostics": diagnostics}, solver_action_index, contract.contract_id)
+    _trace(state, "solver_result", {"working_solution": solution_summary(state.working_solution, instance, cfg, contract_objective_layers=contract.objective_layers, global_objective_layers=state.global_objective_layers), "diagnostics": diagnostics}, solver_action_index, contract.contract_id)
     return dict(result.trace), verification
 
 
@@ -573,14 +591,18 @@ def _trace_contract_compile(state: AgentState, contract: SearchContract) -> None
 
 
 def _working_summary(state: AgentState, instance: Instance, cfg: Config) -> Dict[str, Any]:
+    contract_layers = state.active_contract.objective_layers if state.active_contract else state.global_objective_layers
     if state.working_solution is None:
         empty = AssignmentSolution.empty_from_instance(instance, put_all_unassigned=True)
-        return solution_summary(empty, instance, cfg)
-    return solution_summary(state.working_solution, instance, cfg)
+        return solution_summary(empty, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
+    return solution_summary(state.working_solution, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
 
 
 def _best_summary(state: AgentState, instance: Instance, cfg: Config) -> Optional[Dict[str, Any]]:
-    return None if state.best_solution is None else solution_summary(state.best_solution, instance, cfg)
+    if state.best_solution is None:
+        return None
+    contract_layers = state.active_contract.objective_layers if state.active_contract else state.global_objective_layers
+    return solution_summary(state.best_solution, instance, cfg, contract_objective_layers=contract_layers, global_objective_layers=state.global_objective_layers)
 
 
 def _landscape(state: AgentState, instance: Instance, cfg: Config) -> Dict[str, Any]:
@@ -602,6 +624,7 @@ def _public_landscape(destroy: Dict[str, Any], insertion: Dict[str, Any]) -> Dic
         "assigned_count": int(insertion.get("assigned_count", 0) or 0),
         "candidate_stats": candidate_stats,
         "task_pressure": dict(insertion.get("task_pressure", {}) or {}),
+        "target_buckets": dict(insertion.get("target_buckets", {}) or {}),
         "average_candidate_positions": float(candidate_stats.get("avg_candidate_positions", 0.0) or 0.0),
         "average_feasible_positions": float(candidate_stats.get("avg_feasible_positions", 0.0) or 0.0),
         "hard_to_insert_tasks": int(candidate_stats.get("no_feasible_tasks", 0) or 0),

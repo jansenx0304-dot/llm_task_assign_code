@@ -88,7 +88,9 @@ class MarkdownTraceWriter:
 
     def _write_header(self, run_config: Dict[str, Any]) -> None:
         self._file.write("# LLM-ALNS Execution Report\n\n")
-        self._file.write("> Status: running\n\n")
+        self._file.write("> Status: ")
+        self._status_offset = self._file.tell()
+        self._file.write(f"{'running':<12}\n\n")
         self._file.write("## Run Config\n\n")
         self._write_json_block(run_config)
         self._file.write("\n---\n\n## Live Timeline\n\n")
@@ -125,14 +127,21 @@ class MarkdownTraceWriter:
         self._write_json_block(payload)
         self._file.write("\n## Final Summary\n\n")
         self._write_json_block(summary)
-        self._file.write("\n> Status: finished\n")
+        self._set_status("finished")
         self.flush()
 
     def append_error(self, exc: BaseException) -> None:
         self._file.write("\n---\n\n## Runtime Error\n\n```text\n")
         self._file.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
-        self._file.write("```\n\n> Status: failed\n")
+        self._file.write("```\n")
+        self._set_status("failed")
         self.flush()
+
+    def _set_status(self, status: str) -> None:
+        self.flush()
+        self._file.seek(self._status_offset)
+        self._file.write(f"{status:<12}")
+        self._file.seek(0, 2)
 
     def close(self) -> None:
         if self._closed:
@@ -279,7 +288,7 @@ class ConsoleTracePrinter:
             return f"events={payload.get('events', [])}" if isinstance(payload, dict) else "audit recorded"
         if event_type == "contract_completion_check":
             if isinstance(payload, dict):
-                return f"completed={payload.get('completed')} reason={payload.get('reason')}"
+                return f"completed={payload.get('completed')} reason={payload.get('completion_reason')}"
             return "completion check recorded"
         if event_type == "initial_insertion_result":
             return self._initial_result_summary(payload)

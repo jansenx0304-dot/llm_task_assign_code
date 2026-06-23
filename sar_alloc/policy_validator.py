@@ -6,6 +6,7 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .llm_public_interface import PublicCandidate, PublicCandidates
+from .schemas import SUPPORTED_CONDITION_SOURCES
 
 
 SOLVER_ACTIONS = ("construct_initial", "run_alns", "request_supervisor_review")
@@ -367,7 +368,12 @@ def _exit_conditions(raw_value: Any) -> None:
             if condition_id in seen:
                 raise ValueError(f"duplicate condition_id: {condition_id}")
             seen.add(condition_id)
-            _string(item, "source", context)
+            source = _string(item, "source", context)
+            if source not in SUPPORTED_CONDITION_SOURCES:
+                raise ValueError(
+                    f"{context}.source is not allowed: {source}. "
+                    f"allowed={list(SUPPORTED_CONDITION_SOURCES)}"
+                )
             if _string(item, "op", context) not in {"<", "<=", "==", "!=", ">=", ">"}:
                 raise ValueError(f"{context}.op is invalid")
             _condition_value(item.get("value"), f"{context}.value")

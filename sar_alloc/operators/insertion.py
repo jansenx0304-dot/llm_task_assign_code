@@ -518,6 +518,7 @@ def build_insertion_landscape(
     policy = _default_insertion_policy()
     candidate_counts: List[int] = []
     feasible_counts: List[int] = []
+    task_stats: Dict[int, TaskInsertionStats] = {}
     route_pressure_before = _route_pressure_map(sol, instance, config)
     for tid in unassigned:
         stats, _ = collect_task_insertion_stats(
@@ -526,6 +527,20 @@ def build_insertion_landscape(
         )
         candidate_counts.append(stats.candidate_count)
         feasible_counts.append(stats.feasible_count)
+        task_stats[int(tid)] = stats
+    scarce_capability_threshold = max(1, int(math.ceil(0.25 * len(instance.agents))))
+    scarce_position_threshold = 1
+    scarce_ids = [
+        tid for tid in unassigned
+        if _count_basic_feasible_agents(instance, config, instance.task_by_id(tid)) <= scarce_capability_threshold
+        or task_stats[tid].feasible_count <= scarce_position_threshold
+    ]
+    def bucket(task_ids: Sequence[int]) -> Dict[str, Any]:
+        return {
+            "task_ids": [int(tid) for tid in task_ids],
+            "task_count": len(task_ids),
+            "priority_mass": float(sum(instance.task_by_id(int(tid)).priority for tid in task_ids)),
+        }
     return {
         "unassigned_count": len(unassigned),
         "assigned_count": len(sol.all_assigned_tasks()),
@@ -535,6 +550,20 @@ def build_insertion_landscape(
             "one_feasible_position_tasks": sum(value == 1 for value in feasible_counts),
             "avg_candidate_positions": _mean(candidate_counts),
             "avg_feasible_positions": _mean(feasible_counts),
+            "candidate_position_percentiles": {
+                "p25": _percentile(candidate_counts, 0.25),
+                "p50": _percentile(candidate_counts, 0.50),
+                "p75": _percentile(candidate_counts, 0.75),
+            },
+            "feasible_position_percentiles": {
+                "p25": _percentile(feasible_counts, 0.25),
+                "p50": _percentile(feasible_counts, 0.50),
+                "p75": _percentile(feasible_counts, 0.75),
+            },
+        },
+        "target_buckets": {
+            "unassigned_priority": bucket(unassigned),
+            "scarce_unassigned": bucket(scarce_ids),
         },
         "task_pressure": _task_pressure_summary(sol, instance, config),
         "route_pressure": _route_pressure_summary(sol, instance, config),
@@ -1030,6 +1059,19 @@ def _median(values: Sequence[float]) -> float:
     if len(ordered) % 2:
         return ordered[mid]
     return 0.5 * (ordered[mid - 1] + ordered[mid])
+
+
+def _percentile(values: Sequence[float], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    position = max(0.0, min(1.0, float(q))) * (len(ordered) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
 def _std(values: Sequence[float]) -> float:

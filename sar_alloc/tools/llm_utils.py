@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import Config, ObjectiveLayer
-from ..evaluator import evaluate
+from ..evaluator import build_objective_keys, evaluate
 from ..feasibility_policy_compiler import compile_feasibility_control
 from ..llm_public_interface import PublicCandidates
 from ..models import Agent, Instance, Task
@@ -151,7 +151,6 @@ class ContractProgress:
     verification_ids: List[str] = field(default_factory=list)
     intent_status_counts: Dict[str, int] = field(default_factory=dict)
     dominant_blocker_counts: Dict[str, int] = field(default_factory=dict)
-    metric_delta_total: Dict[str, float] = field(default_factory=dict)
     condition_report: List[Dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
@@ -163,7 +162,6 @@ class ContractProgress:
             "verification_ids": list(self.verification_ids),
             "intent_status_counts": dict(self.intent_status_counts),
             "dominant_blocker_counts": dict(self.dominant_blocker_counts),
-            "metric_delta_total": dict(self.metric_delta_total),
             "condition_report": [dict(item) for item in self.condition_report],
         }
 
@@ -175,6 +173,7 @@ class RuntimeControlManifest:
     contract_id: str
     action: str
     target_id: str
+    trace_id: str
     compiled: Dict[str, Any]
     defaults_applied: List[str]
     validation_report: Dict[str, Any]
@@ -186,6 +185,7 @@ class RuntimeControlManifest:
             "contract_id": self.contract_id,
             "action": self.action,
             "target_id": self.target_id,
+            "trace_id": self.trace_id,
             "compiled": _numericize(self.compiled),
             "defaults_applied": list(self.defaults_applied),
             "validation_report": dict(self.validation_report),
@@ -272,12 +272,25 @@ class VerifiedActionRecord:
         }
 
 
-def llm_solution_summary(solution: AssignmentSolution, instance: Instance, config: Config, update_solution_schedule: bool = True) -> Dict[str, Any]:
+def llm_solution_summary(
+    solution: AssignmentSolution,
+    instance: Instance,
+    config: Config,
+    update_solution_schedule: bool = True,
+    *,
+    contract_objective_layers: Optional[List[Dict[str, Any]]] = None,
+    global_objective_layers: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     ev = evaluate(solution, instance, config, update_solution_schedule=update_solution_schedule)
     report = ev.constraint_report
+    global_layers = global_objective_layers or [
+        {"metric": layer.metric, "direction": layer.direction}
+        for layer in config.eval.objective_policy.layers
+    ]
+    contract_layers = contract_objective_layers or global_layers
     return {
         "is_feasible": bool(report.is_feasible),
-        "lex_key": list(ev.lex_key or ()),
+        "objective_keys": build_objective_keys(ev, contract_layers, global_layers),
         "quality_summary": {name: float(ev.quality_metrics.get(name, 0.0)) for name in QUALITY_METRICS},
         "feasibility_summary": {
             "is_feasible": bool(report.is_feasible),
@@ -424,6 +437,7 @@ def compile_solver_control(
     *,
     decision_id: str = "D0",
     manifest_id: str = "R0",
+    trace_id: Optional[str] = None,
 ) -> RuntimeControlManifest:
     decision = solver_decision.get("solver_decision", solver_decision)
     action = str(decision["action"])
@@ -456,6 +470,7 @@ def compile_solver_control(
         contract_id=contract.contract_id,
         action=action,
         target_id=target_id,
+        trace_id=str(trace_id or f"X_{manifest_id}"),
         compiled=compiled,
         defaults_applied=defaults,
         validation_report={

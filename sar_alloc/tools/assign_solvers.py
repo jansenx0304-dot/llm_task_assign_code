@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import Budget, Config
-from ..evaluator import compare_quality, evaluate as _evaluate_raw
+from ..evaluator import build_objective_keys, compare_quality, evaluate as _evaluate_raw
 from ..feasibility_policy import check_feasibility_admissibility
 from ..models import Instance
 from ..operators import (
@@ -45,7 +45,9 @@ EVAL_STATS = _EvalStats()
 @dataclass(frozen=True)
 class ALNSResult:
     final_current: AssignmentSolution
-    best_feasible: Optional[AssignmentSolution]
+    action_best_feasible: Optional[AssignmentSolution]
+    global_best_feasible: Optional[AssignmentSolution]
+    working_solution: AssignmentSolution
     accepted_trial_count: int
     rejected_trial_count: int
     events: List[str]
@@ -73,6 +75,7 @@ def solve_assignment(
     contract_objective_layers: Optional[List[Dict[str, Any]]] = None,
     feasibility_policy: Optional[Dict[str, Any]] = None,
     global_objective_layers: Optional[List[Dict[str, Any]]] = None,
+    trace_id: str = "X_solver",
 ) -> ALNSResult:
     """Run weighted ALNS from an incumbent using an already validated policy."""
     rng = random.Random(int(rng_seed))
@@ -87,7 +90,7 @@ def solve_assignment(
         f"time_limit={budget.time_limit_sec} "
         f"iters={budget.max_iters} "
         f"init_feasible={_bool_text(cur_ev.is_feasible)} "
-        f"init_lex_key={cur_ev.lex_key}"
+        f"init_contract_key={build_objective_keys(cur_ev, contract_objective_layers or _config_objective_layers(config), global_objective_layers or _config_objective_layers(config))['contract']['key']}"
     )
 
     return _solve_weighted_alns(
@@ -101,6 +104,7 @@ def solve_assignment(
         contract_objective_layers=contract_objective_layers or _config_objective_layers(config),
         feasibility_policy=feasibility_policy or {"mode": "strict"},
         global_objective_layers=global_objective_layers or _config_objective_layers(config),
+        trace_id=trace_id,
     )
 
 
@@ -116,6 +120,7 @@ def _solve_weighted_alns(
     contract_objective_layers: List[Dict[str, Any]],
     feasibility_policy: Dict[str, Any],
     global_objective_layers: List[Dict[str, Any]],
+    trace_id: str,
 ) -> ALNSResult:
     destroy_ops: Dict[str, DestroyOperator] = dict(DESTROY_OPERATORS)
     destroy_priors = {name: max(0.1, float(score)) for name, score in policy.destroy_policy.operator_weights.items()}
@@ -137,12 +142,17 @@ def _solve_weighted_alns(
     temperature = 0.05 + 0.50 * accept_level
     cooling = _clamp_float(0.999 - 0.02 * accept_level, 0.90, 0.9999)
     initial_solution_feasible = bool(cur_ev.is_feasible)
+    initial_working_objective_keys = build_objective_keys(
+        cur_ev, contract_objective_layers, global_objective_layers
+    )
 
-    best_feasible: Optional[AssignmentSolution] = cur.clone(deep=True) if cur_ev.is_feasible else None
-    best_feasible_ev: Optional[EvalResult] = cur_ev if cur_ev.is_feasible else None
+    action_best_feasible: Optional[AssignmentSolution] = cur.clone(deep=True) if cur_ev.is_feasible else None
+    action_best_feasible_ev: Optional[EvalResult] = cur_ev if cur_ev.is_feasible else None
+    global_best_feasible: Optional[AssignmentSolution] = cur.clone(deep=True) if cur_ev.is_feasible else None
+    global_best_feasible_ev: Optional[EvalResult] = cur_ev if cur_ev.is_feasible else None
 
     best_update_iters: List[int] = []
-    best_update_lex_keys: List[List[float]] = []
+    best_update_objective_keys: List[Dict[str, Any]] = []
     last_acceptance_decision: Optional[Dict[str, Any]] = None
     destroy_operator_stats = _init_destroy_operator_stats(d_w.keys())
     insertion_operator_summary = _init_insertion_operator_summary(policy.insertion_policy.operator_weights.keys())
@@ -255,7 +265,7 @@ def _solve_weighted_alns(
                 f"[ALNS] iter={iteration} "
                 f"destroy={actual_d_name} insertion=kernel "
                 f"accepted={_bool_text(accepted)} feasible={_bool_text(ev_trial.is_feasible)} "
-                f"lex_key={ev_trial.lex_key} "
+                f"contract_key={build_objective_keys(ev_trial, contract_objective_layers, global_objective_layers)['contract']['key']} "
                 f"unassigned={len(trial.unassigned)}"
             )
             print(message)
@@ -272,15 +282,24 @@ def _solve_weighted_alns(
             if feasibility_decision.admissible:
                 trial_flow["acceptance_rejected"] += 1
 
+        if ev_trial.is_feasible and (
+            action_best_feasible_ev is None
+            or compare_quality(ev_trial, action_best_feasible_ev, contract_objective_layers) < 0
+        ):
+            action_best_feasible = trial.clone(deep=True)
+            action_best_feasible_ev = ev_trial
+
         best_improved = False
         if ev_trial.is_feasible and (
-            best_feasible_ev is None
-            or compare_quality(ev_trial, best_feasible_ev, global_objective_layers) < 0
+            global_best_feasible_ev is None
+            or compare_quality(ev_trial, global_best_feasible_ev, global_objective_layers) < 0
         ):
-            best_feasible = trial.clone(deep=True)
-            best_feasible_ev = ev_trial
+            global_best_feasible = trial.clone(deep=True)
+            global_best_feasible_ev = ev_trial
             best_update_iters.append(iteration)
-            best_update_lex_keys.append(list(best_feasible_ev.lex_key or ()))
+            best_update_objective_keys.append(
+                build_objective_keys(global_best_feasible_ev, contract_objective_layers, global_objective_layers)
+            )
             reward = max(reward, 5.0)
             best_improved = True
             trial_flow["best_improved_trials"] += 1
@@ -291,10 +310,9 @@ def _solve_weighted_alns(
                 "destroy_operator": actual_d_name,
                 "insertion_operator": "kernel",
                 "accepted": bool(accepted),
-                "current_objective": _trace_objective(cur_ev),
-                "current_lex_key": _trace_lex_key(cur_ev),
-                "best_feasible_objective": None if best_feasible_ev is None else _trace_objective(best_feasible_ev),
-                "best_feasible_lex_key": [] if best_feasible_ev is None else _trace_lex_key(best_feasible_ev),
+                "current_objective_keys": build_objective_keys(cur_ev, contract_objective_layers, global_objective_layers),
+                "action_best_objective_keys": None if action_best_feasible_ev is None else build_objective_keys(action_best_feasible_ev, contract_objective_layers, global_objective_layers),
+                "global_best_objective_keys": None if global_best_feasible_ev is None else build_objective_keys(global_best_feasible_ev, contract_objective_layers, global_objective_layers),
                 "violation_total": float(ev_trial.get_metric("violation_total")),
                 "violation_ratio_by_type": dict(ev_trial.constraint_report.violation_ratio_by_type),
                 "feasibility_reason": feasibility_decision.reason,
@@ -326,10 +344,19 @@ def _solve_weighted_alns(
 
     final_current = cur.clone(deep=True)
     evaluate(final_current, instance, config, update_solution_schedule=True)
-    if best_feasible is not None:
-        evaluate(best_feasible, instance, config, update_solution_schedule=True)
+    if action_best_feasible is not None:
+        evaluate(action_best_feasible, instance, config, update_solution_schedule=True)
+    if global_best_feasible is not None:
+        evaluate(global_best_feasible, instance, config, update_solution_schedule=True)
+    working_solution = (
+        action_best_feasible.clone(deep=True)
+        if action_best_feasible is not None
+        else final_current.clone(deep=True)
+    )
+    returned_source = "action_best_feasible" if action_best_feasible is not None else "final_current_no_feasible"
     actual_time_used_sec = max(0.0, time.perf_counter() - started_at)
     trace = _build_execution_trace(
+        trace_id=trace_id,
         total_iters=iteration,
         destroy_operator_summary=_finalize_destroy_operator_stats(destroy_operator_stats),
         insertion_operator_summary=_finalize_insertion_operator_summary(insertion_operator_summary),
@@ -343,10 +370,10 @@ def _solve_weighted_alns(
         total_iters=iteration,
         actual_time_used_sec=actual_time_used_sec,
         best_update_iters=best_update_iters,
-        best_update_lex_keys=best_update_lex_keys,
-        returned_solution_source="final_current",
+        best_update_objective_keys=best_update_objective_keys,
+        returned_solution_source=returned_source,
         initial_solution_feasible=initial_solution_feasible,
-        returned_solution_feasible=bool(getattr(final_current.eval, "is_feasible", False)),
+        returned_solution_feasible=bool(getattr(working_solution.eval, "is_feasible", False)),
         last_acceptance_decision=last_acceptance_decision,
         last_destroy_move=last_destroy_move,
         destroy_operator_summary=trace["destroy"]["selected_operator_counts"],
@@ -362,24 +389,41 @@ def _solve_weighted_alns(
             "insertion_operators": {"llm_weights": policy.insertion_policy.operator_weights},
         },
         feasibility_policy=feasibility_policy,
-        final_constraint_report=final_current.eval.constraint_report,
+        final_constraint_report=working_solution.eval.constraint_report,
         feasibility_rejection_reasons=feasibility_rejection_reasons,
         execution_trace=trace,
     )
+    diagnostics["solution_flow"] = {
+        "initial_working": {"objective_keys": initial_working_objective_keys},
+        "final_current": {
+            "objective_keys": build_objective_keys(final_current.eval, contract_objective_layers, global_objective_layers),
+            "is_feasible": bool(final_current.eval.is_feasible),
+        },
+        "action_best_feasible": None if action_best_feasible is None else {
+            "objective_keys": build_objective_keys(action_best_feasible.eval, contract_objective_layers, global_objective_layers),
+            "is_feasible": True,
+        },
+        "returned_solution_source": returned_source,
+    }
     print(
         "[ALNS] done "
-        f"returned_source=final_current "
+        f"returned_source={returned_source} "
         f"total_iters={iteration} "
         f"best_update_count={len(best_update_iters)} "
         f"actual_time_used_sec={round(actual_time_used_sec, 4)} "
-        f"returned_feasible={_bool_text(getattr(final_current.eval, 'is_feasible', False))}"
+        f"returned_feasible={_bool_text(getattr(working_solution.eval, 'is_feasible', False))}"
     )
     final_current.solver_diagnostics = diagnostics
-    if best_feasible is not None:
-        best_feasible.solver_diagnostics = diagnostics
+    working_solution.solver_diagnostics = diagnostics
+    if action_best_feasible is not None:
+        action_best_feasible.solver_diagnostics = diagnostics
+    if global_best_feasible is not None:
+        global_best_feasible.solver_diagnostics = diagnostics
     return ALNSResult(
         final_current=final_current,
-        best_feasible=best_feasible,
+        action_best_feasible=action_best_feasible,
+        global_best_feasible=global_best_feasible,
+        working_solution=working_solution,
         accepted_trial_count=int(accepted_trial_count),
         rejected_trial_count=int(rejected_trial_count),
         events=_dedupe_events(events),
@@ -591,7 +635,7 @@ def _build_solver_diagnostics(
     total_iters: int,
     actual_time_used_sec: float,
     best_update_iters: List[int],
-    best_update_lex_keys: List[List[float]],
+    best_update_objective_keys: List[Dict[str, Any]],
     returned_solution_source: str,
     initial_solution_feasible: bool,
     returned_solution_feasible: bool,
@@ -616,7 +660,7 @@ def _build_solver_diagnostics(
         "actual_time_used_sec": max(0.0, float(actual_time_used_sec)),
         "best_update_count": len(best_update_iters),
         "best_update_iters": [int(x) for x in best_update_iters],
-        "best_update_lex_keys": [list(x) for x in best_update_lex_keys],
+        "best_update_objective_keys": list(best_update_objective_keys),
         "first_best_iter": int(best_update_iters[0]) if best_update_iters else None,
         "last_best_iter": int(last_best_iter) if last_best_iter is not None else None,
         "plateau_iters_after_last_update": int(total_iters - last_best_iter) if last_best_iter is not None else int(total_iters),
@@ -646,6 +690,7 @@ def _build_solver_diagnostics(
 
 def _build_execution_trace(
     *,
+    trace_id: str,
     total_iters: int,
     destroy_operator_summary: Dict[str, Any],
     insertion_operator_summary: Dict[str, Any],
@@ -671,7 +716,7 @@ def _build_execution_trace(
     )
     dominant_repair = max(repair_failure_reasons.items(), key=lambda item: int(item[1]), default=("none", 0))[0]
     return {
-        "trace_id": "",
+        "trace_id": trace_id,
         "kind": "alns",
         "iters": int(total_iters),
         "destroy": {
@@ -864,17 +909,6 @@ def _numericize_weight_tree(node: Any) -> Any:
     if isinstance(node, (int, float)):
         return float(node)
     return node
-
-
-def _trace_lex_key(ev: EvalResult) -> List[float]:
-    return [float(value) for value in list(ev.lex_key or ())]
-
-
-def _trace_objective(ev: EvalResult) -> float:
-    lex_key = _trace_lex_key(ev)
-    if lex_key:
-        return float(lex_key[0])
-    return float(ev.get_quality_metric("missed_priority"))
 
 
 def _config_objective_layers(config: Config) -> List[Dict[str, Any]]:

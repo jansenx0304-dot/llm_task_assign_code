@@ -37,17 +37,20 @@ class RunMemory:
     ) -> Dict[str, Any]:
         manifest_dict = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
         record_id = f"M{len(self.verified_actions) + 1}"
-        trace_id = str(trace.get("trace_id") or f"X{len(self.verified_actions) + 1}")
+        trace_id = str(trace.get("trace_id", ""))
+        manifest_trace_id = str(manifest_dict.get("trace_id", ""))
+        verification_trace_id = str(verification.get("trace_id", ""))
+        if not trace_id or not manifest_trace_id or not verification_trace_id:
+            raise ValueError("manifest, execution trace, and verification must have a non-empty trace_id")
+        if len({trace_id, manifest_trace_id, verification_trace_id}) != 1:
+            raise ValueError("manifest, execution trace, and verification trace_id must match")
         verification_id = str(verification.get("verification_id") or f"V{len(self.verified_actions) + 1}")
-        trace["trace_id"] = trace_id
-        verification["trace_id"] = trace_id
         verification["verification_id"] = verification_id
         verification["manifest_id"] = manifest_dict.get("manifest_id", verification.get("manifest_id", ""))
         verification["decision_id"] = manifest_dict.get("source_decision_id", verification.get("decision_id", ""))
         verification["contract_id"] = manifest_dict.get("contract_id", verification.get("contract_id", ""))
         verification["target_id"] = manifest_dict.get("target_id", verification.get("target_id", ""))
         verification["trace"] = dict(trace)
-        raw_decision = decision.get("solver_decision", decision)
         target_kind = _target_kind(observation, str(verification.get("target_id", "")))
         item = {
             "record_id": record_id,
@@ -60,7 +63,7 @@ class RunMemory:
             "verification_id": verification_id,
             "target_id": verification.get("target_id", ""),
             "target_kind": target_kind,
-            "control_fingerprint": _control_fingerprint(manifest_dict, raw_decision),
+            "control_fingerprint": _control_fingerprint(manifest_dict),
             "outcome_fingerprint": _outcome_fingerprint(verification),
             "manifest": manifest_dict,
             "trace": dict(trace),
@@ -129,18 +132,25 @@ def _target_kind(observation: Dict[str, Any], target_id: str) -> str:
     return ""
 
 
-def _control_fingerprint(manifest: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
+def _control_fingerprint(manifest: Dict[str, Any]) -> Dict[str, Any]:
     compiled = manifest.get("compiled", {}) or {}
-    destroy = (compiled.get("destroy", {}) or {}).get("operator_weights", {}) or {}
+    if manifest.get("action") == "request_supervisor_review":
+        return {"action": "review_request"}
+    destroy_manifest = compiled.get("destroy", {}) or {}
+    destroy = destroy_manifest.get("operator_weights", {}) or {}
+    destroy_signals = destroy_manifest.get("signal_weights", {}) or {}
     insertion = compiled.get("insertion", {}) or {}
+    insertion_operators = insertion.get("operator_weights", {}) or {}
     task = insertion.get("task_signal_weights", {}) or {}
     pos = insertion.get("position_signal_weights", {}) or {}
     acceptance = compiled.get("acceptance", {}) or {}
     return {
-        "destroy_top": _top_names(destroy),
-        "insert_task_top": _top_names(task),
-        "insert_pos_top": _top_names(pos),
-        "acceptance": "" if not acceptance else f"{acceptance.get('mode')}:{decision.get('acceptance_control', {}).get('intensity_score', acceptance.get('intensity_score', ''))}",
+        "destroy_operator_top": _top_nonzero(destroy),
+        "destroy_signal_top": _top_nonzero(destroy_signals),
+        "insertion_operator_top": _top_nonzero(insertion_operators),
+        "insertion_task_signal_top": _top_nonzero(task),
+        "insertion_position_signal_top": _top_nonzero(pos),
+        "acceptance": "" if not acceptance else f"{acceptance.get('mode')}:{acceptance.get('intensity_score', '')}",
     }
 
 
@@ -155,11 +165,11 @@ def _outcome_fingerprint(verification: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _top_names(values: Dict[str, Any], limit: int = 2) -> List[str]:
+def _top_nonzero(values: Dict[str, Any], limit: int = 2) -> List[str]:
     if not isinstance(values, dict) or not values:
         return []
     ordered = sorted(values.items(), key=lambda item: (-float(item[1]), str(item[0])))
-    return [str(name) for name, _ in ordered[:limit]]
+    return [str(name) for name, value in ordered if float(value) > 0.0][:limit]
 
 
 def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,13 +205,17 @@ def _supervisor_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _control_summary(control: Dict[str, Any]) -> str:
+    if control.get("action") == "review_request":
+        return "review_request"
     pieces = []
-    pieces.extend(control.get("destroy_top", [])[:1])
-    pieces.extend(control.get("insert_task_top", [])[:1])
-    pieces.extend(control.get("insert_pos_top", [])[:1])
+    pieces.extend(control.get("destroy_operator_top", [])[:1])
+    pieces.extend(control.get("destroy_signal_top", [])[:1])
+    pieces.extend(control.get("insertion_operator_top", [])[:1])
+    pieces.extend(control.get("insertion_task_signal_top", [])[:1])
+    pieces.extend(control.get("insertion_position_signal_top", [])[:1])
     if control.get("acceptance"):
         pieces.append(str(control["acceptance"]))
-    return " + ".join(str(piece) for piece in pieces if piece) or "default"
+    return " + ".join(str(piece) for piece in pieces if piece)
 
 
 __all__ = ["RunMemory"]

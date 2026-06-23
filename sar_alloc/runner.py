@@ -24,7 +24,7 @@ DEFAULT_GOAL = "Prioritize valuable task coverage, then reduce resource use."
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m sar_alloc.runner")
     parser.add_argument("--instance", default="T100")
-    parser.add_argument("--time-limit", default=300.0, type=float)
+    parser.add_argument("--time-limit", "--time-limit-sec", dest="time_limit", default=300.0, type=float)
     parser.add_argument("--iterations", default=2000, type=int)
     parser.add_argument("--max-step-calls", default=10, type=int)
     parser.add_argument("--max-solver-calls", default=20, type=int)

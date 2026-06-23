@@ -195,49 +195,68 @@ def _problem_profile(instance: Instance, instance_summary: Dict[str, Any]) -> Di
 
 
 def _task_buildability_view(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> Dict[str, Any]:
+    raw_buckets = landscape.get("target_buckets", {}) or {}
     quality = working_summary.get("quality_summary", {}) or {}
-    task_pressure = landscape.get("task_pressure", {}) or {}
-    unassigned = int(quality.get("unassigned_count", landscape.get("unassigned_count", 0)) or 0)
-    missed = float(quality.get("missed_priority", 0.0) or 0.0)
+    if "unassigned_priority" not in raw_buckets:
+        raw_buckets = dict(raw_buckets)
+        raw_buckets["unassigned_priority"] = {
+            "task_ids": [],
+            "task_count": int(quality.get("unassigned_count", 0) or 0),
+            "priority_mass": float(quality.get("missed_priority", 0.0) or 0.0),
+        }
+    active: List[Dict[str, Any]] = []
+    inactive: List[Dict[str, Any]] = []
+    for kind, target_id, controls in (
+        (
+            "unassigned_priority", "T_unassigned_priority",
+            {
+                "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
+                "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
+            },
+        ),
+        (
+            "scarce_unassigned", "T_scarce_unassigned",
+            {
+                "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
+                "insertion_control.position_signal_scores": ["future_slack"],
+            },
+        ),
+    ):
+        bucket = dict(raw_buckets.get(kind, {}) or {})
+        item = {
+            "target_id": target_id,
+            "kind": kind,
+            "task_ids": [int(value) for value in bucket.get("task_ids", [])],
+            "task_count": int(bucket.get("task_count", 0) or 0),
+            "priority_mass": float(bucket.get("priority_mass", 0.0) or 0.0),
+            "recommended_controls": controls,
+        }
+        (active if item["task_count"] > 0 else inactive).append(item)
     return {
-        "target_buckets": [
-            {
-                "target_id": "T_unassigned_priority",
-                "kind": "unassigned_priority",
-                "task_count": unassigned,
-                "priority_mass": missed,
-                "recommended_controls": {
-                    "insertion_control.task_signal_scores": ["priority_loss", "scarcity_pressure"],
-                    "insertion_control.position_signal_scores": ["future_slack", "insert_cost"],
-                    "destroy_control.signal_scores": ["mobility_opportunity", "scarcity_protection"],
-                },
-            },
-            {
-                "target_id": "T_scarce_unassigned",
-                "kind": "scarce_unassigned",
-                "task_count": int(task_pressure.get("skill_scarce_unassigned", 0) or 0),
-                "priority_mass": missed,
-                "recommended_controls": {
-                    "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
-                    "insertion_control.position_signal_scores": ["future_slack"],
-                    "destroy_control.signal_scores": ["scarcity_protection", "mobility_opportunity"],
-                },
-            },
+        "target_buckets": active,
+        "inactive_target_summary": [
+            {"kind": item["kind"], "task_count": 0, "priority_mass": 0.0}
+            for item in inactive
         ],
-        "zero_capable_task_count": int(task_pressure.get("zero_capable_task_count", 0) or 0),
     }
 
 
 def _insertion_position_landscape(landscape: Dict[str, Any]) -> Dict[str, Any]:
     stats = landscape.get("candidate_stats", {}) or {}
+    candidate_percentiles = stats.get("candidate_position_percentiles", {}) or {}
+    feasible_percentiles = stats.get("feasible_position_percentiles", {}) or {}
     return {
         "candidate_position_count": {
-            "p50": float(stats.get("avg_candidate_positions", 0.0) or 0.0),
+            "p25": float(candidate_percentiles.get("p25", 0.0) or 0.0),
+            "p50": float(candidate_percentiles.get("p50", 0.0) or 0.0),
+            "p75": float(candidate_percentiles.get("p75", 0.0) or 0.0),
             "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
             "zero_count": int(stats.get("zero_candidate_tasks", 0) or 0),
         },
         "feasible_position_count": {
-            "p50": float(stats.get("avg_feasible_positions", 0.0) or 0.0),
+            "p25": float(feasible_percentiles.get("p25", 0.0) or 0.0),
+            "p50": float(feasible_percentiles.get("p50", 0.0) or 0.0),
+            "p75": float(feasible_percentiles.get("p75", 0.0) or 0.0),
             "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
             "zero_count": int(stats.get("no_feasible_tasks", 0) or 0),
         },
@@ -259,11 +278,24 @@ def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any],
     if not target_kinds:
         target_kinds = ["unassigned_priority", "energy_debt"]
     out: List[Dict[str, Any]] = []
+    bucket_map = landscape.get("target_buckets", {}) or {}
     for kind in target_kinds:
         if kind == "unassigned_priority":
+            bucket = dict(bucket_map.get(kind, {}) or {})
+            if not bucket:
+                bucket = {
+                    "task_count": int(quality.get("unassigned_count", 0) or 0),
+                    "priority_mass": float(quality.get("missed_priority", 0.0) or 0.0),
+                    "task_ids": [],
+                }
+            if int(bucket.get("task_count", 0) or 0) == 0:
+                continue
             out.append({
                 "target_id": "T_unassigned_priority",
                 "kind": kind,
+                "task_ids": [int(value) for value in bucket.get("task_ids", [])],
+                "task_count": int(bucket.get("task_count", 0)),
+                "priority_mass": float(bucket.get("priority_mass", 0.0)),
                 "metric_pressure": {
                     "missed_priority": float(quality.get("missed_priority", 0.0) or 0.0),
                     "unassigned_count": float(quality.get("unassigned_count", 0.0) or 0.0),
@@ -275,10 +307,16 @@ def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any],
                 },
             })
         elif kind == "scarce_unassigned":
+            bucket = dict(bucket_map.get(kind, {}) or {})
+            if int(bucket.get("task_count", 0) or 0) == 0:
+                continue
             out.append({
                 "target_id": "T_scarce_unassigned",
                 "kind": kind,
-                "metric_pressure": {"count": int((landscape.get("task_pressure", {}) or {}).get("skill_scarce_unassigned", 0) or 0)},
+                "task_ids": [int(value) for value in bucket.get("task_ids", [])],
+                "task_count": int(bucket.get("task_count", 0)),
+                "priority_mass": float(bucket.get("priority_mass", 0.0)),
+                "metric_pressure": {"count": int(bucket.get("task_count", 0) or 0)},
                 "recommended_controls": {
                     "insertion_control.task_signal_scores": ["scarcity_pressure", "priority_loss"],
                     "insertion_control.position_signal_scores": ["future_slack"],
@@ -342,7 +380,12 @@ def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     quality = summary.get("quality_summary", {}) or {}
     feasibility = summary.get("feasibility_summary", {}) or {}
     ratios = dict(feasibility.get("violation_ratio_by_type", {}) or {})
-    dominant = max(ratios.items(), key=lambda item: float(item[1]), default=("none", 0.0))
+    debt_total = float(feasibility.get("recoverable_violation_total", feasibility.get("violation_total", 0.0)) or 0.0)
+    dominant = (
+        ("none", 0.0)
+        if debt_total <= 0.0
+        else max(ratios.items(), key=lambda item: float(item[1]), default=("none", 0.0))
+    )
     return {
         "is_feasible": bool(feasibility.get("is_feasible", summary.get("is_feasible", False))),
         "quality": {
@@ -351,7 +394,7 @@ def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
             if name in quality
         },
         "debt": {
-            "total": float(feasibility.get("recoverable_violation_total", feasibility.get("violation_total", 0.0)) or 0.0),
+            "total": debt_total,
             "dominant_type": str(dominant[0]),
             "dominant_ratio": float(dominant[1]),
         },

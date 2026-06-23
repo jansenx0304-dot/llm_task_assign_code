@@ -29,11 +29,10 @@ def _obj_to_dict(value: Any) -> Any:
 
 @dataclass(frozen=True, slots=True)
 class EvalResult:
-    """Evaluation result with quality metrics separated from constraints."""
+    """Objective-neutral evaluation result."""
 
     quality_metrics: Dict[str, float] = field(default_factory=dict)
     constraint_report: Any = None
-    lex_key: Optional[Tuple[float, ...]] = None
 
     @property
     def is_feasible(self) -> bool:
@@ -159,8 +158,6 @@ class AssignmentSolution:
 
     def to_dict(self) -> Dict[str, Any]:
         ev_dict = _obj_to_dict(self.eval)
-        if isinstance(ev_dict, dict):
-            ev_dict["lex_key"] = list(self.eval.lex_key or ()) if self.eval is not None else None
         return {
             "routes": {str(aid): [int(tid) for tid in seq] for aid, seq in self.routes.items()},
             "unassigned": [int(tid) for tid in sorted(self.unassigned)],

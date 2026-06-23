@@ -84,11 +84,7 @@ def evaluate(
         "makespan": float(makespan),
         "route_balance": float(_coefficient_of_variation(route_counts)),
     }
-    ev = EvalResult(
-        quality_metrics=quality_metrics,
-        constraint_report=constraint_report,
-        lex_key=_build_lex_key(quality_metrics, config.eval.objective_policy.layers),
-    )
+    ev = EvalResult(quality_metrics=quality_metrics, constraint_report=constraint_report)
     solution.eval = ev
     return ev
 
@@ -100,8 +96,8 @@ def compare_quality(eval_a: EvalResult, eval_b: EvalResult, objective_layers: It
             raise ValueError(f"constraint metric is not allowed in quality comparison: {metric}")
         if metric not in QUALITY_METRICS:
             raise ValueError(f"unknown quality metric: {metric}")
-        va = float(eval_a.quality_metrics.get(metric, 0.0))
-        vb = float(eval_b.quality_metrics.get(metric, 0.0))
+        va = float(eval_a.get_quality_metric(metric))
+        vb = float(eval_b.get_quality_metric(metric))
         diff = va - vb
         if str(layer["direction"]) == "max":
             diff = -diff
@@ -116,7 +112,7 @@ def compare(a: EvalResult, b: EvalResult, config: Config) -> int:
     return compare_quality(a, b, config.eval.objective_policy.layers)
 
 
-def _build_lex_key(metrics: Dict[str, float], objective_layers: Iterable[Any]) -> Tuple[float, ...]:
+def build_lex_key(metrics: Dict[str, float], objective_layers: Iterable[Any]) -> Tuple[float, ...]:
     key_values: List[float] = []
     for layer in _normalize_layers(objective_layers):
         metric = str(layer["metric"])
@@ -127,6 +123,30 @@ def _build_lex_key(metrics: Dict[str, float], objective_layers: Iterable[Any]) -
             value = -value
         key_values.append(value)
     return tuple(key_values)
+
+
+def build_objective_keys(
+    evaluation: EvalResult,
+    contract_objective_layers: Iterable[Any],
+    global_objective_layers: Iterable[Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Build the two explicitly scoped objective keys used by the closed loop."""
+    contract_layers = _normalize_layers(contract_objective_layers)
+    global_layers = _normalize_layers(global_objective_layers)
+    metrics = {
+        item["metric"]: float(evaluation.get_quality_metric(item["metric"]))
+        for item in contract_layers + global_layers
+    }
+    return {
+        "contract": {
+            "layers": [item["metric"] for item in contract_layers],
+            "key": list(build_lex_key(metrics, contract_layers)),
+        },
+        "global": {
+            "layers": [item["metric"] for item in global_layers],
+            "key": list(build_lex_key(metrics, global_layers)),
+        },
+    }
 
 
 def _normalize_layers(objective_layers: Iterable[Any]) -> List[Dict[str, str]]:

@@ -279,7 +279,7 @@ class ClosedLoopRefactorTests(unittest.TestCase):
 
         partial = verify_initial_construction(Result(), self.contract)
         self.assertEqual(partial["event_tags"], ["initial_partial"])
-        self.assertEqual(partial["intent_status"], "partially_achieved")
+        self.assertEqual(partial["intent_status"], "partial")
 
         class Empty:
             evaluation = FakeEval({"missed_priority": 2.0}, is_feasible=False)
@@ -308,8 +308,8 @@ class ClosedLoopRefactorTests(unittest.TestCase):
         verification = verify_alns_action(
             before_working_eval=before,
             after_working_eval=after,
-            before_best_eval=None,
-            after_best_eval=None,
+            before_best_feasible_eval=None,
+            after_action_best_eval=None,
             trace=trace,
             contract=self.contract,
             manifest={"manifest_id": "R1", "source_decision_id": "D1", "target_id": "T_energy_debt", "contract_id": "C001"},
@@ -330,8 +330,8 @@ class ClosedLoopRefactorTests(unittest.TestCase):
             protected_metrics=[],
             resource_policy={"min_actions": 2, "max_actions": 4, "max_iters": 20, "max_time_sec": 5.0},
             exit_conditions={
-                "success": [{"condition_id": "S1", "source": "aggregate.metric_delta_total.missed_priority", "op": "<", "value": 0, "window": 2}],
-                "failure": [{"condition_id": "F1", "source": "aggregate.dominant_blocker.feasibility_rejected_trials", "op": ">=", "value": 2, "window": 2}],
+                "success": [{"condition_id": "S1", "source": "aggregate.achieved", "op": ">", "value": 5, "window": 2}],
+                "failure": [{"condition_id": "F1", "source": "aggregate.not_achieved", "op": ">=", "value": 2, "window": 2}],
             },
         )
         progress = ContractProgress("C010")
@@ -350,9 +350,9 @@ class ClosedLoopRefactorTests(unittest.TestCase):
         decision = {"solver_decision": {"action": "run_alns", "target_id": "T1"}}
         memory.record_observation(obs)
         did = memory.record_decision(decision, obs)
-        manifest = {"manifest_id": "R1", "source_decision_id": did, "contract_id": "C1", "target_id": "T1", "compiled": {"acceptance": {"mode": "threshold", "intensity_score": 4}}}
-        trace = {"kind": "alns", "trial_flow": {"candidate_trials": 2, "accepted_trials": 1}}
-        verification = {"intent_status": "partially_achieved", "dominant_blocker": "none", "metric_delta": {"working": {"energy_total": -1.0}}, "trace": trace}
+        manifest = {"manifest_id": "R1", "source_decision_id": did, "contract_id": "C1", "target_id": "T1", "trace_id": "X1", "compiled": {"acceptance": {"mode": "threshold", "intensity_score": 4}}}
+        trace = {"trace_id": "X1", "kind": "alns", "trial_flow": {"candidate_trials": 2, "accepted_trials": 1}}
+        verification = {"trace_id": "X1", "intent_status": "partial", "dominant_blocker": "none", "metric_delta": {"working": {"energy_total": -1.0}}, "trace": trace}
         record = memory.record_verified_action(obs, decision, manifest, trace, verification)
         self.assertEqual(record["observation_id"], "O1")
         self.assertEqual(record["decision_id"], did)

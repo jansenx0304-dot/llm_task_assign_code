@@ -50,8 +50,8 @@ def demo_supervisor_review(observation: Optional[Dict[str, Any]] = None, *, stop
                 max_actions=actions,
                 max_iters=max(actions, 3),
                 max_time_sec=1.0,
-                success=[{"condition_id": "S_best", "source": "last.trace.trial_flow.best_improved_trials", "op": ">", "value": 0, "window": 1}],
-                failure=[{"condition_id": "F_blocker", "source": "aggregate.dominant_blocker.feasibility_rejected_trials", "op": ">=", "value": actions, "window": actions}],
+                success=[{"condition_id": "S_best", "source": "last.best_improved", "op": "==", "value": True, "window": 1}],
+                failure=[{"condition_id": "F_no_gain", "source": "aggregate.not_achieved", "op": ">=", "value": actions, "window": actions}],
                 explanation="Run a short ALNS contract using verified feedback.",
             ),
         }

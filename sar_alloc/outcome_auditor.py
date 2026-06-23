@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from .evaluator import compare_quality
+from .evaluator import build_objective_keys, compare_quality
 from .solution import EvalResult
 
 
@@ -33,6 +33,7 @@ def verify_initial_construction(
     verification_id: str = "",
 ) -> Dict[str, Any]:
     trace = dict(getattr(result, "trace", {}) or {})
+    trace["trace_id"] = str(trace.get("trace_id") or f"X_{verification_id or 'initial'}")
     evaluation = getattr(result, "evaluation", None)
     inserted = int(trace.get("inserted_task_count", 0) or 0)
     if result is None or evaluation is None:
@@ -49,7 +50,7 @@ def verify_initial_construction(
         blocker = "none"
     else:
         tag = "initial_partial"
-        status = "partially_achieved"
+        status = "partial"
         blocker = _initial_blocker(trace)
     trace.setdefault("kind", "initial_insertion")
     verification = _base_verification(
@@ -72,6 +73,7 @@ def verify_initial_construction(
         "dominant_blocker": blocker,
         "flow_diagnosis": _flow_diagnosis(blocker),
         "event_tags": [tag],
+        "objective_keys": _verification_objective_keys(evaluation, _contract_metrics(contract)),
         "trace": trace,
     })
     return verification
@@ -81,26 +83,30 @@ def verify_alns_action(
     *,
     before_working_eval: EvalResult,
     after_working_eval: EvalResult,
-    before_best_eval: Optional[EvalResult],
-    after_best_eval: Optional[EvalResult],
+    before_best_feasible_eval: Optional[EvalResult],
+    after_action_best_eval: Optional[EvalResult],
     trace: Dict[str, Any],
     contract: Any,
     manifest: Any,
+    before_global_best_eval: Optional[EvalResult] = None,
+    after_global_best_eval: Optional[EvalResult] = None,
     decision_id: str = "",
     verification_id: str = "",
     global_objective_layers: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     metrics = _contract_metrics(contract)
     working_delta = _metric_delta(before_working_eval, after_working_eval, metrics)
-    best_delta = _metric_delta(before_best_eval, after_best_eval, metrics)
+    best_delta = _metric_delta(before_best_feasible_eval, after_action_best_eval, metrics)
     debt_delta = _debt_delta(before_working_eval, after_working_eval)
     protected = _protected_metric_result(before_working_eval, after_working_eval, _protected_metrics(contract))
-    blocker = _dominant_blocker_from_trace(trace, working_delta)
+    chosen_after = _better_eval(after_working_eval, after_action_best_eval, metrics)
+    status = _intent_status(before_working_eval, chosen_after, metrics, debt_delta)
+    blocker = _dominant_blocker_from_trace(trace, status)
     tags = _event_tags(
         before_working_eval,
         after_working_eval,
-        before_best_eval,
-        after_best_eval,
+        before_global_best_eval,
+        after_global_best_eval,
         working_delta,
         best_delta,
         debt_delta,
@@ -108,7 +114,6 @@ def verify_alns_action(
         blocker,
         global_objective_layers or metrics,
     )
-    status = _intent_status(working_delta, best_delta, debt_delta, protected, blocker)
     trace = dict(trace)
     trace.setdefault("kind", "alns")
     verification = _base_verification(
@@ -126,8 +131,17 @@ def verify_alns_action(
         "debt_delta": debt_delta,
         "protected_metric_result": protected,
         "dominant_blocker": blocker,
-        "flow_diagnosis": _flow_diagnosis(blocker),
+        "flow_diagnosis": _flow_diagnosis(blocker, status),
         "event_tags": tags,
+        "best_improved": bool(after_global_best_eval is not None and (
+            before_global_best_eval is None
+            or compare_quality(after_global_best_eval, before_global_best_eval, global_objective_layers or metrics) < 0
+        )),
+        "objective_keys": build_objective_keys(
+            chosen_after,
+            metrics,
+            global_objective_layers or metrics,
+        ),
         "trace": trace,
     })
     return verification
@@ -141,9 +155,10 @@ def verify_review_request(
     manifest: Optional[Any] = None,
     decision_id: str = "",
     verification_id: str = "",
+    trace_id: str = "X_review",
 ) -> Dict[str, Any]:
     trace = {
-        "trace_id": "",
+        "trace_id": trace_id,
         "kind": "review_request",
         "recent_verification_ids": [item.get("verification_id") for item in recent_verifications],
     }
@@ -162,7 +177,7 @@ def verify_review_request(
         "debt_delta": {},
         "protected_metric_result": {"passed": True, "violations": []},
         "dominant_blocker": "solver_requested_review",
-        "flow_diagnosis": _flow_diagnosis("none"),
+        "flow_diagnosis": _flow_diagnosis("solver_requested_review", "not_applicable"),
         "event_tags": [],
         "trace": trace,
     })
@@ -180,8 +195,8 @@ def audit_outcome(**kwargs: Any) -> Dict[str, Any]:
     return verify_alns_action(
         before_working_eval=kwargs["before_working_eval"],
         after_working_eval=kwargs["after_working_eval"],
-        before_best_eval=kwargs.get("before_best_eval"),
-        after_best_eval=kwargs.get("after_best_eval"),
+        before_best_feasible_eval=kwargs.get("before_best_eval"),
+        after_action_best_eval=kwargs.get("after_best_eval"),
         trace=kwargs.get("solver_diagnostics", {}).get("execution_trace", {}),
         contract={"contract_id": "", "objective_layers": kwargs.get("contract_objective_layers", []), "protected_metrics": []},
         manifest=None,
@@ -251,7 +266,7 @@ def _protected_metric_result(before_eval: EvalResult, after_eval: EvalResult, pr
     return {"passed": not violations, "violations": violations}
 
 
-def _dominant_blocker_from_trace(trace: Dict[str, Any], working_delta: Dict[str, float]) -> str:
+def _dominant_blocker_from_trace(trace: Dict[str, Any], status: str) -> str:
     flow = trace.get("trial_flow", {}) or {}
     candidate_trials = int(flow.get("candidate_trials", 0) or 0)
     hard_filter_failed = int(flow.get("hard_filter_failed", 0) or 0)
@@ -260,32 +275,43 @@ def _dominant_blocker_from_trace(trace: Dict[str, Any], working_delta: Dict[str,
     accepted = int(flow.get("accepted_trials", 0) or 0)
     if candidate_trials == 0:
         return "no_candidate_position"
-    if hard_filter_failed / max(1, candidate_trials) >= 0.7:
-        return "hard_filter_blocked"
     if feasibility_rejected / max(1, candidate_trials) >= 0.7:
         return "feasibility_rejected_trials"
+    if hard_filter_failed / max(1, candidate_trials) >= 0.7:
+        return "hard_filter_blocked"
     if admissible > 0 and accepted == 0:
         return "acceptance_rejected_trials"
-    primary_improved = any(value < -1e-9 for value in working_delta.values())
-    if accepted > 0 and not primary_improved:
+    if status == "regressed":
+        return "objective_regressed"
+    if status == "not_achieved":
         return "no_quality_gain"
     return "none"
 
 
 def _intent_status(
-    working_delta: Dict[str, float],
-    best_delta: Dict[str, float],
+    before: EvalResult,
+    after: EvalResult,
+    layers: List[Dict[str, Any]],
     debt_delta: Dict[str, float],
-    protected: Dict[str, Any],
-    blocker: str,
 ) -> str:
-    protected_ok = bool(protected.get("passed", False))
-    improved = any(value < -1e-9 for value in working_delta.values()) or any(value < -1e-9 for value in best_delta.values())
-    debt_reduced = any(value < -1e-9 for value in debt_delta.values())
-    if improved and protected_ok and blocker == "none":
+    primary = layers[0]
+    metric = str(primary.get("metric", ""))
+    direction = str(primary.get("direction", "min"))
+    before_primary = float(before.get_quality_metric(metric))
+    after_primary = float(after.get_quality_metric(metric))
+    oriented_delta = after_primary - before_primary
+    if direction == "max":
+        oriented_delta = -oriented_delta
+    if oriented_delta > 1e-9:
+        return "regressed"
+    if oriented_delta < -1e-9:
         return "achieved"
-    if protected_ok and (improved or debt_reduced):
-        return "partially_achieved"
+    secondary_improved = any(
+        compare_quality(after, before, [layer]) < 0 for layer in layers[1:]
+    )
+    non_objective_improved = any(value < -1e-9 for value in debt_delta.values())
+    if secondary_improved or non_objective_improved:
+        return "partial"
     return "not_achieved"
 
 
@@ -320,14 +346,20 @@ def _event_tags(
     return [tag for tag in EVENT_TAGS if tag in tags]
 
 
-def _flow_diagnosis(blocker: str) -> Dict[str, bool]:
+def _flow_diagnosis(blocker: str, status: str = "") -> Dict[str, bool]:
     return {
         "candidate_problem": blocker == "no_candidate_position",
         "hard_filter_problem": blocker == "hard_filter_blocked",
         "feasibility_problem": blocker == "feasibility_rejected_trials",
         "acceptance_problem": blocker == "acceptance_rejected_trials",
-        "quality_problem": blocker == "no_quality_gain",
+        "quality_problem": status in {"not_achieved", "regressed"} and blocker in {"no_quality_gain", "objective_regressed"},
     }
+
+
+def _better_eval(first: EvalResult, second: Optional[EvalResult], layers: List[Dict[str, Any]]) -> EvalResult:
+    if second is None:
+        return first
+    return second if compare_quality(second, first, layers) < 0 else first
 
 
 def _initial_blocker(trace: Dict[str, Any]) -> str:
@@ -357,6 +389,14 @@ def _contract_id(contract: Any) -> str:
 def _manifest_target(manifest: Optional[Any]) -> str:
     raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
     return str(raw.get("target_id", ""))
+
+
+def _verification_objective_keys(
+    evaluation: Optional[EvalResult], layers: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    if evaluation is None or not layers:
+        return {}
+    return build_objective_keys(evaluation, layers, layers)
 
 
 __all__ = [
