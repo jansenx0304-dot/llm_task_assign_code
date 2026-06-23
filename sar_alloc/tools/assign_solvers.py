@@ -49,7 +49,11 @@ class ALNSResult:
     accepted_trial_count: int
     rejected_trial_count: int
     events: List[str]
+    trace: Dict[str, Any]
     diagnostics: Dict[str, Any]
+
+
+ALNSExecutionResult = ALNSResult
 
 def evaluate(*args, **kwargs):  # noqa: F811
     t0 = time.perf_counter()
@@ -149,6 +153,17 @@ def _solve_weighted_alns(
     rejected_trial_count = 0
     feasibility_rejection_reasons: Dict[str, int] = {}
     events: List[str] = []
+    trial_flow = {
+        "candidate_trials": 0,
+        "hard_filter_failed": 0,
+        "feasibility_rejected": 0,
+        "admissible_trials": 0,
+        "acceptance_rejected": 0,
+        "accepted_trials": 0,
+        "best_improved_trials": 0,
+    }
+    repair_failure_reasons: Dict[str, int] = {}
+    removed_task_count_sum = 0.0
 
     iteration = 0
     started_at = time.perf_counter()
@@ -169,6 +184,7 @@ def _solve_weighted_alns(
         actual_d_name = str(move.operator_name)
         d_used[actual_d_name] += 1
         removed = list(int(tid) for tid in move.task_ids)
+        removed_task_count_sum += float(len(removed))
         last_destroy_move = move.as_dict()
 
         partial = cur.clone(deep=True)
@@ -188,6 +204,13 @@ def _solve_weighted_alns(
         )
         trial.solver_diagnostics["last_destroy_move"] = last_destroy_move
         last_insertion = dict((getattr(trial, "solver_diagnostics", {}) or {}).get("last_insertion", {}) or {})
+        trial_flow["candidate_trials"] += 1
+        if int(last_insertion.get("inserted_count", 0) or 0) == 0:
+            trial_flow["hard_filter_failed"] += 1
+            repair_failure_reasons["no_reinserted_task"] = repair_failure_reasons.get("no_reinserted_task", 0) + 1
+        for name, count in dict(last_insertion.get("failure_breakdown", {}) or {}).items():
+            if int(count):
+                repair_failure_reasons[str(name)] = repair_failure_reasons.get(str(name), 0) + int(count)
 
         trial.normalize(instance)
         ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
@@ -207,6 +230,7 @@ def _solve_weighted_alns(
             feasibility_reason=feasibility_decision.reason,
         )
         if feasibility_decision.admissible:
+            trial_flow["admissible_trials"] += 1
             acceptance = _alns_accept(
                 cur_ev=cur_ev,
                 trial_ev=ev_trial,
@@ -220,6 +244,7 @@ def _solve_weighted_alns(
                 feasibility_reason=feasibility_decision.reason,
             )
         else:
+            trial_flow["feasibility_rejected"] += 1
             feasibility_rejection_reasons[feasibility_decision.reason] = (
                 feasibility_rejection_reasons.get(feasibility_decision.reason, 0) + 1
             )
@@ -240,9 +265,12 @@ def _solve_weighted_alns(
             cur = trial
             cur_ev = ev_trial
             accepted_trial_count += 1
+            trial_flow["accepted_trials"] += 1
             reward = max(reward, 0.2)
         else:
             rejected_trial_count += 1
+            if feasibility_decision.admissible:
+                trial_flow["acceptance_rejected"] += 1
 
         best_improved = False
         if ev_trial.is_feasible and (
@@ -255,7 +283,7 @@ def _solve_weighted_alns(
             best_update_lex_keys.append(list(best_feasible_ev.lex_key or ()))
             reward = max(reward, 5.0)
             best_improved = True
-            events.append("quality_improved")
+            trial_flow["best_improved_trials"] += 1
 
         iteration_trace.append(
             {
@@ -301,10 +329,15 @@ def _solve_weighted_alns(
     if best_feasible is not None:
         evaluate(best_feasible, instance, config, update_solution_schedule=True)
     actual_time_used_sec = max(0.0, time.perf_counter() - started_at)
-    if accepted_trial_count == 0:
-        events.append("no_admissible_candidate")
-    elif not any(event == "quality_improved" for event in events):
-        events.append("quality_flat")
+    trace = _build_execution_trace(
+        total_iters=iteration,
+        destroy_operator_summary=_finalize_destroy_operator_stats(destroy_operator_stats),
+        insertion_operator_summary=_finalize_insertion_operator_summary(insertion_operator_summary),
+        trial_flow=trial_flow,
+        rejection_reasons=feasibility_rejection_reasons,
+        repair_failure_reasons=repair_failure_reasons,
+        removed_task_count_sum=removed_task_count_sum,
+    )
     diagnostics = _build_solver_diagnostics(
         policy=policy,
         total_iters=iteration,
@@ -316,8 +349,8 @@ def _solve_weighted_alns(
         returned_solution_feasible=bool(getattr(final_current.eval, "is_feasible", False)),
         last_acceptance_decision=last_acceptance_decision,
         last_destroy_move=last_destroy_move,
-        destroy_operator_summary=_finalize_destroy_operator_stats(destroy_operator_stats),
-        insertion_operator_summary=_finalize_insertion_operator_summary(insertion_operator_summary),
+        destroy_operator_summary=trace["destroy"]["selected_operator_counts"],
+        insertion_operator_summary=trace["repair"],
         iteration_trace=iteration_trace,
         last_insertion=last_insertion,
         operator_weights={
@@ -331,6 +364,7 @@ def _solve_weighted_alns(
         feasibility_policy=feasibility_policy,
         final_constraint_report=final_current.eval.constraint_report,
         feasibility_rejection_reasons=feasibility_rejection_reasons,
+        execution_trace=trace,
     )
     print(
         "[ALNS] done "
@@ -349,6 +383,7 @@ def _solve_weighted_alns(
         accepted_trial_count=int(accepted_trial_count),
         rejected_trial_count=int(rejected_trial_count),
         events=_dedupe_events(events),
+        trace=trace,
         diagnostics=diagnostics,
     )
 
@@ -570,6 +605,7 @@ def _build_solver_diagnostics(
     feasibility_policy: Dict[str, Any],
     final_constraint_report: Any,
     feasibility_rejection_reasons: Dict[str, int],
+    execution_trace: Dict[str, Any],
 ) -> Dict[str, Any]:
     last_best_iter = best_update_iters[-1] if best_update_iters else None
     diagnostics = {
@@ -603,8 +639,55 @@ def _build_solver_diagnostics(
             str(reason): int(count)
             for reason, count in feasibility_rejection_reasons.items()
         },
+        "execution_trace": dict(execution_trace),
     }
     return diagnostics
+
+
+def _build_execution_trace(
+    *,
+    total_iters: int,
+    destroy_operator_summary: Dict[str, Any],
+    insertion_operator_summary: Dict[str, Any],
+    trial_flow: Dict[str, int],
+    rejection_reasons: Dict[str, int],
+    repair_failure_reasons: Dict[str, int],
+    removed_task_count_sum: float,
+) -> Dict[str, Any]:
+    selected_counts = {
+        str(name): int(values.get("used", 0) if isinstance(values, dict) else values)
+        for name, values in destroy_operator_summary.items()
+    }
+    candidate_trials = max(1, int(trial_flow.get("candidate_trials", 0) or 0))
+    tasks_reinserted = sum(
+        int(values.get("inserted_sum", 0) or 0)
+        for values in insertion_operator_summary.values()
+        if isinstance(values, dict)
+    )
+    tasks_left = sum(
+        int(values.get("unassigned_after_sum", 0) or 0)
+        for values in insertion_operator_summary.values()
+        if isinstance(values, dict)
+    )
+    dominant_repair = max(repair_failure_reasons.items(), key=lambda item: int(item[1]), default=("none", 0))[0]
+    return {
+        "trace_id": "",
+        "kind": "alns",
+        "iters": int(total_iters),
+        "destroy": {
+            "selected_operator_counts": selected_counts,
+            "removed_task_count_avg": round(float(removed_task_count_sum) / candidate_trials, 6),
+        },
+        "repair": {
+            "candidate_tasks_total": int(tasks_reinserted + tasks_left),
+            "tasks_reinserted": int(tasks_reinserted),
+            "tasks_left_unassigned": int(tasks_left),
+            "dominant_repair_failure": str(dominant_repair),
+            "repair_failure_reasons": {str(k): int(v) for k, v in repair_failure_reasons.items()},
+        },
+        "trial_flow": {str(k): int(v) for k, v in trial_flow.items()},
+        "rejection_reasons": {str(k): int(v) for k, v in rejection_reasons.items()},
+    }
 
 
 def _violation_ratio_diagnostics(

@@ -10,38 +10,19 @@ def demo_supervisor_kickoff(observation: Optional[Dict[str, Any]] = None) -> Dic
             "action": "start_run",
             "global_objective": {
                 "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
-                "selection_basis": [
-                    {"metric": "missed_priority", "data_refs": ["E1"], "reason": "Prioritize mission value coverage."},
-                    {"metric": "unassigned_count", "data_refs": ["E1"], "reason": "Track task coverage after value loss."},
-                    {"metric": "energy_total", "data_refs": ["E1"], "reason": "Reduce resource use after coverage."},
-                ],
+                "explanation": {"summary": "Prioritize coverage, then energy."},
             },
-            "next_contract": {
-                "contract_type": "initial_construction",
-                "stage_goal": {
-                    "summary": "Build a coverage-oriented initial solution.",
-                    "main_problem": "The run starts from empty routes.",
-                    "search_intent": "Insert valuable and scarce tasks early.",
-                },
-                "stage_objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
-                "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
-                "guidance": {
-                    "instruction": "Construct a stable initial solution with high task coverage.",
-                    "preferred_search_direction": "priority-and-scarcity-aware insertion",
-                    "protect": "Preserve time and energy slack for later insertions.",
-                    "success_signal": "Most high-priority tasks are assigned.",
-                    "failure_signal": "Many scarce high-priority tasks remain unassigned.",
-                },
-                "completion_policy": {
-                    "min_solver_actions": 1,
-                    "max_solver_actions": 1,
-                    "max_time_sec": _cap_time(remaining, 5.0),
-                    "max_iters": _cap_iters(remaining, 1),
-                    "success_rules": [{"event": "initial_solution_built", "count": 1, "scope": "total"}],
-                    "failure_rules": [{"event": "initial_solution_failed", "count": 1, "scope": "total"}],
-                },
-            },
-            "decision_basis": _basis("Start with coverage-oriented construction."),
+            "next_contract": _contract(
+                "initial_construction",
+                remaining,
+                min_actions=1,
+                max_actions=1,
+                max_iters=1,
+                max_time_sec=5.0,
+                success=[{"condition_id": "S_initial", "source": "last.intent_status", "op": "==", "value": "achieved", "window": 1}],
+                failure=[{"condition_id": "F_initial", "source": "last.intent_status", "op": "==", "value": "not_achieved", "window": 1}],
+                explanation="Build a coverage-oriented initial solution.",
+            ),
         }
     }
 
@@ -53,109 +34,119 @@ def demo_supervisor_review(observation: Optional[Dict[str, Any]] = None, *, stop
         return {
             "supervisor_decision": {
                 "action": "stop_run",
-                "contract_review": _contract_review("The demo search is complete."),
-                "stop_reason": "The demo search is complete.",
-                "decision_basis": _basis("Return the best solution found."),
+                "contract_review": _contract_review("The search is complete."),
+                "stop_explanation": "The search is complete.",
             }
         }
-    actions = min(3, allowed_actions)
-    actions = max(1, actions)
+    actions = max(1, min(3, allowed_actions))
     return {
         "supervisor_decision": {
             "action": "issue_contract",
-            "contract_review": _contract_review("Initial construction produced a working solution."),
-            "next_contract": {
-                "contract_type": "alns_search",
-                "stage_goal": {
-                    "summary": "Improve the coverage-oriented solution.",
-                    "main_problem": "Some valuable tasks may remain unassigned or costly.",
-                    "search_intent": "Locally rebuild routes around valuable and coupled tasks.",
-                },
-                "stage_objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
-                "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
-                "guidance": {
-                    "instruction": "Run focused ALNS actions to improve priority coverage.",
-                    "preferred_search_direction": "related-cluster removal with scarcity-aware reinsertion",
-                    "protect": "Preserve feasible route structure and useful slack.",
-                    "success_signal": "Priority loss or unassigned count decreases.",
-                    "failure_signal": "Repeated flat outcomes indicate this direction is exhausted.",
-                },
-                "completion_policy": {
-                    "min_solver_actions": actions,
-                    "max_solver_actions": actions,
-                    "max_time_sec": _cap_time(remaining, 1.0),
-                    "max_iters": _cap_iters(remaining, max(actions, 3)),
-                    "success_rules": [{"event": "global_best_improved", "count": 1, "scope": "total"}],
-                    "failure_rules": [{"event": "quality_flat", "count": actions, "scope": "consecutive"}],
-                },
-            },
-            "decision_basis": _basis("Use a short multi-action ALNS contract."),
+            "contract_review": _contract_review("The previous contract produced verified feedback."),
+            "next_contract": _contract(
+                "alns_search",
+                remaining,
+                min_actions=actions,
+                max_actions=actions,
+                max_iters=max(actions, 3),
+                max_time_sec=1.0,
+                success=[{"condition_id": "S_best", "source": "last.trace.trial_flow.best_improved_trials", "op": ">", "value": 0, "window": 1}],
+                failure=[{"condition_id": "F_blocker", "source": "aggregate.dominant_blocker.feasibility_rejected_trials", "op": ">=", "value": actions, "window": actions}],
+                explanation="Run a short ALNS contract using verified feedback.",
+            ),
         }
     }
 
 
 def demo_solver_decision(observation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    contract = (observation or {}).get("active_contract", {}) or {}
+    contract = (observation or {}).get("contract_view", {}) or (observation or {}).get("active_contract", {}) or {}
     if contract.get("contract_type") == "initial_construction":
         return {
             "solver_decision": {
                 "action": "construct_initial",
-                "reason": "Build the first working solution under the initial construction contract.",
+                "target_id": _first_target(observation, "T_unassigned_priority"),
                 "insertion_control": _insertion_control(),
-                "decision_basis": _basis("Use priority and scarcity aware construction."),
+                "explanation": {"reason_summary": "Use priority and scarcity aware construction."},
             }
         }
     return {
         "solver_decision": {
             "action": "run_alns",
-            "reason": "Use a focused local rebuild under the active contract.",
+            "target_id": _first_target(observation, "T_unassigned_priority"),
             "destroy_control": {
-                "operator_scores": [{"name": "related_cluster_removal", "score": 8, "reason": "Rebuild a coupled local region."}],
-                "signal_scores": [{"name": "coupling_pressure", "score": 8, "reason": "Target tightly coupled tasks."}],
+                "operator_scores": [{"name": "related_cluster_removal", "score": 8}],
+                "signal_scores": [{"name": "coupling_pressure", "score": 8}],
                 "intensity_score": 5,
             },
             "insertion_control": _insertion_control(),
-            "acceptance_control": {"mode": "threshold", "intensity_score": 4, "reason": "Allow limited exploration."},
-            "decision_basis": _basis("Run one bounded ALNS action."),
+            "acceptance_control": {"mode": "threshold", "intensity_score": 4},
+            "explanation": {"reason_summary": "Run one bounded local rebuild."},
         }
+    }
+
+
+def _contract(
+    contract_type: str,
+    remaining: Dict[str, float],
+    *,
+    min_actions: int,
+    max_actions: int,
+    max_iters: int,
+    max_time_sec: float,
+    success: list[Dict[str, Any]],
+    failure: list[Dict[str, Any]],
+    explanation: str,
+) -> Dict[str, Any]:
+    return {
+        "contract_type": contract_type,
+        "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
+        "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
+        "target_policy": {"preferred_target_kinds": ["unassigned_priority", "energy_debt"]},
+        "protected_metrics": [{"metric": "unassigned_count", "max_worsen": 0}],
+        "resource_policy": {
+            "min_actions": min_actions,
+            "max_actions": max_actions,
+            "max_time_sec": _cap_time(remaining, max_time_sec),
+            "max_iters": _cap_iters(remaining, max_iters),
+        },
+        "exit_conditions": {"success": success, "failure": failure},
+        "explanation": {"stage_summary": explanation},
     }
 
 
 def _insertion_control() -> Dict[str, Any]:
     return {
         "operator_scores": [
-            {"name": "scarcity_first_insertion", "score": 8, "reason": "Insert scarce tasks early."},
-            {"name": "regret_insertion", "score": 7, "reason": "Avoid losing future insertion opportunities."},
+            {"name": "scarcity_first_insertion", "score": 8},
+            {"name": "regret_insertion", "score": 7},
         ],
         "task_signal_scores": [
-            {"name": "priority_loss", "score": 9, "reason": "Protect valuable tasks."},
-            {"name": "scarcity_pressure", "score": 8, "reason": "Prioritize constrained tasks."},
+            {"name": "priority_loss", "score": 9},
+            {"name": "scarcity_pressure", "score": 8},
         ],
         "position_signal_scores": [
-            {"name": "insert_cost", "score": 8, "reason": "Control route growth."},
-            {"name": "future_slack", "score": 7, "reason": "Preserve future flexibility."},
+            {"name": "insert_cost", "score": 8},
+            {"name": "future_slack", "score": 7},
         ],
     }
-
-
-def _basis(summary: str) -> Dict[str, Any]:
-    return {"evidence_refs": ["E1"], "memory_refs": [], "summary": summary}
 
 
 def _contract_review(summary: str) -> Dict[str, str]:
     return {
         "outcome_summary": summary,
-        "main_lesson": "The next decision should use the completed contract result and remaining budget.",
-        "next_intent": "Continue only when there is enough budget for another contract.",
+        "main_lesson": "The next decision should use condition_report and verified outcomes.",
     }
 
 
 def _remaining(observation: Optional[Dict[str, Any]]) -> Dict[str, float]:
-    raw = (observation or {}).get("remaining_global_budget", {}) or {}
+    obs = observation or {}
+    raw = obs.get("remaining_global_budget", {}) or {}
+    caps = obs.get("budget_caps", {}) or {}
     return {
-        "solver_calls": float(raw.get("solver_calls", 1) or 0),
-        "time_sec": float(raw.get("time_sec", 1.0) or 0.0),
-        "iters": float(raw.get("iters", 1) or 0),
+        "solver_calls": float(raw.get("solver_calls", caps.get("max_solver_actions", 1)) or 0),
+        "step_calls": float(raw.get("step_calls", caps.get("max_solver_actions", 1)) or 0),
+        "time_sec": float(raw.get("time_sec", caps.get("max_time_sec", 1.0)) or 0.0),
+        "iters": float(raw.get("iters", caps.get("max_iters", 1)) or 0),
     }
 
 
@@ -163,13 +154,14 @@ def _allowed_actions(observation: Optional[Dict[str, Any]], remaining: Dict[str,
     limits = (observation or {}).get("next_contract_resource_limits", {}) or {}
     if "max_solver_actions_allowed" in limits:
         return max(0, int(float(limits.get("max_solver_actions_allowed", 0) or 0)))
-    return max(
-        0,
-        min(
-            int(float(remaining.get("solver_calls", 0) or 0)),
-            int(float((observation or {}).get("remaining_global_budget", {}).get("step_calls", remaining.get("solver_calls", 0)) or 0)),
-        ),
-    )
+    return max(0, min(int(float(remaining.get("solver_calls", 0) or 0)), int(float(remaining.get("step_calls", 0) or 0))))
+
+
+def _first_target(observation: Optional[Dict[str, Any]], fallback: str) -> str:
+    for item in (observation or {}).get("decision_targets", []) or []:
+        if isinstance(item, dict) and item.get("kind") != "contract_review":
+            return str(item.get("target_id", fallback))
+    return fallback
 
 
 def _cap_time(remaining: Dict[str, float], desired: float) -> float:

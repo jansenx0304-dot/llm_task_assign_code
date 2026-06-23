@@ -18,10 +18,9 @@ def get_supervisor_kickoff_prompt(*, user_goal_text: str, observation: Dict[str,
     return _prompt(
         "SUPERVISOR_KICKOFF",
         (
-            "Start the run. Select the run-level global_objective and issue the first "
-            "initial_construction contract. The contract must define stage_goal, "
-            "stage_objective_layers, feasibility_control, guidance, and completion_policy. "
-            "Do not choose destroy, insertion, acceptance, or per-action operator scores."
+            "You are the stage supervisor. Use only the observation fields. Output a "
+            "global objective and one executable initial contract. Operational fields "
+            "will be compiled and enforced. Put human-readable text only in explanation."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,
@@ -32,9 +31,9 @@ def get_supervisor_review_prompt(*, user_goal_text: str, observation: Dict[str, 
     return _prompt(
         "SUPERVISOR_REVIEW",
         (
-            "Review the completed contract and decide whether to issue the next contract "
-            "or stop the run. A new contract must define the next stage goal, stage objective, "
-            "feasibility mode, guidance, and completion policy. Do not choose low-level ALNS operators."
+            "Use condition_report, stage_verification_summary, solution_position, and "
+            "budget_caps to decide whether to stop or issue the next executable contract. "
+            "Put human-readable text only in contract_review or explanation."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,
@@ -45,9 +44,9 @@ def get_solver_prompt(*, user_goal_text: str, observation: Dict[str, Any], json_
     return _prompt(
         "SOLVER",
         (
-            "Act under the active supervisor contract. For initial_construction, output construct_initial. "
-            "For alns_search, recovery, or final_refinement, output run_alns unless the contract is clearly inconsistent "
-            "with the observation. Do not change global objective, stage objective, feasibility mode, or completion policy."
+            "Choose one allowed action. If executing a solver action, choose one target_id "
+            "from decision_targets and choose controls only from action_space. Every "
+            "operational field will be compiled and executed exactly."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,

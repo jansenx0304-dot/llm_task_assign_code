@@ -17,12 +17,14 @@ def event_category(event_type: str) -> str:
         return "raw"
     if normalized.endswith("_validated_payload") or normalized.startswith("validated_"):
         return "validated"
-    if normalized.startswith("compiled_"):
+    if normalized.startswith("compiled_") or normalized == "runtime_control_manifest":
         return "compiled"
     if normalized.startswith("solver_") or normalized in {"solver_request", "solver_result"}:
         return "solver"
-    if normalized == "outcome_audit":
+    if normalized in {"outcome_audit", "outcome_verification"}:
         return "audit"
+    if normalized == "execution_trace":
+        return "solver"
     if normalized in {"contract_completion_check", "contract_end", "contract_progress"}:
         return "review"
     if normalized == "final_result":
@@ -167,9 +169,12 @@ class MarkdownTraceWriter:
             or normalized.startswith("compiled_")
             or normalized in {
                 "initial_insertion_result",
+                "runtime_control_manifest",
+                "execution_trace",
                 "solver_request",
                 "solver_result",
                 "outcome_audit",
+                "outcome_verification",
                 "contract_completion_check",
                 "contract_end",
                 "contract_progress",
@@ -256,6 +261,8 @@ class ConsoleTracePrinter:
             return "public candidates recorded"
         if event_type == "compiled_contract":
             return self._compiled_contract_summary(payload)
+        if event_type == "runtime_control_manifest":
+            return self._manifest_summary(payload)
         if event_type == "compiled_solver_policy":
             return self._compiled_solver_summary(payload)
         if event_type == "compiled_initial_policy":
@@ -264,7 +271,11 @@ class ConsoleTracePrinter:
             return self._solver_request_summary(payload)
         if event_type == "solver_result":
             return self._solver_result_summary(payload)
-        if event_type == "outcome_audit":
+        if event_type == "execution_trace":
+            return self._execution_trace_summary(payload)
+        if event_type in {"outcome_audit", "outcome_verification"}:
+            if isinstance(payload, dict) and "intent_status" in payload:
+                return f"status={payload.get('intent_status')} blocker={payload.get('dominant_blocker')}"
             return f"events={payload.get('events', [])}" if isinstance(payload, dict) else "audit recorded"
         if event_type == "contract_completion_check":
             if isinstance(payload, dict):
@@ -299,12 +310,32 @@ class ConsoleTracePrinter:
     def _compiled_contract_summary(self, payload: Any) -> str:
         if not isinstance(payload, dict):
             return "contract compiled"
-        policy = payload.get("completion_policy", {}) or {}
-        objective = [item.get("metric") for item in payload.get("stage_objective_layers", []) if isinstance(item, dict)]
+        policy = payload.get("resource_policy", {}) or {}
+        objective = [item.get("metric") for item in payload.get("objective_layers", []) if isinstance(item, dict)]
         return (
             f"type={payload.get('contract_type')} objective={objective} "
-            f"actions={policy.get('min_solver_actions')}..{policy.get('max_solver_actions')}"
+            f"actions={policy.get('min_actions')}..{policy.get('max_actions')}"
         )
+
+    def _manifest_summary(self, payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return "manifest compiled"
+        compiled = payload.get("compiled", {}) or {}
+        action = payload.get("action")
+        target = payload.get("target_id")
+        if action == "run_alns":
+            destroy = (compiled.get("destroy", {}) or {}).get("operator_weights", {})
+            insertion = (compiled.get("insertion", {}) or {}).get("operator_weights", {})
+            return f"action={action} target={target} destroy={self._format_operator_weights(destroy)} insertion={self._format_operator_weights(insertion)}"
+        return f"action={action} target={target}"
+
+    def _execution_trace_summary(self, payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return "execution trace recorded"
+        flow = payload.get("trial_flow", {}) or {}
+        if flow:
+            return f"trials={flow.get('candidate_trials')} accepted={flow.get('accepted_trials')} best={flow.get('best_improved_trials')}"
+        return f"kind={payload.get('kind')} inserted={payload.get('inserted_task_count')}"
 
     def _compiled_solver_summary(self, payload: Any) -> str:
         if not isinstance(payload, dict):

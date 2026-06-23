@@ -43,8 +43,8 @@ def compile_feasibility_control(
     rules = load_delta_rules(config)
     per_type: Dict[str, Dict[str, float]] = {}
     for item in feasibility_control["relaxation_ratios"]:
-        violation_type = str(item["type"])
-        limit_ratio = float(item["limit_ratio"])
+        violation_type = str(item.get("violation_type", item.get("type", "")))
+        limit_ratio = float(item.get("max_ratio", item.get("limit_ratio", 0.0)))
         rule = rules[violation_type]
         per_type[violation_type] = {
             "limit_ratio": limit_ratio,

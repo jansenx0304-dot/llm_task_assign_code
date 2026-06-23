@@ -6,87 +6,364 @@ from .evaluator import compare_quality
 from .solution import EvalResult
 
 
-OUTCOME_EVENTS = (
-    "initial_solution_built",
-    "initial_solution_failed",
-    "quality_improved",
-    "quality_flat",
-    "quality_worsened",
-    "global_best_improved",
-    "no_admissible_candidate",
+EVENT_TAGS = (
+    "initial_feasible",
+    "initial_partial",
+    "initial_empty",
+    "initial_failed",
+    "working_quality_improved",
+    "best_feasible_improved",
+    "protected_metric_violated",
+    "hard_filter_blocked",
+    "feasibility_rejected_trials",
+    "acceptance_rejected_trials",
+    "no_accepted_trial",
+    "no_quality_gain",
+    "debt_reduced",
     "feasibility_recovered",
-    "recovery_debt_reduced",
 )
 
 
-def audit_initial_result(*, initial_eval: Optional[EvalResult]) -> Dict[str, Any]:
-    if initial_eval is None:
-        return {
-            "action": "construct_initial",
-            "initial_quality": {"is_feasible": False, "quality_metrics": {}},
-            "events": ["initial_solution_failed"],
-        }
-    return {
-        "action": "construct_initial",
-        "initial_quality": {
-            "is_feasible": bool(initial_eval.is_feasible),
-            "quality_metrics": dict(initial_eval.quality_metrics),
+def verify_initial_construction(
+    result: Any,
+    contract: Any,
+    manifest: Optional[Any] = None,
+    *,
+    decision_id: str = "",
+    verification_id: str = "",
+) -> Dict[str, Any]:
+    trace = dict(getattr(result, "trace", {}) or {})
+    evaluation = getattr(result, "evaluation", None)
+    inserted = int(trace.get("inserted_task_count", 0) or 0)
+    if result is None or evaluation is None:
+        tag = "initial_failed"
+        status = "not_achieved"
+        blocker = "initial_failed"
+    elif inserted == 0:
+        tag = "initial_empty"
+        status = "not_achieved"
+        blocker = "no_candidate_position" if int(trace.get("zero_candidate_task_count", 0) or 0) else "initial_empty"
+    elif bool(evaluation.is_feasible):
+        tag = "initial_feasible"
+        status = "achieved"
+        blocker = "none"
+    else:
+        tag = "initial_partial"
+        status = "partially_achieved"
+        blocker = _initial_blocker(trace)
+    trace.setdefault("kind", "initial_insertion")
+    verification = _base_verification(
+        verification_id=verification_id,
+        contract=contract,
+        decision_id=decision_id,
+        manifest=manifest,
+        trace=trace,
+        action="construct_initial",
+        target_id=_manifest_target(manifest),
+    )
+    verification.update({
+        "intent_status": status,
+        "metric_delta": {
+            "working": _metric_values(evaluation, _contract_metrics(contract)) if evaluation is not None else {},
+            "best_feasible": _metric_values(evaluation, _contract_metrics(contract)) if evaluation is not None and evaluation.is_feasible else {},
         },
-        "events": ["initial_solution_built"],
-    }
+        "debt_delta": {},
+        "protected_metric_result": {"passed": True, "violations": []},
+        "dominant_blocker": blocker,
+        "flow_diagnosis": _flow_diagnosis(blocker),
+        "event_tags": [tag],
+        "trace": trace,
+    })
+    return verification
 
 
-def audit_outcome(
+def verify_alns_action(
     *,
     before_working_eval: EvalResult,
     after_working_eval: EvalResult,
     before_best_eval: Optional[EvalResult],
     after_best_eval: Optional[EvalResult],
-    contract_objective_layers: List[Dict[str, Any]],
-    global_objective_layers: List[Dict[str, Any]],
-    solver_diagnostics: Dict[str, Any],
-    solver_events: List[str],
+    trace: Dict[str, Any],
+    contract: Any,
+    manifest: Any,
+    decision_id: str = "",
+    verification_id: str = "",
+    global_objective_layers: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    comparison = compare_quality(after_working_eval, before_working_eval, contract_objective_layers)
-    status = "improved" if comparison < 0 else "worsened" if comparison > 0 else "flat"
-    events = [f"quality_{status}"]
-    global_improved = bool(
-        after_best_eval is not None
-        and (before_best_eval is None or compare_quality(after_best_eval, before_best_eval, global_objective_layers) < 0)
+    metrics = _contract_metrics(contract)
+    working_delta = _metric_delta(before_working_eval, after_working_eval, metrics)
+    best_delta = _metric_delta(before_best_eval, after_best_eval, metrics)
+    debt_delta = _debt_delta(before_working_eval, after_working_eval)
+    protected = _protected_metric_result(before_working_eval, after_working_eval, _protected_metrics(contract))
+    blocker = _dominant_blocker_from_trace(trace, working_delta)
+    tags = _event_tags(
+        before_working_eval,
+        after_working_eval,
+        before_best_eval,
+        after_best_eval,
+        working_delta,
+        best_delta,
+        debt_delta,
+        protected,
+        blocker,
+        global_objective_layers or metrics,
     )
-    if global_improved:
-        events.append("global_best_improved")
-    if "no_admissible_candidate" in solver_events:
-        events.append("no_admissible_candidate")
-    if not before_working_eval.is_feasible and after_working_eval.is_feasible:
-        events.append("feasibility_recovered")
-    if bool(solver_diagnostics.get("recovery_debt_reduced", False)):
-        events.append("recovery_debt_reduced")
-    events = [event for event in OUTCOME_EVENTS if event in events]
+    status = _intent_status(working_delta, best_delta, debt_delta, protected, blocker)
+    trace = dict(trace)
+    trace.setdefault("kind", "alns")
+    verification = _base_verification(
+        verification_id=verification_id,
+        contract=contract,
+        decision_id=decision_id,
+        manifest=manifest,
+        trace=trace,
+        action="run_alns",
+        target_id=_manifest_target(manifest),
+    )
+    verification.update({
+        "intent_status": status,
+        "metric_delta": {"working": working_delta, "best_feasible": best_delta},
+        "debt_delta": debt_delta,
+        "protected_metric_result": protected,
+        "dominant_blocker": blocker,
+        "flow_diagnosis": _flow_diagnosis(blocker),
+        "event_tags": tags,
+        "trace": trace,
+    })
+    return verification
+
+
+def verify_review_request(
+    decision: Dict[str, Any],
+    contract: Any,
+    recent_verifications: List[Dict[str, Any]],
+    *,
+    manifest: Optional[Any] = None,
+    decision_id: str = "",
+    verification_id: str = "",
+) -> Dict[str, Any]:
+    trace = {
+        "trace_id": "",
+        "kind": "review_request",
+        "recent_verification_ids": [item.get("verification_id") for item in recent_verifications],
+    }
+    verification = _base_verification(
+        verification_id=verification_id,
+        contract=contract,
+        decision_id=decision_id,
+        manifest=manifest,
+        trace=trace,
+        action="request_supervisor_review",
+        target_id=(decision.get("solver_decision", decision)).get("target_id", "contract_review"),
+    )
+    verification.update({
+        "intent_status": "not_applicable",
+        "metric_delta": {"working": {}, "best_feasible": {}},
+        "debt_delta": {},
+        "protected_metric_result": {"passed": True, "violations": []},
+        "dominant_blocker": "solver_requested_review",
+        "flow_diagnosis": _flow_diagnosis("none"),
+        "event_tags": [],
+        "trace": trace,
+    })
+    return verification
+
+
+def audit_initial_result(*, initial_eval: Optional[EvalResult]) -> Dict[str, Any]:
+    class _Result:
+        evaluation = initial_eval
+        trace = {"inserted_task_count": 1 if initial_eval is not None else 0, "kind": "initial_insertion"}
+    return verify_initial_construction(_Result(), {"contract_id": "", "objective_layers": []})
+
+
+def audit_outcome(**kwargs: Any) -> Dict[str, Any]:
+    return verify_alns_action(
+        before_working_eval=kwargs["before_working_eval"],
+        after_working_eval=kwargs["after_working_eval"],
+        before_best_eval=kwargs.get("before_best_eval"),
+        after_best_eval=kwargs.get("after_best_eval"),
+        trace=kwargs.get("solver_diagnostics", {}).get("execution_trace", {}),
+        contract={"contract_id": "", "objective_layers": kwargs.get("contract_objective_layers", []), "protected_metrics": []},
+        manifest=None,
+        global_objective_layers=kwargs.get("global_objective_layers"),
+    )
+
+
+def _base_verification(
+    *,
+    verification_id: str,
+    contract: Any,
+    decision_id: str,
+    manifest: Optional[Any],
+    trace: Dict[str, Any],
+    action: str,
+    target_id: str,
+) -> Dict[str, Any]:
+    manifest_dict = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
     return {
-        "action": "run_alns",
-        "contract_quality_change": {
-            "status": status,
-            "before": _metrics(before_working_eval, contract_objective_layers),
-            "after": _metrics(after_working_eval, contract_objective_layers),
-        },
-        "global_best_change": {"improved": global_improved},
-        "solver_stats": {
-            "iterations": int(solver_diagnostics.get("total_iters", 0) or 0),
-            "accepted_trials": int(solver_diagnostics.get("accepted_trial_count", 0) or 0),
-            "rejected_trials": int(solver_diagnostics.get("rejected_trial_count", 0) or 0),
-            "best_changed": global_improved,
-            "violation_ratios": dict(solver_diagnostics.get("violation_ratios", {}) or {}),
-            "feasibility_rejection_reasons": dict(
-                solver_diagnostics.get("feasibility_rejection_reasons", {}) or {}
-            ),
-        },
-        "events": events,
+        "verification_id": verification_id,
+        "contract_id": _contract_id(contract),
+        "decision_id": decision_id or manifest_dict.get("source_decision_id", ""),
+        "manifest_id": manifest_dict.get("manifest_id", ""),
+        "trace_id": trace.get("trace_id", ""),
+        "action": action,
+        "target_id": target_id,
     }
 
 
-def _metrics(evaluation: EvalResult, layers: List[Dict[str, Any]]) -> Dict[str, float]:
-    return {str(layer["metric"]): float(evaluation.get_metric(str(layer["metric"]))) for layer in layers}
+def _metric_delta(before: Optional[EvalResult], after: Optional[EvalResult], metrics: List[Dict[str, Any]]) -> Dict[str, float]:
+    if before is None or after is None:
+        return {}
+    return {
+        str(layer.get("metric", layer.get("name", ""))): float(after.get_metric(str(layer.get("metric", layer.get("name", ""))))) - float(before.get_metric(str(layer.get("metric", layer.get("name", "")))))
+        for layer in metrics
+        if str(layer.get("metric", layer.get("name", "")))
+    }
 
 
-__all__ = ["OUTCOME_EVENTS", "audit_initial_result", "audit_outcome"]
+def _metric_values(evaluation: Optional[EvalResult], metrics: List[Dict[str, Any]]) -> Dict[str, float]:
+    if evaluation is None:
+        return {}
+    return {
+        str(layer.get("metric", layer.get("name", ""))): float(evaluation.get_metric(str(layer.get("metric", layer.get("name", "")))))
+        for layer in metrics
+        if str(layer.get("metric", layer.get("name", "")))
+    }
+
+
+def _debt_delta(before: EvalResult, after: EvalResult) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    before_ratios = before.constraint_report.violation_ratio_by_type
+    after_ratios = after.constraint_report.violation_ratio_by_type
+    for name in sorted(set(before_ratios) | set(after_ratios) | {"time_window", "energy"}):
+        out[str(name)] = float(after_ratios.get(name, 0.0)) - float(before_ratios.get(name, 0.0))
+    return out
+
+
+def _protected_metric_result(before_eval: EvalResult, after_eval: EvalResult, protected_metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    violations = []
+    for item in protected_metrics:
+        metric = str(item.get("metric", ""))
+        max_worsen = float(item.get("max_worsen", 0.0) or 0.0)
+        delta = float(after_eval.get_metric(metric)) - float(before_eval.get_metric(metric))
+        if delta > max_worsen + 1e-9:
+            violations.append({"metric": metric, "delta": delta, "max_worsen": max_worsen})
+    return {"passed": not violations, "violations": violations}
+
+
+def _dominant_blocker_from_trace(trace: Dict[str, Any], working_delta: Dict[str, float]) -> str:
+    flow = trace.get("trial_flow", {}) or {}
+    candidate_trials = int(flow.get("candidate_trials", 0) or 0)
+    hard_filter_failed = int(flow.get("hard_filter_failed", 0) or 0)
+    feasibility_rejected = int(flow.get("feasibility_rejected", 0) or 0)
+    admissible = int(flow.get("admissible_trials", 0) or 0)
+    accepted = int(flow.get("accepted_trials", 0) or 0)
+    if candidate_trials == 0:
+        return "no_candidate_position"
+    if hard_filter_failed / max(1, candidate_trials) >= 0.7:
+        return "hard_filter_blocked"
+    if feasibility_rejected / max(1, candidate_trials) >= 0.7:
+        return "feasibility_rejected_trials"
+    if admissible > 0 and accepted == 0:
+        return "acceptance_rejected_trials"
+    primary_improved = any(value < -1e-9 for value in working_delta.values())
+    if accepted > 0 and not primary_improved:
+        return "no_quality_gain"
+    return "none"
+
+
+def _intent_status(
+    working_delta: Dict[str, float],
+    best_delta: Dict[str, float],
+    debt_delta: Dict[str, float],
+    protected: Dict[str, Any],
+    blocker: str,
+) -> str:
+    protected_ok = bool(protected.get("passed", False))
+    improved = any(value < -1e-9 for value in working_delta.values()) or any(value < -1e-9 for value in best_delta.values())
+    debt_reduced = any(value < -1e-9 for value in debt_delta.values())
+    if improved and protected_ok and blocker == "none":
+        return "achieved"
+    if protected_ok and (improved or debt_reduced):
+        return "partially_achieved"
+    return "not_achieved"
+
+
+def _event_tags(
+    before_working_eval: EvalResult,
+    after_working_eval: EvalResult,
+    before_best_eval: Optional[EvalResult],
+    after_best_eval: Optional[EvalResult],
+    working_delta: Dict[str, float],
+    best_delta: Dict[str, float],
+    debt_delta: Dict[str, float],
+    protected: Dict[str, Any],
+    blocker: str,
+    global_layers: List[Dict[str, Any]],
+) -> List[str]:
+    tags: List[str] = []
+    if any(value < -1e-9 for value in working_delta.values()):
+        tags.append("working_quality_improved")
+    global_improved = bool(after_best_eval is not None and (before_best_eval is None or compare_quality(after_best_eval, before_best_eval, global_layers) < 0))
+    if global_improved or any(value < -1e-9 for value in best_delta.values()):
+        tags.append("best_feasible_improved")
+    if not protected.get("passed", False):
+        tags.append("protected_metric_violated")
+    if blocker in {"hard_filter_blocked", "feasibility_rejected_trials", "acceptance_rejected_trials", "no_quality_gain"}:
+        tags.append(blocker)
+    if blocker in {"feasibility_rejected_trials", "acceptance_rejected_trials"}:
+        tags.append("no_accepted_trial")
+    if any(value < -1e-9 for value in debt_delta.values()):
+        tags.append("debt_reduced")
+    if not before_working_eval.is_feasible and after_working_eval.is_feasible:
+        tags.append("feasibility_recovered")
+    return [tag for tag in EVENT_TAGS if tag in tags]
+
+
+def _flow_diagnosis(blocker: str) -> Dict[str, bool]:
+    return {
+        "candidate_problem": blocker == "no_candidate_position",
+        "hard_filter_problem": blocker == "hard_filter_blocked",
+        "feasibility_problem": blocker == "feasibility_rejected_trials",
+        "acceptance_problem": blocker == "acceptance_rejected_trials",
+        "quality_problem": blocker == "no_quality_gain",
+    }
+
+
+def _initial_blocker(trace: Dict[str, Any]) -> str:
+    dominant = str(trace.get("dominant_failure_reason", "") or "")
+    if dominant in {"no_candidate", "no_candidate_position"}:
+        return "no_candidate_position"
+    if dominant in {"no_feasible", "no_feasible_position"}:
+        return "hard_filter_blocked"
+    return dominant or "initial_partial"
+
+
+def _contract_metrics(contract: Any) -> List[Dict[str, Any]]:
+    raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract or {})
+    return [dict(item) for item in raw.get("objective_layers", [])]
+
+
+def _protected_metrics(contract: Any) -> List[Dict[str, Any]]:
+    raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract or {})
+    return [dict(item) for item in raw.get("protected_metrics", [])]
+
+
+def _contract_id(contract: Any) -> str:
+    raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract or {})
+    return str(raw.get("contract_id", ""))
+
+
+def _manifest_target(manifest: Optional[Any]) -> str:
+    raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
+    return str(raw.get("target_id", ""))
+
+
+__all__ = [
+    "EVENT_TAGS",
+    "verify_initial_construction",
+    "verify_alns_action",
+    "verify_review_request",
+    "audit_initial_result",
+    "audit_outcome",
+]

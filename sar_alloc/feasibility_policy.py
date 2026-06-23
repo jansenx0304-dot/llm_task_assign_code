@@ -35,7 +35,7 @@ def check_feasibility_admissibility(
 def _strict_decision(trial: ConstraintReport) -> FeasibilityDecision:
     if trial.is_feasible:
         return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible under strict policy.", [])
-    return FeasibilityDecision(False, "reject", "Strict policy rejects infeasible trials.", ["no_admissible_candidate"])
+    return FeasibilityDecision(False, "reject", "feasibility_rejected_infeasible_trial", ["feasibility_rejected_infeasible_trial"])
 
 
 def _relaxed_recoverable_decision(
@@ -50,8 +50,8 @@ def _relaxed_recoverable_decision(
             return FeasibilityDecision(
                 False,
                 "reject",
-                f"{violation_type} is not relaxable under current policy.",
-                ["feasibility_debt_exceeded"],
+                f"{violation_type}_not_relaxable",
+                ["feasibility_rejected_infeasible_trial"],
             )
 
     for violation_type, limits in per_type.items():
@@ -63,23 +63,23 @@ def _relaxed_recoverable_decision(
             return FeasibilityDecision(
                 False,
                 "reject",
-                f"{violation_type} total violation ratio exceeds limit_ratio.",
-                ["feasibility_debt_exceeded"],
+                f"{violation_type}_limit_exceeded",
+                ["feasibility_debt_limit_exceeded"],
             )
         if (trial_ratio - current_ratio) - delta_ratio > _EPS:
             return FeasibilityDecision(
                 False,
                 "reject",
-                f"{violation_type} violation ratio delta exceeds delta_ratio.",
-                ["feasibility_debt_exceeded"],
+                f"{violation_type}_delta_exceeded",
+                ["feasibility_debt_delta_exceeded"],
             )
         for item in trial.violation_details_by_type.get(violation_type, []):
             if float(item.get("ratio", 0.0)) - limit_ratio > _EPS:
                 return FeasibilityDecision(
                     False,
                     "reject",
-                    f"{violation_type} individual violation ratio exceeds limit_ratio.",
-                    ["feasibility_debt_exceeded"],
+                    f"{violation_type}_individual_limit_exceeded",
+                    ["feasibility_debt_limit_exceeded"],
                 )
 
     if trial.is_feasible:
@@ -88,9 +88,9 @@ def _relaxed_recoverable_decision(
         return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible.", events)
 
     if trial.recoverable_violation_total > current.recoverable_violation_total + _EPS:
-        events.append("feasibility_debt_created")
+        events.append("feasibility_debt_increased")
     elif trial.recoverable_violation_total < current.recoverable_violation_total - _EPS:
-        events.append("feasibility_debt_reduced")
+        events.append("recovery_debt_reduced")
     return FeasibilityDecision(
         True,
         "working_only",
@@ -106,5 +106,5 @@ def _recovery_only_decision(
     if trial.is_feasible:
         return FeasibilityDecision(True, "working_and_best_candidate", "Trial restored feasibility.", ["feasibility_recovered"])
     if trial.violation_total < current.violation_total - _EPS:
-        return FeasibilityDecision(True, "working_only", "Trial reduced violation debt.", ["feasibility_debt_reduced"])
-    return FeasibilityDecision(False, "reject", "Recovery-only policy rejects non-reducing trial.", ["recovery_failed"])
+        return FeasibilityDecision(True, "working_only", "recovery_debt_reduced", ["recovery_debt_reduced"])
+    return FeasibilityDecision(False, "reject", "recovery_non_reducing_trial", ["recovery_non_reducing_trial"])

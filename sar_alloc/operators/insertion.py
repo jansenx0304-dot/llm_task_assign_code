@@ -55,6 +55,23 @@ class InsertionContext:
             raise ValueError(f"invalid insertion feasibility mode: {self.feasibility_mode}")
 
 
+@dataclass(slots=True)
+class TaskInsertionAttempt:
+    task_id: int
+    candidate_positions: int
+    hard_feasible_positions: int
+    evaluated_positions: int
+    inserted: bool
+    failure_reasons: Dict[str, int]
+    chosen_agent_id: Optional[int] = None
+    chosen_position: Optional[int] = None
+
+
+@dataclass(slots=True)
+class InsertionTrace:
+    attempts: List[TaskInsertionAttempt]
+
+
 @dataclass(frozen=True)
 class InsertionCandidate:
     tid: int
@@ -543,6 +560,7 @@ def run_insertion_kernel(
     out.unassigned.update(pending)
     out.normalize(instance)
     diagnostics = _new_insertion_diagnostics(context, insertion_policy, len(pending))
+    latest_attempts: Dict[int, TaskInsertionAttempt] = {}
     started_at = time.perf_counter()
 
     while pending:
@@ -560,6 +578,14 @@ def run_insertion_kernel(
                 None,
             )
             stats_by_tid[tid] = stats
+            latest_attempts[int(tid)] = TaskInsertionAttempt(
+                task_id=int(tid),
+                candidate_positions=int(stats.candidate_count),
+                hard_feasible_positions=int(stats.feasible_count),
+                evaluated_positions=int(diag.get("positions_strict_checked", 0) or 0),
+                inserted=False,
+                failure_reasons=_failure_reasons(stats),
+            )
             _add_stats_diagnostics(diagnostics, stats, diag)
 
         stats_by_tid = _score_candidate_task_stats(stats_by_tid, insertion_policy)
@@ -578,12 +604,24 @@ def run_insertion_kernel(
             break
         stats, candidate = choice
         out.add_task(candidate.agent_id, stats.tid, position=candidate.position)
+        latest_attempts[int(stats.tid)] = TaskInsertionAttempt(
+            task_id=int(stats.tid),
+            candidate_positions=int(stats.candidate_count),
+            hard_feasible_positions=int(stats.feasible_count),
+            evaluated_positions=int(len(stats.sorted_feasible_candidates) + len(stats.sorted_relaxed_candidates)),
+            inserted=True,
+            failure_reasons={},
+            chosen_agent_id=int(candidate.agent_id),
+            chosen_position=int(candidate.position),
+        )
         pending.discard(stats.tid)
         diagnostics["inserted_count"] += 1
         diagnostics["operator_use"][operator_name] = diagnostics["operator_use"].get(operator_name, 0) + 1
+        diagnostics["operator"] = operator_name
 
     diagnostics["unassigned_after"] = len(out.unassigned)
     diagnostics["failed_count"] = len(pending)
+    diagnostics["top_failed_tasks"] = _top_failed_attempts(latest_attempts, instance)
     diagnostics["time_ms"] = round((time.perf_counter() - started_at) * 1000.0, 4)
     out.solver_diagnostics = dict(out.solver_diagnostics or {})
     out.solver_diagnostics["last_insertion"] = diagnostics
@@ -702,6 +740,7 @@ def _new_insertion_diagnostics(context: InsertionContext, policy: InsertionPolic
             "energy": 0,
             "skill": 0,
         },
+        "top_failed_tasks": [],
         "time_ms": 0.0,
     }
 
@@ -716,6 +755,34 @@ def _add_stats_diagnostics(diagnostics: Dict[str, Any], stats: TaskInsertionStat
         breakdown["no_candidate"] += 1
     elif stats.feasible_count == 0:
         breakdown["no_feasible"] += 1
+
+
+def _failure_reasons(stats: TaskInsertionStats) -> Dict[str, int]:
+    if stats.candidate_count == 0:
+        return {"no_candidate_position": 1}
+    if stats.feasible_count == 0:
+        return {"no_feasible_position": 1}
+    return {}
+
+
+def _top_failed_attempts(attempts: Dict[int, TaskInsertionAttempt], instance: Instance, limit: int = 5) -> List[Dict[str, Any]]:
+    failed = [attempt for attempt in attempts.values() if not attempt.inserted]
+    failed.sort(key=lambda item: (-sum(item.failure_reasons.values()), item.task_id))
+    out: List[Dict[str, Any]] = []
+    for attempt in failed[:limit]:
+        task = instance.task_by_id(int(attempt.task_id))
+        reasons = dict(attempt.failure_reasons)
+        dominant = max(reasons.items(), key=lambda item: int(item[1]))[0] if reasons else "none"
+        out.append({
+            "task_id": int(attempt.task_id),
+            "priority": float(task.priority),
+            "capable_agents": sum(1 for agent in instance.agents if set(task.skill_req).issubset(agent.skills)),
+            "candidate_positions": int(attempt.candidate_positions),
+            "hard_feasible_positions": int(attempt.hard_feasible_positions),
+            "hard_filter_rejections": reasons,
+            "dominant_reason": dominant,
+        })
+    return out
 
 
 def _finish_diagnostics(sol: AssignmentSolution, diagnostics: Dict[str, Any], start: float) -> None:
@@ -974,6 +1041,8 @@ def _std(values: Sequence[float]) -> float:
 
 __all__ = [
     "InsertionContext",
+    "TaskInsertionAttempt",
+    "InsertionTrace",
     "InsertionCandidate",
     "TaskInsertionStats",
     "build_insertion_landscape",
@@ -984,4 +1053,3 @@ __all__ = [
     "run_insertion_kernel",
     "score_insert_positions",
 ]
-

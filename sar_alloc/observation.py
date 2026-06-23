@@ -1,45 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from .llm_public_interface import PublicCandidates
 from .models import Agent, Instance, Task
-
-
-_OBJECTIVE_METRIC_DEFINITIONS = {
-    "missed_priority": {
-        "definition": "sum(priority[t] for each unassigned task t)",
-        "depends_on": ["task priority", "whether task is assigned"],
-    },
-    "unassigned_count": {
-        "definition": "count(tasks that are not assigned)",
-        "depends_on": ["whether task is assigned"],
-    },
-    "energy_total": {
-        "definition": "sum(energy used by each agent route)",
-        "depends_on": [
-            "assigned tasks",
-            "route order",
-            "agent energy model",
-            "travel distance",
-            "service energy",
-            "waiting energy",
-        ],
-    },
-    "total_distance": {
-        "definition": "sum(travel distance of each agent route)",
-        "depends_on": ["assigned tasks", "route order", "task locations", "depot locations"],
-    },
-    "makespan": {
-        "definition": "max(finish_time of each agent route)",
-        "depends_on": ["assigned tasks", "route order", "agent speed", "service time", "travel time"],
-    },
-    "route_balance": {
-        "definition": "coefficient of variation of route task counts across agents",
-        "depends_on": ["number of assigned tasks on each agent route"],
-    },
-}
 
 
 def build_supervisor_kickoff_observation(
@@ -50,33 +15,33 @@ def build_supervisor_kickoff_observation(
     user_goal_text: str,
     remaining_global_budget: Dict[str, Any],
     relaxation_scale_context: Dict[str, Any],
+    observation_id: str = "O0",
 ) -> Dict[str, Any]:
-    objective_part = _objective_observation_part(instance, candidates, user_goal_text)
-    evidence = [
-        {"id": "E1", "type": "user_goal_and_instance", "summary": {"user_goal": user_goal_text, "instance_summary": instance_summary}},
-        {"id": "E2", "type": "objective_metric_definitions", "summary": objective_part["objective_metric_definitions"]},
-        {"id": "E3", "type": "remaining_global_budget", "summary": remaining_global_budget},
-        {"id": "E4", "type": "relaxation_scale_context", "summary": relaxation_scale_context},
-    ]
+    del candidates
+    profile = _problem_profile(instance, instance_summary)
     resource_limits = next_contract_resource_limits(remaining_global_budget)
     return {
-        "decision_context": {
-            "stage": "supervisor_kickoff",
-            "task": "Select global objective and issue the initial construction contract.",
-            "user_goal": user_goal_text,
+        "observation_id": observation_id,
+        "frame_type": "supervisor_kickoff",
+        "role": "supervisor",
+        "user_goal": user_goal_text,
+        "budget_caps": {
+            "max_solver_actions": resource_limits["max_solver_actions_allowed"],
+            "max_time_sec": resource_limits["max_time_sec_allowed"],
+            "max_iters": resource_limits["max_iters_allowed"],
         },
-        "remaining_global_budget": remaining_global_budget,
+        "problem_profile": profile,
+        "relaxation_reference": _relaxation_reference(relaxation_scale_context),
+        "allowed_contract_types": ["initial_construction"],
+        "allowed_objective_metrics": [
+            "missed_priority",
+            "unassigned_count",
+            "energy_total",
+            "total_distance",
+            "makespan",
+            "route_balance",
+        ],
         "next_contract_resource_limits": resource_limits,
-        "objective_metric_definitions": objective_part["objective_metric_definitions"],
-        "instance_overview": objective_part["instance_overview"],
-        "instance_summary": instance_summary,
-        "objective_candidates": _public(candidates, "objective_candidates"),
-        "feasibility_mode_candidates": _public(candidates, "feasibility_mode_candidates"),
-        "relaxable_violation_candidates": _public(candidates, "relaxable_violation_candidates"),
-        "completion_event_candidates": _public(candidates, "completion_event_candidates"),
-        "relaxation_scale_context": dict(relaxation_scale_context),
-        "evidence_items": evidence,
-        "memory_items": [],
     }
 
 
@@ -88,41 +53,44 @@ def build_supervisor_review_observation(
     completed_contract_result: Dict[str, Any],
     working_summary: Dict[str, Any],
     best_summary: Optional[Dict[str, Any]],
-    candidate_landscape: Dict[str, Any],
-    recent_memory: List[Dict[str, Any]],
-    candidates: PublicCandidates,
-    relaxation_scale_context: Dict[str, Any],
+    candidate_landscape: Optional[Dict[str, Any]] = None,
+    recent_memory: Optional[List[Dict[str, Any]]] = None,
+    candidates: Optional[PublicCandidates] = None,
+    relaxation_scale_context: Optional[Dict[str, Any]] = None,
+    verifications: Optional[List[Dict[str, Any]]] = None,
+    observation_id: str = "O_review",
 ) -> Dict[str, Any]:
-    evidence = [
-        {"id": "E1", "type": "completed_contract", "summary": completed_contract},
-        {"id": "E2", "type": "completed_contract_result", "summary": completed_contract_result},
-        {"id": "E3", "type": "working_solution", "summary": working_summary},
-        {"id": "E4", "type": "best_solution", "summary": best_summary or {}},
-        {"id": "E5", "type": "candidate_landscape", "summary": candidate_landscape},
-        {"id": "E6", "type": "remaining_global_budget", "summary": remaining_global_budget},
-    ]
+    del candidate_landscape, candidates
     resource_limits = next_contract_resource_limits(remaining_global_budget)
     return {
-        "decision_context": {
-            "stage": "supervisor_review",
-            "task": "Review the completed contract and issue the next contract or stop.",
+        "observation_id": observation_id,
+        "frame_type": "supervisor_review",
+        "role": "supervisor",
+        "budget_caps": {
+            "max_solver_actions": resource_limits["max_solver_actions_allowed"],
+            "max_time_sec": resource_limits["max_time_sec_allowed"],
+            "max_iters": resource_limits["max_iters_allowed"],
         },
-        "remaining_global_budget": remaining_global_budget,
+        "completed_contract": _contract_view(completed_contract, completed_contract_progress),
+        "contract_completion": dict(completed_contract_result),
+        "condition_report": list(completed_contract_progress.get("condition_report", []) or completed_contract_result.get("condition_report", []) or []),
+        "stage_verification_summary": _verification_summary(verifications or []),
+        "solution_position": {
+            "working": _state_digest_from_summary(working_summary),
+            "best_feasible": _best_digest(best_summary),
+        },
+        "usable_memory": list(recent_memory or []),
+        "relaxation_reference": _relaxation_reference(relaxation_scale_context or {}),
+        "allowed_contract_types": ["alns_search", "recovery", "final_refinement"],
+        "allowed_objective_metrics": [
+            "missed_priority",
+            "unassigned_count",
+            "energy_total",
+            "total_distance",
+            "makespan",
+            "route_balance",
+        ],
         "next_contract_resource_limits": resource_limits,
-        "completed_contract": _solver_safe_contract(completed_contract),
-        "completed_contract_progress": completed_contract_progress,
-        "completed_contract_result": completed_contract_result,
-        "current_solution": working_summary,
-        "best_solution": best_summary or {},
-        "candidate_landscape": candidate_landscape,
-        "recent_memory": recent_memory,
-        "objective_candidates": _public(candidates, "objective_candidates"),
-        "feasibility_mode_candidates": _public(candidates, "feasibility_mode_candidates"),
-        "relaxable_violation_candidates": _public(candidates, "relaxable_violation_candidates"),
-        "completion_event_candidates": _public(candidates, "completion_event_candidates"),
-        "relaxation_scale_context": dict(relaxation_scale_context),
-        "evidence_items": evidence,
-        "memory_items": recent_memory,
     }
 
 
@@ -131,43 +99,48 @@ def build_solver_observation(
     active_contract: Dict[str, Any],
     contract_progress: Dict[str, Any],
     remaining_contract_resources: Dict[str, Any],
-    remaining_global_budget: Dict[str, Any],
-    working_summary: Dict[str, Any],
-    best_summary: Optional[Dict[str, Any]],
-    candidate_landscape: Dict[str, Any],
-    recent_memory: List[Dict[str, Any]],
+    remaining_global_budget: Optional[Dict[str, Any]] = None,
+    working_summary: Optional[Dict[str, Any]] = None,
+    best_summary: Optional[Dict[str, Any]] = None,
+    candidate_landscape: Optional[Dict[str, Any]] = None,
+    recent_memory: Optional[List[Dict[str, Any]]] = None,
     candidates: PublicCandidates,
+    last_verification: Optional[Dict[str, Any]] = None,
+    observation_id: str = "O_solver",
+    step_index: int = 0,
 ) -> Dict[str, Any]:
-    contract = _solver_safe_contract(active_contract)
+    del remaining_global_budget
+    contract = _contract_view(active_contract, contract_progress)
     contract_type = str(contract.get("contract_type", ""))
+    contract["remaining_resources"] = dict(remaining_contract_resources)
     if contract_type == "initial_construction":
-        allowed_actions = ["construct_initial", "request_supervisor_review"]
-    else:
-        allowed_actions = ["run_alns", "request_supervisor_review"]
-    contract["remaining_contract_resources"] = remaining_contract_resources
-    evidence = _state_evidence(working_summary, best_summary, candidate_landscape, remaining_contract_resources, remaining_global_budget)
+        return {
+            "observation_id": observation_id,
+            "frame_type": "solver_initial_construction",
+            "role": "solver",
+            "step_index": step_index,
+            "contract_view": contract,
+            "task_buildability_view": _task_buildability_view(working_summary or {}, candidate_landscape or {}),
+            "insertion_position_landscape": _insertion_position_landscape(candidate_landscape or {}),
+            "decision_targets": _initial_targets(working_summary or {}, candidate_landscape or {}),
+            "last_action_verification": _compact_last_verification(last_verification),
+            "action_space": _action_space(candidates, initial=True),
+            "usable_memory": list(recent_memory or []),
+        }
     return {
-        "active_contract": contract,
-        "contract_progress": contract_progress,
-        "remaining_global_budget": remaining_global_budget,
-        "current_solution": working_summary,
-        "best_solution": best_summary or {},
-        "candidate_landscape": candidate_landscape,
-        "available_action_candidates": [{"name": name, "description": _action_description(name)} for name in allowed_actions],
-        "available_alns_candidates": {
-            name: _public(candidates, name)
-            for name in (
-                "destroy_operator_candidates",
-                "destroy_signal_candidates",
-                "insertion_operator_candidates",
-                "insertion_task_signal_candidates",
-                "insertion_position_signal_candidates",
-                "acceptance_candidates",
-            )
+        "observation_id": observation_id,
+        "frame_type": "solver_step",
+        "role": "solver",
+        "step_index": step_index,
+        "contract_view": contract,
+        "state_digest": {
+            "working": _state_digest_from_summary(working_summary or {}),
+            "best_feasible": _best_digest(best_summary),
         },
-        "recent_solver_results": recent_memory,
-        "evidence_items": evidence,
-        "memory_items": recent_memory,
+        "last_action_verification": _compact_last_verification(last_verification),
+        "decision_targets": _decision_targets(active_contract, working_summary or {}, candidate_landscape or {}),
+        "action_space": _action_space(candidates, initial=False),
+        "usable_memory": list(recent_memory or []),
     }
 
 
@@ -181,187 +154,249 @@ def next_contract_resource_limits(remaining_global_budget: Dict[str, Any]) -> Di
     }
 
 
-def _solver_safe_contract(active_contract: Dict[str, Any]) -> Dict[str, Any]:
-    contract = dict(active_contract)
-    contract.pop("feasibility_policy", None)
-    contract["stage_objective_layers"] = [
-        item.get("metric", "") if isinstance(item, dict) else str(item)
-        for item in contract.get("stage_objective_layers", [])
-    ]
-    return contract
+def _contract_view(active_contract: Dict[str, Any], progress: Dict[str, Any]) -> Dict[str, Any]:
+    del progress
+    feasibility = dict(active_contract.get("feasibility_control", {}) or {})
+    return {
+        "contract_id": active_contract.get("contract_id", ""),
+        "contract_type": active_contract.get("contract_type", ""),
+        "objective_layers": [
+            item.get("metric", "") if isinstance(item, dict) else str(item)
+            for item in active_contract.get("objective_layers", [])
+        ],
+        "feasibility_mode": feasibility.get("mode", "strict"),
+        "protected_metrics": [dict(item) for item in active_contract.get("protected_metrics", [])],
+    }
 
 
-def _objective_observation_part(instance: Instance, candidates: PublicCandidates, user_goal_text: str) -> Dict[str, Any]:
-    del user_goal_text
+def _problem_profile(instance: Instance, instance_summary: Dict[str, Any]) -> Dict[str, Any]:
     tasks = list(instance.tasks)
     agents = list(instance.agents)
+    capable_counts = [_capable_count(agents, task) for task in tasks]
     priorities = [float(task.priority) for task in tasks]
-    priority_counts = Counter(priorities)
-    capable_counts = [sum(1 for agent in agents if _capable(agent, task)) for task in tasks]
-    depot_distances = [instance.distance(instance.depot.loc, task.loc) for task in tasks]
-    nearest_distances = _nearest_task_distances(instance, tasks)
-    service_times = [float(task.service_time) for task in tasks]
-    time_window_widths = [float(task.tw_end - task.tw_start) for task in tasks]
-    direct_arrivals, unavailable_arrivals = _direct_arrival_times(instance, tasks, agents)
+    high_cut = sorted(priorities)[max(0, int(0.75 * len(priorities)) - 1)] if priorities else 0.0
+    scarce = [task for task, count in zip(tasks, capable_counts) if count <= max(1, len(agents) // 4)]
+    tw_risk = float((instance_summary.get("time_window_risk", {}) or {}).get("negative_slack_frac_lb", 0.0) or 0.0)
+    energy_risk = float((instance_summary.get("energy_risk", {}) or {}).get("energy_tight_frac_lb", 0.0) or 0.0)
+    dominant = "energy" if energy_risk >= tw_risk else "time_window"
     return {
-        "objective_metric_definitions": _objective_metric_definitions(candidates),
-        "instance_overview": {
-            "scale": {
-                "num_tasks": len(tasks),
-                "num_agents": len(agents),
-                "tasks_per_agent": _round(len(tasks) / len(agents)) if agents else None,
+        "num_tasks": len(tasks),
+        "num_agents": len(agents),
+        "priority_mass": round(sum(priorities), 6),
+        "high_priority_task_count": sum(1 for value in priorities if value >= high_cut),
+        "zero_capable_task_count": sum(1 for count in capable_counts if count == 0),
+        "scarce_task_count": len(scarce),
+        "scarce_priority_mass": round(sum(float(task.priority) for task in scarce), 6),
+        "time_window_risk": _risk_label(tw_risk),
+        "energy_risk": _risk_label(energy_risk),
+        "dominant_risk": dominant,
+    }
+
+
+def _task_buildability_view(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> Dict[str, Any]:
+    quality = working_summary.get("quality_summary", {}) or {}
+    task_pressure = landscape.get("task_pressure", {}) or {}
+    unassigned = int(quality.get("unassigned_count", landscape.get("unassigned_count", 0)) or 0)
+    missed = float(quality.get("missed_priority", 0.0) or 0.0)
+    return {
+        "target_buckets": [
+            {
+                "target_id": "T_unassigned_priority",
+                "kind": "unassigned_priority",
+                "task_count": unassigned,
+                "priority_mass": missed,
+                "recommended_control_axis": ["task_order", "position_choice"],
+                "usable_signals": ["priority_loss", "scarcity_pressure", "future_slack"],
             },
-            "task_value": {
-                "field": "priority[t]",
-                "used_by_metric": "missed_priority",
-                "distribution": _distribution(priorities, include_sum=True),
-                "counts_by_value": {
-                    str(_round(value)): int(count)
-                    for value, count in sorted(priority_counts.items())
+            {
+                "target_id": "T_scarce_unassigned",
+                "kind": "scarce_unassigned",
+                "task_count": int(task_pressure.get("skill_scarce_unassigned", 0) or 0),
+                "priority_mass": missed,
+                "recommended_control_axis": ["task_order"],
+                "usable_signals": ["scarcity_pressure", "priority_loss"],
+            },
+        ],
+        "zero_capable_task_count": int(task_pressure.get("zero_capable_task_count", 0) or 0),
+    }
+
+
+def _insertion_position_landscape(landscape: Dict[str, Any]) -> Dict[str, Any]:
+    stats = landscape.get("candidate_stats", {}) or {}
+    return {
+        "candidate_position_count": {
+            "p50": float(stats.get("avg_candidate_positions", 0.0) or 0.0),
+            "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
+            "zero_count": int(stats.get("zero_candidate_tasks", 0) or 0),
+        },
+        "feasible_position_count": {
+            "p50": float(stats.get("avg_feasible_positions", 0.0) or 0.0),
+            "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
+            "zero_count": int(stats.get("no_feasible_tasks", 0) or 0),
+        },
+        "top_failed_tasks": list(stats.get("top_failed_tasks", []) or []),
+    }
+
+
+def _initial_targets(working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
+    targets = list(_task_buildability_view(working_summary, landscape)["target_buckets"])
+    targets.append({"target_id": "contract_review", "kind": "contract_review", "recommended_control_axis": []})
+    return targets
+
+
+def _decision_targets(contract: Dict[str, Any], working_summary: Dict[str, Any], landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
+    quality = (working_summary.get("quality_summary", {}) or {})
+    feasibility = (working_summary.get("feasibility_summary", {}) or {})
+    target_kinds = list((contract.get("target_policy", {}) or {}).get("preferred_target_kinds", []) or [])
+    if not target_kinds:
+        target_kinds = ["unassigned_priority", "energy_debt"]
+    out: List[Dict[str, Any]] = []
+    for kind in target_kinds:
+        if kind == "unassigned_priority":
+            out.append({
+                "target_id": "T_unassigned_priority",
+                "kind": kind,
+                "metric_pressure": {
+                    "missed_priority": float(quality.get("missed_priority", 0.0) or 0.0),
+                    "unassigned_count": float(quality.get("unassigned_count", 0.0) or 0.0),
                 },
-            },
-            "task_assignability": {
-                "field": "capable_agents[t]",
-                "definition": "agents that have all required skills for task t",
-                "distribution": _distribution(capable_counts),
-                "counts": {
-                    "zero_capable_tasks": sum(1 for count in capable_counts if count == 0),
-                    "one_capable_task": sum(1 for count in capable_counts if count == 1),
-                    "two_or_fewer_capable_tasks": sum(1 for count in capable_counts if count <= 2),
-                },
-            },
-            "travel_distance_reference": {
-                "fields": ["distance from depot to task", "distance from task to nearest other task"],
-                "distance_from_depot_to_task": _distribution(depot_distances),
-                "nearest_task_distance": _distribution(nearest_distances),
-            },
-            "task_time": {
-                "service_time": _distribution(service_times),
-                "time_window_width": _distribution(time_window_widths),
-                "direct_arrival_time_from_depot": {
-                    "definition": "for each task, minimum depot-to-task travel time among capable agents",
-                    "distribution": _distribution(direct_arrivals),
-                    "unavailable_task_count": unavailable_arrivals,
-                },
-            },
-            "agent_profile": {
-                "initial_energy": _distribution([agent.init_energy for agent in agents]),
-                "speed": _distribution([agent.speed for agent in agents]),
-                "travel_energy_rate": _distribution([agent.travel_energy_rate for agent in agents]),
-                "standby_power": _distribution([agent.standby_power for agent in agents]),
-                "skill_count": _distribution([len(agent.skills) for agent in agents]),
-            },
+                "recommended_control_axis": ["insertion_task", "insertion_position"],
+                "usable_signals": ["priority_loss", "scarcity_pressure", "future_slack"],
+            })
+        elif kind == "scarce_unassigned":
+            out.append({
+                "target_id": "T_scarce_unassigned",
+                "kind": kind,
+                "metric_pressure": {"count": int((landscape.get("task_pressure", {}) or {}).get("skill_scarce_unassigned", 0) or 0)},
+                "recommended_control_axis": ["insertion_task"],
+                "usable_signals": ["scarcity_pressure", "priority_loss"],
+            })
+        elif kind == "time_window_debt":
+            out.append(_debt_target("T_time_window_debt", kind, "time_window", feasibility))
+        elif kind == "route_balance":
+            out.append({
+                "target_id": "T_route_balance",
+                "kind": kind,
+                "metric_pressure": {"route_balance": float(quality.get("route_balance", 0.0) or 0.0)},
+                "recommended_control_axis": ["destroy", "position"],
+                "usable_signals": ["route_balance_pressure", "route_balance_gain"],
+            })
+        else:
+            out.append(_debt_target("T_energy_debt", "energy_debt", "energy", feasibility))
+    out.append({"target_id": "contract_review", "kind": "contract_review", "recommended_control_axis": []})
+    return out
+
+
+def _debt_target(target_id: str, kind: str, debt_type: str, feasibility: Dict[str, Any]) -> Dict[str, Any]:
+    ratios = feasibility.get("violation_ratio_by_type", {}) or {}
+    return {
+        "target_id": target_id,
+        "kind": kind,
+        "metric_pressure": {f"{debt_type}_ratio": float(ratios.get(debt_type, 0.0) or 0.0)},
+        "recommended_control_axis": ["destroy", "position", "acceptance"],
+        "usable_signals": ["cost_pressure", "future_slack", "threshold"],
+    }
+
+
+def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    quality = summary.get("quality_summary", {}) or {}
+    feasibility = summary.get("feasibility_summary", {}) or {}
+    ratios = dict(feasibility.get("violation_ratio_by_type", {}) or {})
+    dominant = max(ratios.items(), key=lambda item: float(item[1]), default=("none", 0.0))
+    return {
+        "is_feasible": bool(feasibility.get("is_feasible", summary.get("is_feasible", False))),
+        "quality": {
+            name: float(quality.get(name, 0.0) or 0.0)
+            for name in ("missed_priority", "unassigned_count", "energy_total", "total_distance", "makespan", "route_balance")
+            if name in quality
+        },
+        "debt": {
+            "total": float(feasibility.get("recoverable_violation_total", feasibility.get("violation_total", 0.0)) or 0.0),
+            "dominant_type": str(dominant[0]),
+            "dominant_ratio": float(dominant[1]),
         },
     }
 
 
-def _public(candidates: PublicCandidates, name: str) -> List[Dict[str, str]]:
-    return [candidate.as_dict() for candidate in getattr(candidates, name)]
-
-
-def _objective_metric_definitions(candidates: PublicCandidates) -> List[Dict[str, Any]]:
-    out = []
-    for name in candidates.names("objective_candidates"):
-        item = {"metric": name}
-        item.update(_OBJECTIVE_METRIC_DEFINITIONS[name])
-        out.append(item)
-    return out
-
-
-def _action_description(name: str) -> str:
+def _best_digest(best_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not best_summary:
+        return {"exists": False, "quality": {}}
     return {
-        "construct_initial": "Build the first working solution with insertion control.",
-        "run_alns": "Run one ALNS action under the active contract.",
-        "request_supervisor_review": "End the current contract and ask Supervisor to review.",
-    }.get(name, "Available solver action.")
-
-
-def _round(value: float) -> float:
-    return round(float(value), 6)
-
-
-def _quantile(sorted_values: Sequence[float], q: float) -> Optional[float]:
-    if not sorted_values:
-        return None
-    values = sorted(float(value) for value in sorted_values)
-    if len(values) == 1:
-        return _round(values[0])
-    pos = (len(values) - 1) * q
-    lo = int(pos)
-    hi = min(lo + 1, len(values) - 1)
-    frac = pos - lo
-    return _round(values[lo] * (1.0 - frac) + values[hi] * frac)
-
-
-def _distribution(values: Sequence[float], *, include_sum: bool = False) -> Dict[str, Any]:
-    vals = sorted(float(value) for value in values)
-    if not vals:
-        base: Dict[str, Any] = {"min": None, "p25": None, "median": None, "p75": None, "max": None}
-        if include_sum:
-            base["sum"] = 0.0
-        return base
-    out = {
-        "min": _round(vals[0]),
-        "p25": _quantile(vals, 0.25),
-        "median": _quantile(vals, 0.50),
-        "p75": _quantile(vals, 0.75),
-        "max": _round(vals[-1]),
+        "exists": True,
+        "quality": _state_digest_from_summary(best_summary).get("quality", {}),
     }
-    if include_sum:
-        out["sum"] = _round(sum(vals))
-    return out
 
 
-def _capable(agent: Agent, task: Task) -> bool:
-    return set(task.skill_req).issubset(agent.skills)
+def _compact_last_verification(verification: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not verification:
+        return {"exists": False}
+    trace = verification.get("trace", {}) or {}
+    flow = trace.get("trial_flow", {}) or {}
+    return {
+        "exists": True,
+        "verification_id": verification.get("verification_id"),
+        "intent_status": verification.get("intent_status"),
+        "dominant_blocker": verification.get("dominant_blocker"),
+        "metric_delta": (verification.get("metric_delta", {}) or {}).get("working", {}),
+        "debt_delta": verification.get("debt_delta", {}),
+        "trace_counts": {
+            "candidate_trials": int(flow.get("candidate_trials", 0) or 0),
+            "feasibility_rejected": int(flow.get("feasibility_rejected", 0) or 0),
+            "accepted": int(flow.get("accepted_trials", 0) or 0),
+            "best_improved": int(flow.get("best_improved_trials", 0) or 0),
+        },
+    }
 
 
-def _nearest_task_distances(instance: Instance, tasks: List[Task]) -> List[float]:
-    if len(tasks) <= 1:
-        return []
-    out = []
-    for i, task in enumerate(tasks):
-        best = None
-        for j, other in enumerate(tasks):
-            if i == j:
-                continue
-            distance = instance.distance(task.loc, other.loc)
-            best = distance if best is None else min(best, distance)
-        if best is not None:
-            out.append(best)
-    return out
+def _verification_summary(verifications: List[Dict[str, Any]]) -> Dict[str, Any]:
+    statuses = Counter(str(item.get("intent_status", "")) for item in verifications)
+    blockers = Counter(str(item.get("dominant_blocker", "")) for item in verifications)
+    return {
+        "verification_ids": [item.get("verification_id") for item in verifications],
+        "intent_status_counts": dict(statuses),
+        "dominant_blocker_counts": dict(blockers),
+        "last": _compact_last_verification(verifications[-1] if verifications else None),
+    }
 
 
-def _direct_arrival_times(instance: Instance, tasks: List[Task], agents: List[Agent]) -> Tuple[List[float], int]:
-    values = []
-    unavailable = 0
-    for task in tasks:
-        times = [
-            instance.travel_time(agent, instance.depot.loc, task.loc)
-            for agent in agents
-            if _capable(agent, task)
-        ]
-        if not times:
-            unavailable += 1
-            continue
-        values.append(min(times))
-    return values, unavailable
+def _action_space(candidates: PublicCandidates, *, initial: bool) -> Dict[str, Any]:
+    base = {
+        "allowed_actions": ["construct_initial", "request_supervisor_review"] if initial else ["run_alns", "request_supervisor_review"],
+        "allowed_insertion_operators": list(candidates.names("insertion_operator_candidates")),
+        "allowed_task_signals": list(candidates.names("insertion_task_signal_candidates")),
+        "allowed_position_signals": list(candidates.names("insertion_position_signal_candidates")),
+    }
+    if not initial:
+        base.update({
+            "allowed_destroy_operators": list(candidates.names("destroy_operator_candidates")),
+            "allowed_destroy_signals": list(candidates.names("destroy_signal_candidates")),
+            "allowed_acceptance_modes": list(candidates.names("acceptance_candidates")),
+        })
+    return base
 
 
-def _state_evidence(
-    working: Dict[str, Any],
-    best: Optional[Dict[str, Any]],
-    landscape: Dict[str, Any],
-    contract_budget: Dict[str, Any],
-    global_budget: Dict[str, Any],
-) -> List[Dict[str, Any]]:
-    return [
-        {"id": "E1", "type": "working_solution", "summary": working},
-        {"id": "E2", "type": "best_solution", "summary": best or {}},
-        {"id": "E3", "type": "candidate_landscape", "summary": landscape},
-        {"id": "E4", "type": "remaining_contract_resources", "summary": contract_budget},
-        {"id": "E5", "type": "remaining_global_budget", "summary": global_budget},
-    ]
+def _relaxation_reference(context: Dict[str, Any]) -> Dict[str, float]:
+    if "time_window_median_width" in context or "agent_energy_median" in context:
+        return {
+            "time_window_median_width": float(context.get("time_window_median_width", 0.0) or 0.0),
+            "agent_energy_median": float(context.get("agent_energy_median", 0.0) or 0.0),
+        }
+    return {
+        "time_window_median_width": float((context.get("time_window", {}) or {}).get("median", 0.0) or 0.0),
+        "agent_energy_median": float((context.get("energy", {}) or {}).get("median", 0.0) or 0.0),
+    }
+
+
+def _capable_count(agents: Sequence[Agent], task: Task) -> int:
+    return sum(1 for agent in agents if set(task.skill_req).issubset(agent.skills))
+
+
+def _risk_label(value: float) -> str:
+    if value >= 0.30:
+        return "high"
+    if value >= 0.10:
+        return "medium"
+    return "low"
 
 
 __all__ = [

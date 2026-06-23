@@ -5,7 +5,15 @@ from .assign_solvers import solve_assignment
 from .init_solutions import build_initial_solution_with_insertion
 from .llm_utils import (
     ContractProgress,
+    ActionSpace,
+    ExecutionTrace,
+    MinimalObservation,
+    OutcomeVerification,
+    RuntimeControlManifest,
     SearchContract,
+    SolverActionIntent,
+    VerifiedActionRecord,
+    alns_policy_from_manifest,
     compile_acceptance,
     compile_contract,
     compile_destroy_control,
@@ -17,11 +25,20 @@ from .llm_utils import (
     format_solution_summary,
     llm_instance_summary as instance_summary,
     llm_solution_summary as solution_summary,
+    insertion_policy_from_manifest,
 )
 
 __all__ = [
     "ContractProgress",
+    "ActionSpace",
+    "ExecutionTrace",
+    "MinimalObservation",
+    "OutcomeVerification",
+    "RuntimeControlManifest",
     "SearchContract",
+    "SolverActionIntent",
+    "VerifiedActionRecord",
+    "alns_policy_from_manifest",
     "build_initial_solution_with_insertion",
     "compare",
     "compare_quality",
@@ -36,6 +53,7 @@ __all__ = [
     "format_instance_summary",
     "format_solution_summary",
     "instance_summary",
+    "insertion_policy_from_manifest",
     "solution_summary",
     "solve_assignment",
 ]
