@@ -93,7 +93,10 @@ class CompletionPriorityTests(unittest.TestCase):
         )
         self.assertEqual(
             check_contract_completion(
-                failure, progress, [{"action": "run_alns"}], self._state()
+                failure,
+                progress,
+                [{"action": "run_alns", "intent_status": "not_achieved"}],
+                self._state(),
             )["completion_status"],
             "failure",
         )

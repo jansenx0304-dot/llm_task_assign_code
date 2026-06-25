@@ -15,7 +15,7 @@ def event_category(event_type: str) -> str:
         return "prompt"
     if normalized.endswith("_raw_output"):
         return "raw"
-    if normalized.endswith("_validated_payload") or normalized.startswith("validated_"):
+    if normalized.endswith("_validation_result") or normalized.startswith("validated_"):
         return "validated"
     if normalized.startswith("compiled_") or normalized == "runtime_control_manifest":
         return "compiled"
@@ -90,7 +90,7 @@ class MarkdownTraceWriter:
         self._write_header(run_config)
 
     def _write_header(self, run_config: Dict[str, Any]) -> None:
-        self._file.write("# LLM-ALNS Execution Report\n\n")
+        self._file.write("# LLM-ALNS Execution Audit\n\n")
         self._file.write("> Status: ")
         self._status_offset = self._file.tell()
         self._file.write(f"{'running':<12}\n\n")
@@ -125,11 +125,7 @@ class MarkdownTraceWriter:
         self.flush()
 
     def append_final(self, solution: Any, summary: Dict[str, Any]) -> None:
-        self._file.write("\n---\n\n## Final Solution\n\n")
-        payload = solution.to_dict() if hasattr(solution, "to_dict") else solution
-        self._write_json_block(payload)
-        self._file.write("\n## Final Summary\n\n")
-        self._write_json_block(summary)
+        del solution, summary
         self._set_status("finished")
         self.flush()
 
@@ -178,7 +174,7 @@ class MarkdownTraceWriter:
     def _default_open(self, event_type: str) -> bool:
         normalized = event_type.lower()
         return (
-            normalized.endswith("_validated_payload")
+            normalized.endswith("_validation_result")
             or normalized.startswith("validated_")
             or normalized.startswith("compiled_")
             or normalized
@@ -275,7 +271,7 @@ class ConsoleTracePrinter:
             return "prompt recorded"
         if event_type.endswith("_raw_output"):
             return "raw output received"
-        if event_type.endswith("_validated_payload"):
+        if event_type.endswith("_validation_result"):
             return self._validated_summary(event_type, payload)
         if event_type == "run_start":
             return self._run_start_summary(payload)
@@ -318,22 +314,22 @@ class ConsoleTracePrinter:
     def _run_start_summary(self, payload: Any) -> str:
         if not isinstance(payload, dict):
             return "run started"
-        cfg = payload.get("run_config", {}) or {}
         return (
-            f"instance={cfg.get('instance')} mode={payload.get('llm_mode')} "
-            f"step_budget={cfg.get('max_step_calls')} solver_budget={cfg.get('max_solver_calls')}"
+            f"instance={payload.get('instance')} mode={payload.get('llm_mode')} "
+            f"budget={payload.get('global_budget')}"
         )
 
     def _validated_summary(self, event_type: str, payload: Any) -> str:
         if not isinstance(payload, dict):
             return "validated"
-        if event_type == "solver_validated_payload":
-            return f"action={(payload.get('solver_decision') or {}).get('action', 'unknown')}"
+        validated = payload.get("validated_payload", {}) or {}
+        if event_type == "solver_validation_result":
+            return f"action={(validated.get('solver_decision') or {}).get('action', 'unknown')} source={payload.get('source')}"
         if event_type in {
-            "supervisor_kickoff_validated_payload",
-            "supervisor_review_validated_payload",
+            "supervisor_kickoff_validation_result",
+            "supervisor_review_validation_result",
         }:
-            return f"action={(payload.get('supervisor_decision') or {}).get('action', 'unknown')}"
+            return f"action={(validated.get('supervisor_decision') or {}).get('action', 'unknown')} source={payload.get('source')}"
         return "validated"
 
     def _compiled_contract_summary(self, payload: Any) -> str:

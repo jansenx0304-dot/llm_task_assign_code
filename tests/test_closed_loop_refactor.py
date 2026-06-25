@@ -244,7 +244,7 @@ class ClosedLoopRefactorTests(unittest.TestCase):
         observation = {
             "action_space": action_space,
             "decision_targets": [{"target_id": "T1"}],
-            "contract_view": {"contract_type": "alns_search"},
+            "active_contract": {"contract_type": "alns_search"},
         }
         decision = {
             "solver_decision": {
@@ -309,14 +309,20 @@ class ClosedLoopRefactorTests(unittest.TestCase):
             candidates=self.candidates,
             observation_id="O1",
         )
-        for key in (
-            "remaining_global_budget",
-            "recent_solver_results",
-            "evidence_items",
-            "memory_items",
-            "available_alns_candidates",
-        ):
-            self.assertNotIn(key, solver)
+        self.assertEqual(
+            set(solver),
+            {
+                "run_context",
+                "active_contract",
+                "progress",
+                "solution_state",
+                "decision_targets",
+                "action_space",
+                "candidate_landscape",
+                "recent_memory",
+                "last_verification",
+            },
+        )
         review = build_supervisor_review_observation(
             remaining_global_budget=self.remaining,
             completed_contract=self.contract.as_dict(),
@@ -327,8 +333,12 @@ class ClosedLoopRefactorTests(unittest.TestCase):
             working_summary={},
             best_summary=None,
         )
-        self.assertIn("condition_report", review)
-        self.assertIn("stage_verification_summary", review)
+        self.assertIn("completed_progress", review)
+        self.assertIn("verification_summary", review)
+        self.assertEqual(
+            review["completed_progress"]["condition_report"][0]["condition_id"],
+            "S1",
+        )
         self.assertNotIn("candidate_landscape", review)
 
     def test_schema_outputs_validate_and_compile_to_manifest(self) -> None:

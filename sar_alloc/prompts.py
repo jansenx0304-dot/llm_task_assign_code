@@ -34,8 +34,8 @@ def get_supervisor_review_prompt(
     return _prompt(
         "SUPERVISOR_REVIEW",
         (
-            "Use condition_report, stage_verification_summary, solution_position, and "
-            "budget_caps to decide whether to stop or issue the next executable contract. "
+            "Use contract_result, verification_summary, solution_state, and the current "
+            "action_space to decide whether to stop or issue the next executable contract. "
             "Put human-readable text only in contract_review or explanation."
         ),
         {"user_goal": user_goal_text, "observation": observation},

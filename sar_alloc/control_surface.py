@@ -31,33 +31,74 @@ FIELD_CANDIDATES: Dict[str, Tuple[str, ...]] = {
     "acceptance_control.mode": ACCEPTANCE_MODES,
 }
 
-INITIAL_CONTROL_FIELDS: Tuple[str, ...] = (
-    "insertion_control.operator_scores",
-    "insertion_control.task_signal_scores",
-    "insertion_control.position_signal_scores",
-)
+OBSERVATION_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
+    "run_context": ("prompt", "memory.trace_link"),
+    "active_contract": ("action_gate", "compiler", "contract_monitor"),
+    "progress": ("review_gate", "resource_gate", "contract_monitor"),
+    "solution_state": ("action_gate", "decision_target_builder"),
+    "decision_targets": ("schema.target_enum", "validator", "compiler", "runtime"),
+    "action_space": ("schema.enums", "validator", "compiler"),
+    "candidate_landscape": ("decision_target_builder", "llm_decision"),
+    "recent_memory": ("llm_decision",),
+    "last_verification": ("review_gate", "llm_decision"),
+}
 
-ALNS_CONTROL_FIELDS: Tuple[str, ...] = tuple(FIELD_CANDIDATES)
+SUPERVISOR_KICKOFF_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
+    "run_context": ("prompt", "trace"),
+    "problem_profile": ("supervisor_decision",),
+    "relaxation_reference": ("feasibility_control_decision",),
+    "action_space": ("schema.enums", "validator", "contract_compiler"),
+}
 
-DESTROY_INTERNAL_TO_PUBLIC_SIGNAL: Dict[str, str] = {
-    "cost_pressure": "cost_pressure",
-    "coupling_pressure": "coupling_pressure",
-    "route_balance_pressure": "route_balance_pressure",
-    "mobility_opportunity": "mobility_opportunity",
-    "scarcity_pressure": "scarcity_protection",
+SUPERVISOR_REVIEW_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
+    "run_context": ("prompt", "trace"),
+    "completed_contract": ("supervisor_decision", "contract_audit"),
+    "completed_progress": ("supervisor_decision", "contract_audit"),
+    "contract_result": ("supervisor_decision", "contract_monitor"),
+    "verification_summary": ("supervisor_decision",),
+    "solution_state": ("supervisor_decision",),
+    "recent_memory": ("supervisor_decision",),
+    "relaxation_reference": ("feasibility_control_decision",),
+    "action_space": ("schema.enums", "validator", "contract_compiler"),
+}
+
+SOLVER_OUTPUT_FIELD_CONSUMERS: Dict[str, Tuple[str, ...]] = {
+    "action": ("validator", "compiler", "orchestrator"),
+    "target_id": ("validator", "compiler", "runtime"),
+    "destroy_control": ("validator", "compiler", "destroy_operator"),
+    "insertion_control": ("validator", "compiler", "insertion_operator"),
+    "acceptance_control": ("validator", "compiler", "acceptance_runtime"),
+    "explanation": ("validator", "audit_only"),
+}
+
+SUPERVISOR_OUTPUT_FIELD_CONSUMERS: Dict[str, Tuple[str, ...]] = {
+    "action": ("validator", "orchestrator"),
+    "global_objective": ("validator", "global_objective_compiler"),
+    "next_contract.contract_type": ("validator", "action_gate"),
+    "next_contract.objective_layers": ("validator", "solver_comparator"),
+    "next_contract.feasibility_control": ("validator", "compiler", "runtime"),
+    "next_contract.target_policy": ("validator", "decision_target_builder"),
+    "next_contract.protected_metrics": ("validator", "runtime_hard_gate"),
+    "next_contract.resource_policy": ("validator", "solver_budget", "contract_monitor"),
+    "next_contract.exit_conditions": ("validator", "contract_monitor"),
+    "contract_review": ("validator", "audit_only"),
+    "stop_explanation": ("validator", "audit_only"),
+    "explanation": ("validator", "audit_only"),
 }
 
 
 __all__ = [
     "ACCEPTANCE_MODES",
-    "ALNS_CONTROL_FIELDS",
-    "DESTROY_INTERNAL_TO_PUBLIC_SIGNAL",
     "DESTROY_OPERATOR_NAMES",
     "DESTROY_SIGNAL_NAMES",
     "FIELD_CANDIDATES",
-    "INITIAL_CONTROL_FIELDS",
     "INSERTION_OPERATOR_NAMES",
     "INSERTION_POSITION_SIGNAL_NAMES",
     "INSERTION_TASK_SIGNAL_NAMES",
+    "OBSERVATION_BLOCK_CONSUMERS",
     "QUALITY_METRICS",
+    "SOLVER_OUTPUT_FIELD_CONSUMERS",
+    "SUPERVISOR_KICKOFF_BLOCK_CONSUMERS",
+    "SUPERVISOR_OUTPUT_FIELD_CONSUMERS",
+    "SUPERVISOR_REVIEW_BLOCK_CONSUMERS",
 ]

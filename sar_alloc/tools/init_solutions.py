@@ -29,11 +29,18 @@ def build_initial_solution_with_insertion(
     empty_solution = AssignmentSolution.empty_from_instance(
         instance, put_all_unassigned=False
     )
+    compiled_target = dict((manifest or {}).get("compiled", {}).get("target", {}) or {})
     solution = run_insertion_kernel(
         partial_solution=empty_solution,
         candidate_tasks=sorted(int(tid) for tid in instance.all_task_ids()),
         insertion_policy=insertion_policy,
-        context=InsertionContext(kind="initial", feasibility_mode="strict"),
+        context=InsertionContext(
+            kind="initial",
+            feasibility_mode="strict",
+            target_task_ids=tuple(
+                int(tid) for tid in compiled_target.get("task_ids", []) or []
+            ),
+        ),
         instance=instance,
         config=config,
         rng=random.Random(rng_seed),
@@ -43,6 +50,7 @@ def build_initial_solution_with_insertion(
     trace = _initial_trace(
         solution, instance, str((manifest or {}).get("trace_id", "X_initial"))
     )
+    trace["runtime_target"] = compiled_target
     print(
         f"[INITIAL INSERTION] assigned={len(solution.all_assigned_tasks())} "
         f"unassigned={len(solution.unassigned)}"

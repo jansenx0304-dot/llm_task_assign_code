@@ -67,7 +67,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     }
     mode = "dummy" if args.dummy_llm else "api"
     reporter = RunReporter(
-        markdown_path=run_dir / "result.md",
+        markdown_path=run_dir / "result.txt",
         run_config=run_config,
         use_color=not args.no_color,
         use_emoji=not args.no_emoji,
@@ -103,49 +103,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             pass
         raise
     print(f"[ARTIFACTS] {str(run_dir).replace(chr(92), '/')}")
-
-
-def build_result_text(solution: Any, summary: Dict[str, Any]) -> str:
-    artifact = dict(getattr(solution, "run_artifact", {}) or {})
-    events = list(artifact.get("trace_events", []) or [])
-    lines = ["# LLM-ALNS Execution Trace", ""]
-    for event in events:
-        event_type = str(event.get("event_type", ""))
-        label = event_type.replace("_", " ").upper()
-        context = []
-        if event.get("contract_id") is not None:
-            context.append(str(event["contract_id"]))
-        if event.get("step_index") is not None:
-            context.append(f"STEP {int(event['step_index']):03d}")
-        suffix = " / ".join(context)
-        lines.append(f"## [{label}]" + (f" {suffix}" if suffix else ""))
-        payload = event.get("payload")
-        if event.get("payload_type") == "text":
-            lines.extend(["```text", str(payload), "```", ""])
-        else:
-            lines.extend(
-                [
-                    "```json",
-                    json.dumps(payload, ensure_ascii=False, indent=2),
-                    "```",
-                    "",
-                ]
-            )
-    lines.extend(
-        [
-            "## [FINAL SOLUTION]",
-            "```json",
-            json.dumps(_solution_json(solution), ensure_ascii=False, indent=2),
-            "```",
-            "",
-            "## [FINAL SUMMARY]",
-            "```json",
-            json.dumps(summary, ensure_ascii=False, indent=2),
-            "```",
-            "",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def build_summary(
@@ -296,18 +253,12 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def write_text(path: Path, payload: str) -> None:
-    path.write_text(payload, encoding="utf-8")
-
-
-def _solution_json(solution: Any) -> Any:
-    return solution.to_dict() if hasattr(solution, "to_dict") else solution
-
-
 def _validate_args(args: argparse.Namespace) -> None:
     for name in ("time_limit", "iterations", "max_step_calls", "max_solver_calls"):
         if float(getattr(args, name)) <= 0:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    if not args.dummy_llm and args.allow_llm_fallback:
+        raise ValueError("API mode forbids --allow-llm-fallback")
 
 
 def _required(mapping: Mapping[str, Any], key: str) -> Any:

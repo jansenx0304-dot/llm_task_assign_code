@@ -10,7 +10,7 @@ from sar_alloc.reporting import MarkdownTraceWriter
 class ReporterStatusTests(unittest.TestCase):
     def test_finished_rewrites_top_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "result.md"
+            path = Path(directory) / "result.txt"
             writer = MarkdownTraceWriter(path, {"instance": "T"})
             writer.append_final({"routes": {}}, {"ok": True})
             writer.close()
@@ -20,7 +20,7 @@ class ReporterStatusTests(unittest.TestCase):
 
     def test_failed_rewrites_top_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "result.md"
+            path = Path(directory) / "result.txt"
             writer = MarkdownTraceWriter(path, {"instance": "T"})
             writer.append_error(RuntimeError("boom"))
             writer.close()

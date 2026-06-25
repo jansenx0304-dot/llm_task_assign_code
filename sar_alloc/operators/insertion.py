@@ -46,6 +46,7 @@ _ZERO_POSITION_FEATURES = PositionFeatures(
 class InsertionContext:
     kind: str
     feasibility_mode: str = "strict"
+    target_task_ids: Tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in {"initial", "alns"}:
@@ -825,6 +826,11 @@ def _choose_for_context(
         return None
 
     eligible = [stats_by_tid[tid] for tid in available]
+    targeted = [
+        item for item in eligible if int(item.tid) in set(context.target_task_ids)
+    ]
+    if targeted:
+        eligible = targeted
     if operator_name == "regret_insertion":
         regrets = {
             stats.tid: _candidate_regret(available[stats.tid], REGRET_K)
@@ -933,6 +939,7 @@ def _new_insertion_diagnostics(
     return {
         "context": context.kind,
         "feasibility_mode": context.feasibility_mode,
+        "target_task_ids": [int(tid) for tid in context.target_task_ids],
         "operator_weights": dict(policy.operator_weights),
         "task_signal_weights": dict(policy.task_signal_weights),
         "position_signal_weights": dict(policy.position_signal_weights),
@@ -1013,15 +1020,6 @@ def _top_failed_attempts(
             }
         )
     return out
-
-
-def _finish_diagnostics(
-    sol: AssignmentSolution, diagnostics: Dict[str, Any], start: float
-) -> None:
-    diagnostics["unassigned_after"] = int(len(sol.unassigned))
-    diagnostics["failed_count"] = int(len(sol.unassigned))
-    diagnostics["time_ms"] = round(1000.0 * max(0.0, time.perf_counter() - start), 4)
-    sol.solver_diagnostics["last_insertion"] = diagnostics
 
 
 def _mark_dominated_candidates(

@@ -12,10 +12,15 @@ class RunMemory:
     contract_summaries: List[Dict[str, Any]] = field(default_factory=list)
 
     def record_observation(self, observation: Dict[str, Any]) -> str:
+        run_context = observation.get("run_context", {}) or {}
         observation_id = str(
-            observation.get("observation_id") or f"O{len(self.observations)}"
+            run_context.get("observation_id")
+            or observation.get("observation_id")
+            or f"O{len(self.observations)}"
         )
-        observation["observation_id"] = observation_id
+        if isinstance(run_context, dict):
+            run_context["observation_id"] = observation_id
+            observation["run_context"] = run_context
         self.observations.append(dict(observation))
         return observation_id
 
@@ -25,7 +30,7 @@ class RunMemory:
         decision_id = f"D{len(self.decisions) + 1}"
         item = {
             "decision_id": decision_id,
-            "observation_id": observation.get("observation_id", ""),
+            "observation_id": _observation_id(observation),
             "payload": dict(decision),
         }
         self.decisions.append(item)
@@ -76,13 +81,14 @@ class RunMemory:
             "record_id": record_id,
             "kind": "verified_action",
             "contract_id": verification.get("contract_id", ""),
-            "observation_id": observation.get("observation_id", ""),
+            "observation_id": _observation_id(observation),
             "decision_id": verification.get("decision_id", ""),
             "manifest_id": verification.get("manifest_id", ""),
             "trace_id": trace_id,
             "verification_id": verification_id,
             "target_id": verification.get("target_id", ""),
             "target_kind": target_kind,
+            "action": manifest_dict.get("action", verification.get("action", "")),
             "control_fingerprint": _control_fingerprint(manifest_dict),
             "outcome_fingerprint": _outcome_fingerprint(verification),
             "manifest": manifest_dict,
@@ -145,13 +151,17 @@ class RunMemory:
         if contract is not None:
             raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract)
             contract_id = raw.get("contract_id")
-        values = self.verified_actions
+        values = list(self.verified_actions)
         if contract_id is not None:
-            values = [
+            same_contract = [
                 item
                 for item in values
                 if str(item.get("contract_id", "")) == str(contract_id)
             ]
+            prior = [item for item in values if item not in same_contract]
+            current = same_contract[-limit:]
+            needed = max(0, limit - len(current))
+            values = (prior[-needed:] if needed else []) + current
         return [_solver_memory_item(item) for item in values[-limit:]]
 
     def for_supervisor(self, limit: int = 5) -> List[Dict[str, Any]]:
@@ -177,6 +187,13 @@ def _target_kind(observation: Dict[str, Any], target_id: str) -> str:
         if isinstance(item, dict) and str(item.get("target_id", "")) == target_id:
             return str(item.get("kind", ""))
     return ""
+
+
+def _observation_id(observation: Dict[str, Any]) -> str:
+    return str(
+        (observation.get("run_context", {}) or {}).get("observation_id")
+        or observation.get("observation_id", "")
+    )
 
 
 def _control_fingerprint(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +233,12 @@ def _outcome_fingerprint(verification: Dict[str, Any]) -> Dict[str, Any]:
             )
         ),
         "metric_delta": dict(working),
+        "debt_delta": dict(verification.get("debt_delta", {}) or {}),
+        "protected_metric_result": dict(
+            verification.get("protected_metric_result", {}) or {}
+        ),
+        "feasibility_result": dict(verification.get("feasibility_result", {}) or {}),
+        "improvement_flags": dict(verification.get("improvement_flags", {}) or {}),
     }
 
 
@@ -229,17 +252,22 @@ def _top_nonzero(values: Dict[str, Any], limit: int = 2) -> List[str]:
 def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
     outcome = item.get("outcome_fingerprint", {}) or {}
     control = item.get("control_fingerprint", {}) or {}
-    trace = item.get("trace", {}) or {}
-    flow = trace.get("trial_flow", {}) or {}
-    metric_delta = outcome.get("metric_delta", {}) or {}
-    delta_text = (
-        ", ".join(f"{k} {v:+.3g}" for k, v in metric_delta.items()) or "no metric delta"
-    )
     return {
         "record_id": item.get("record_id"),
+        "contract_id": item.get("contract_id"),
+        "action": item.get("action"),
+        "target_id": item.get("target_id"),
         "target_kind": item.get("target_kind"),
-        "control_summary": _control_summary(control),
-        "outcome": f"{delta_text}, accepted {flow.get('accepted_trials', 0)}/{flow.get('candidate_trials', 0)}, blocker {outcome.get('dominant_blocker')}",
+        "compiled_controls": dict(control),
+        "intent_status": outcome.get("intent_status"),
+        "dominant_blocker": outcome.get("dominant_blocker"),
+        "metric_delta": dict(outcome.get("metric_delta", {}) or {}),
+        "debt_delta": dict(outcome.get("debt_delta", {}) or {}),
+        "improvement_result": dict(outcome.get("improvement_flags", {}) or {}),
+        "protection_result": dict(
+            outcome.get("protected_metric_result", {}) or {}
+        ),
+        "feasibility_result": dict(outcome.get("feasibility_result", {}) or {}),
     }
 
 
@@ -266,20 +294,6 @@ def _supervisor_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
             "dominant_blocker"
         ),
     }
-
-
-def _control_summary(control: Dict[str, Any]) -> str:
-    if control.get("action") == "review_request":
-        return "review_request"
-    pieces = []
-    pieces.extend(control.get("destroy_operator_top", [])[:1])
-    pieces.extend(control.get("destroy_signal_top", [])[:1])
-    pieces.extend(control.get("insertion_operator_top", [])[:1])
-    pieces.extend(control.get("insertion_task_signal_top", [])[:1])
-    pieces.extend(control.get("insertion_position_signal_top", [])[:1])
-    if control.get("acceptance"):
-        pieces.append(str(control["acceptance"]))
-    return " + ".join(str(piece) for piece in pieces if piece)
 
 
 __all__ = ["RunMemory"]

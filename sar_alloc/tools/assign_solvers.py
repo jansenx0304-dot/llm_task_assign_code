@@ -83,6 +83,7 @@ def solve_assignment(
     global_objective_layers: Optional[List[Dict[str, Any]]] = None,
     trace_id: str = "X_solver",
     protected_metric_bounds: Optional[List[ProtectedMetricBound]] = None,
+    runtime_target: Optional[Dict[str, Any]] = None,
 ) -> ALNSResult:
     """Run weighted ALNS from an incumbent using an already validated policy."""
     rng = random.Random(int(rng_seed))
@@ -115,6 +116,7 @@ def solve_assignment(
         or _config_objective_layers(config),
         trace_id=trace_id,
         protected_metric_bounds=list(protected_metric_bounds or []),
+        runtime_target=dict(runtime_target or {}),
     )
 
 
@@ -132,6 +134,7 @@ def _solve_weighted_alns(
     global_objective_layers: List[Dict[str, Any]],
     trace_id: str,
     protected_metric_bounds: List[ProtectedMetricBound],
+    runtime_target: Dict[str, Any],
 ) -> ALNSResult:
     destroy_ops: Dict[str, DestroyOperator] = dict(DESTROY_OPERATORS)
     destroy_priors = {
@@ -156,6 +159,7 @@ def _solve_weighted_alns(
     temperature = 0.05 + 0.50 * accept_level
     cooling = _clamp_float(0.999 - 0.02 * accept_level, 0.90, 0.9999)
     contract_start_solution = cur.clone(deep=True)
+    contract_start_constraint_report = cur_ev.constraint_report
     initial_solution_feasible = bool(cur_ev.is_feasible)
     initial_protected_check = check_protected_metrics(
         evaluation_quality(cur_ev), protected_metric_bounds
@@ -244,6 +248,9 @@ def _solve_weighted_alns(
             context=InsertionContext(
                 kind="alns",
                 feasibility_mode=str(feasibility_policy.get("mode", "strict")),
+                target_task_ids=tuple(
+                    int(tid) for tid in runtime_target.get("task_ids", []) or []
+                ),
             ),
             instance=instance,
             config=config,
@@ -489,6 +496,17 @@ def _solve_weighted_alns(
         },
         repair_failure_reasons=repair_failure_reasons,
         removed_task_count_sum=removed_task_count_sum,
+        runtime_target=runtime_target,
+        feasibility_policy=feasibility_policy,
+        feasibility_rejection_reasons=feasibility_rejection_reasons,
+        final_constraint_report=working_solution.eval.constraint_report,
+        initial_constraint_report=contract_start_constraint_report,
+        protected_metric_bounds=[bound.as_dict() for bound in protected_metric_bounds],
+        protected_metric_rejections=protected_metric_rejections,
+        protected_metric_rejection_reasons=protected_metric_rejection_reasons,
+        returned_protected_result=returned_protected_check.as_dict(),
+        actual_time_used_sec=actual_time_used_sec,
+        returned_solution_source=returned_source,
     )
     diagnostics = _build_solver_diagnostics(
         policy=policy,
@@ -806,13 +824,6 @@ def _remove_tasks(sol: AssignmentSolution, tids: Sequence[int]) -> None:
     sol.eval = None
 
 
-def _attach_solver_diagnostics(
-    solution: AssignmentSolution, diagnostics: Dict[str, Any]
-) -> AssignmentSolution:
-    solution.solver_diagnostics = diagnostics
-    return solution
-
-
 def _build_solver_diagnostics(
     *,
     policy: CompiledALNSPolicy,
@@ -899,6 +910,17 @@ def _build_execution_trace(
     rejection_reasons: Dict[str, int],
     repair_failure_reasons: Dict[str, int],
     removed_task_count_sum: float,
+    runtime_target: Dict[str, Any],
+    feasibility_policy: Dict[str, Any],
+    feasibility_rejection_reasons: Dict[str, int],
+    final_constraint_report: Any,
+    initial_constraint_report: Any,
+    protected_metric_bounds: List[Dict[str, Any]],
+    protected_metric_rejections: int,
+    protected_metric_rejection_reasons: Dict[str, int],
+    returned_protected_result: Dict[str, Any],
+    actual_time_used_sec: float,
+    returned_solution_source: str,
 ) -> Dict[str, Any]:
     selected_counts = {
         str(name): int(values.get("used", 0) if isinstance(values, dict) else values)
@@ -924,6 +946,9 @@ def _build_execution_trace(
         "trace_id": trace_id,
         "kind": "alns",
         "iters": int(total_iters),
+        "actual_time_used_sec": float(actual_time_used_sec),
+        "returned_solution_source": str(returned_solution_source),
+        "runtime_target": dict(runtime_target),
         "destroy": {
             "selected_operator_counts": selected_counts,
             "removed_task_count_avg": round(
@@ -941,6 +966,28 @@ def _build_execution_trace(
         },
         "trial_flow": {str(k): int(v) for k, v in trial_flow.items()},
         "rejection_reasons": {str(k): int(v) for k, v in rejection_reasons.items()},
+        "feasibility_control": {
+            "policy": _numericize_weight_tree(feasibility_policy),
+            "rejection_reasons": {
+                str(k): int(v) for k, v in feasibility_rejection_reasons.items()
+            },
+            "returned_violation_ratios": _violation_ratio_diagnostics(
+                final_constraint_report, feasibility_policy
+            ),
+            "returned_check": _returned_feasibility_check(
+                initial_constraint_report,
+                final_constraint_report,
+                feasibility_policy,
+            ),
+        },
+        "protected_metrics": {
+            "bounds": list(protected_metric_bounds),
+            "rejected_trials": int(protected_metric_rejections),
+            "rejection_reasons": {
+                str(k): int(v) for k, v in protected_metric_rejection_reasons.items()
+            },
+            "returned_check": dict(returned_protected_result),
+        },
     }
 
 
@@ -968,6 +1015,42 @@ def _violation_ratio_diagnostics(
         }
         for name in sorted(names)
     }
+
+
+def _returned_feasibility_check(
+    initial_report: Any,
+    final_report: Any,
+    policy: Dict[str, Any],
+) -> Dict[str, Any]:
+    mode = str(policy.get("mode", "strict"))
+    if mode == "strict":
+        passed = bool(getattr(final_report, "is_feasible", False))
+        reason = "feasible" if passed else "returned_working_is_infeasible"
+    elif mode == "recovery_only":
+        initial_total = float(getattr(initial_report, "violation_total", 0.0) or 0.0)
+        final_total = float(getattr(final_report, "violation_total", 0.0) or 0.0)
+        passed = bool(
+            getattr(final_report, "is_feasible", False)
+            or final_total < initial_total - 1e-9
+        )
+        reason = "recovery_progress" if passed else "recovery_non_reducing_return"
+    else:
+        per_type = dict(policy.get("per_type", {}) or {})
+        ratios = dict(getattr(final_report, "violation_ratio_by_type", {}) or {})
+        passed = bool(
+            float(
+                getattr(final_report, "unrecoverable_violation_total", 0.0) or 0.0
+            )
+            <= 1e-9
+            and all(
+                name in per_type
+                and float(value) <= float(per_type[name]["limit_ratio"]) + 1e-9
+                for name, value in ratios.items()
+                if float(value) > 1e-9
+            )
+        )
+        reason = "within_relaxation_limits" if passed else "relaxation_limit_exceeded"
+    return {"mode": mode, "passed": passed, "reason": reason}
 
 
 @dataclass(slots=True)

@@ -54,7 +54,12 @@ def demo_supervisor_review(
 ) -> Dict[str, Any]:
     remaining = _remaining(observation)
     allowed_actions = _allowed_actions(observation, remaining)
-    if stop or allowed_actions < 1 or int(float(remaining.get("iters", 0))) < 1:
+    if (
+        stop
+        or allowed_actions < 1
+        or int(float(remaining.get("iters", 0))) < 1
+        or float(remaining.get("time_sec", 0.0)) <= 0.0
+    ):
         return {
             "supervisor_decision": {
                 "action": "stop_run",
@@ -116,8 +121,7 @@ def demo_solver_decision(
             }
         }
     contract = (
-        (observation or {}).get("contract_view", {})
-        or (observation or {}).get("active_contract", {})
+        (observation or {}).get("active_contract", {})
         or {}
     )
     if contract.get("contract_type") == "initial_construction":
@@ -176,7 +180,11 @@ def _contract(
         "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
         "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
         "target_policy": {
-            "preferred_target_kinds": ["unassigned_priority", "energy_debt"]
+            "preferred_target_kinds": (
+                ["unassigned_priority", "insertion_scarce_unassigned"]
+                if contract_type == "initial_construction"
+                else ["unassigned_priority", "energy_debt"]
+            )
         },
         "protected_metrics": [{"metric": "unassigned_count", "max_worsen": 0}],
         "resource_policy": {
@@ -246,24 +254,38 @@ def _contract_review(summary: str) -> Dict[str, str]:
 
 def _remaining(observation: Optional[Dict[str, Any]]) -> Dict[str, float]:
     obs = observation or {}
-    raw = obs.get("remaining_global_budget", {}) or {}
-    caps = obs.get("budget_caps", {}) or {}
+    raw = (obs.get("run_context", {}) or {}).get(
+        "remaining_global_resources", {}
+    ) or {}
+    limits = (obs.get("action_space", {}) or {}).get(
+        "next_contract_resource_limits", {}
+    ) or {}
     return {
         "solver_calls": float(
-            raw.get("solver_calls", caps.get("max_solver_actions", 1)) or 0
+            raw.get(
+                "solver_calls", limits.get("max_solver_actions_allowed", 1)
+            )
+            or 0
         ),
         "step_calls": float(
-            raw.get("step_calls", caps.get("max_solver_actions", 1)) or 0
+            raw.get("step_calls", limits.get("max_solver_actions_allowed", 1))
+            or 0
         ),
-        "time_sec": float(raw.get("time_sec", caps.get("max_time_sec", 1.0)) or 0.0),
-        "iters": float(raw.get("iters", caps.get("max_iters", 1)) or 0),
+        "time_sec": float(
+            raw.get("time_sec", limits.get("max_time_sec_allowed", 1.0)) or 0.0
+        ),
+        "iters": float(
+            raw.get("iters", limits.get("max_iters_allowed", 1)) or 0
+        ),
     }
 
 
 def _allowed_actions(
     observation: Optional[Dict[str, Any]], remaining: Dict[str, float]
 ) -> int:
-    limits = (observation or {}).get("next_contract_resource_limits", {}) or {}
+    limits = ((observation or {}).get("action_space", {}) or {}).get(
+        "next_contract_resource_limits", {}
+    ) or {}
     if "max_solver_actions_allowed" in limits:
         return max(0, int(float(limits.get("max_solver_actions_allowed", 0) or 0)))
     return max(

@@ -558,18 +558,27 @@ def solver_decision_schema_for_candidates(
         ]
 
     target_ids = []
+    review_target_ids = []
     if isinstance(observation, Mapping):
-        target_ids = [
-            str(item["target_id"])
-            for item in (observation.get("decision_targets") or [])
-            if isinstance(item, Mapping) and item.get("target_id") is not None
-        ]
+        for item in observation.get("decision_targets") or []:
+            if not isinstance(item, Mapping) or item.get("target_id") is None:
+                continue
+            target_id = str(item["target_id"])
+            if str(item.get("kind", "")) == "contract_review":
+                review_target_ids.append(target_id)
+            else:
+                target_ids.append(target_id)
     for branch in branches:
         properties = branch["properties"]
-        if target_ids:
-            properties["target_id"] = _enum_string(
-                target_ids, "Target id from current decision_targets."
-            )
+        action = branch["properties"]["action"].get("const")
+        branch_targets = (
+            review_target_ids
+            if action == "request_supervisor_review"
+            else target_ids
+        )
+        properties["target_id"] = _enum_string(
+            branch_targets, "Target id executable for this action."
+        )
         if "insertion_control" in properties:
             properties["insertion_control"] = deepcopy(insertion)
         if "destroy_control" in properties:
@@ -601,11 +610,75 @@ def supervisor_review_schema_for_limits(
 
 
 def _supervisor_schema_for_limits(
-    schema: Dict[str, Any], resource_limits: Dict[str, Any]
+    schema: Dict[str, Any], action_space_or_limits: Dict[str, Any]
 ) -> Dict[str, Any]:
     out = deepcopy(schema)
+    action_space = dict(action_space_or_limits or {})
+    resource_limits = dict(
+        action_space.get("next_contract_resource_limits", action_space) or {}
+    )
     _apply_contract_limits(out, resource_limits)
+    _apply_supervisor_enums(out, action_space)
+    if any(
+        float(resource_limits.get(name, 0) or 0) <= 0.0
+        for name in (
+            "max_solver_actions_allowed",
+            "max_time_sec_allowed",
+            "max_iters_allowed",
+        )
+    ):
+        decision = (out.get("properties", {}) or {}).get("supervisor_decision", {})
+        branches = decision.get("oneOf") if isinstance(decision, dict) else None
+        if isinstance(branches, list):
+            branches[:] = [
+                branch
+                for branch in branches
+                if (branch.get("properties", {}) or {})
+                .get("action", {})
+                .get("const")
+                == "stop_run"
+            ]
     return out
+
+
+def _apply_supervisor_enums(node: Any, action_space: Dict[str, Any]) -> None:
+    if not action_space:
+        return
+    if isinstance(node, dict):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            if "contract_type" in properties and action_space.get(
+                "allowed_contract_types"
+            ):
+                properties["contract_type"]["enum"] = list(
+                    action_space["allowed_contract_types"]
+                )
+            if "objective_layers" in properties and action_space.get(
+                "allowed_objective_metrics"
+            ):
+                properties["objective_layers"]["items"]["enum"] = list(
+                    action_space["allowed_objective_metrics"]
+                )
+            if (
+                "mode" in properties
+                and "relaxation_ratios" in properties
+                and action_space.get("allowed_feasibility_modes")
+            ):
+                properties["mode"]["enum"] = list(
+                    action_space["allowed_feasibility_modes"]
+                )
+            if (
+                "violation_type" in properties
+                and action_space.get("allowed_relaxable_violation_types")
+            ):
+                properties["violation_type"]["enum"] = list(
+                    action_space["allowed_relaxable_violation_types"]
+                )
+        for value in node.values():
+            _apply_supervisor_enums(value, action_space)
+    elif isinstance(node, list):
+        for value in node:
+            _apply_supervisor_enums(value, action_space)
 
 
 def _apply_contract_limits(node: Any, resource_limits: Dict[str, Any]) -> None:

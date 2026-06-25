@@ -40,76 +40,6 @@ _EPS = 1e-9
 
 
 @dataclass(slots=True)
-class MinimalObservation:
-    observation_id: str
-    frame_type: str
-    role: str
-    step_index: int = 0
-    contract_view: Dict[str, Any] = field(default_factory=dict)
-    state_digest: Dict[str, Any] = field(default_factory=dict)
-    last_action_verification: Dict[str, Any] = field(default_factory=dict)
-    decision_targets: List[Dict[str, Any]] = field(default_factory=list)
-    action_space: Dict[str, Any] = field(default_factory=dict)
-    usable_memory: List[Dict[str, Any]] = field(default_factory=list)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "observation_id": self.observation_id,
-            "frame_type": self.frame_type,
-            "role": self.role,
-            "step_index": self.step_index,
-            "contract_view": dict(self.contract_view),
-            "state_digest": dict(self.state_digest),
-            "last_action_verification": dict(self.last_action_verification),
-            "decision_targets": [dict(item) for item in self.decision_targets],
-            "action_space": dict(self.action_space),
-            "usable_memory": [dict(item) for item in self.usable_memory],
-        }
-
-
-@dataclass(slots=True)
-class ActionSpace:
-    allowed_actions: List[str]
-    allowed_insertion_operators: List[str] = field(default_factory=list)
-    allowed_task_signals: List[str] = field(default_factory=list)
-    allowed_position_signals: List[str] = field(default_factory=list)
-    allowed_destroy_operators: List[str] = field(default_factory=list)
-    allowed_destroy_signals: List[str] = field(default_factory=list)
-    allowed_acceptance_modes: List[str] = field(default_factory=list)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "allowed_actions": list(self.allowed_actions),
-            "allowed_insertion_operators": list(self.allowed_insertion_operators),
-            "allowed_task_signals": list(self.allowed_task_signals),
-            "allowed_position_signals": list(self.allowed_position_signals),
-            "allowed_destroy_operators": list(self.allowed_destroy_operators),
-            "allowed_destroy_signals": list(self.allowed_destroy_signals),
-            "allowed_acceptance_modes": list(self.allowed_acceptance_modes),
-        }
-
-
-@dataclass(slots=True)
-class SolverActionIntent:
-    decision_id: str
-    observation_id: str
-    action: str
-    target_id: str
-    controls: Dict[str, Any]
-    explanation: Dict[str, str] = field(default_factory=dict)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "decision_id": self.decision_id,
-            "observation_id": self.observation_id,
-            "action": self.action,
-            "target_id": self.target_id,
-            "controls": dict(self.controls),
-            "explanation": dict(self.explanation),
-        }
-
-
-@dataclass(slots=True)
 class SearchContract:
     contract_id: str
     contract_type: str
@@ -128,9 +58,13 @@ class SearchContract:
             "contract_id": self.contract_id,
             "contract_type": self.contract_type,
             "objective_layers": [dict(item) for item in self.objective_layers],
-            "feasibility_control": _contract_feasibility_view(
-                self.feasibility_control, self.feasibility_policy
-            ),
+            "feasibility_control": {
+                **dict(self.feasibility_control),
+                "relaxation_ratios": [
+                    dict(item)
+                    for item in self.feasibility_control.get("relaxation_ratios", [])
+                ],
+            },
             "feasibility_policy": dict(self.feasibility_policy),
             "target_policy": dict(self.target_policy),
             "protected_metrics": [dict(item) for item in self.protected_metrics],
@@ -157,6 +91,8 @@ class ContractProgress:
     verification_ids: List[str] = field(default_factory=list)
     intent_status_counts: Dict[str, int] = field(default_factory=dict)
     dominant_blocker_counts: Dict[str, int] = field(default_factory=dict)
+    recent_intent_statuses: List[str] = field(default_factory=list)
+    recent_blockers: List[str] = field(default_factory=list)
     condition_report: List[Dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
@@ -168,6 +104,8 @@ class ContractProgress:
             "verification_ids": list(self.verification_ids),
             "intent_status_counts": dict(self.intent_status_counts),
             "dominant_blocker_counts": dict(self.dominant_blocker_counts),
+            "recent_intent_statuses": list(self.recent_intent_statuses[-5:]),
+            "recent_blockers": list(self.recent_blockers[-5:]),
             "condition_report": [dict(item) for item in self.condition_report],
         }
 
@@ -195,86 +133,6 @@ class RuntimeControlManifest:
             "compiled": _numericize(self.compiled),
             "defaults_applied": list(self.defaults_applied),
             "validation_report": dict(self.validation_report),
-        }
-
-
-@dataclass(slots=True)
-class ExecutionTrace:
-    trace_id: str
-    kind: str
-    payload: Dict[str, Any]
-
-    def as_dict(self) -> Dict[str, Any]:
-        out = dict(self.payload)
-        out["trace_id"] = self.trace_id
-        out["kind"] = self.kind
-        return out
-
-
-@dataclass(slots=True)
-class OutcomeVerification:
-    verification_id: str
-    contract_id: str
-    decision_id: str
-    manifest_id: str
-    trace_id: str
-    action: str
-    target_id: str
-    intent_status: str
-    metric_delta: Dict[str, Any]
-    debt_delta: Dict[str, float]
-    protected_metric_result: Dict[str, Any]
-    dominant_blocker: str
-    flow_diagnosis: Dict[str, bool]
-    event_tags: List[str]
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "verification_id": self.verification_id,
-            "contract_id": self.contract_id,
-            "decision_id": self.decision_id,
-            "manifest_id": self.manifest_id,
-            "trace_id": self.trace_id,
-            "action": self.action,
-            "target_id": self.target_id,
-            "intent_status": self.intent_status,
-            "metric_delta": dict(self.metric_delta),
-            "debt_delta": dict(self.debt_delta),
-            "protected_metric_result": dict(self.protected_metric_result),
-            "dominant_blocker": self.dominant_blocker,
-            "flow_diagnosis": dict(self.flow_diagnosis),
-            "event_tags": list(self.event_tags),
-        }
-
-
-@dataclass(slots=True)
-class VerifiedActionRecord:
-    record_id: str
-    contract_id: str
-    observation_id: str
-    decision_id: str
-    manifest_id: str
-    trace_id: str
-    verification_id: str
-    target_id: str
-    target_kind: str
-    control_fingerprint: Dict[str, Any]
-    outcome_fingerprint: Dict[str, Any]
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "record_id": self.record_id,
-            "kind": "verified_action",
-            "contract_id": self.contract_id,
-            "observation_id": self.observation_id,
-            "decision_id": self.decision_id,
-            "manifest_id": self.manifest_id,
-            "trace_id": self.trace_id,
-            "verification_id": self.verification_id,
-            "target_id": self.target_id,
-            "target_kind": self.target_kind,
-            "control_fingerprint": dict(self.control_fingerprint),
-            "outcome_fingerprint": dict(self.outcome_fingerprint),
         }
 
 
@@ -412,54 +270,6 @@ def compile_global_objective(
     return layers
 
 
-def compile_insertion_control(
-    control: Dict[str, Any], candidates: PublicCandidates | Dict[str, Any]
-) -> InsertionPolicy:
-    names = _names(
-        candidates,
-        "allowed_insertion_operators",
-        "insertion_operator_candidates",
-        INSERTION_OPERATOR_NAMES,
-    )
-    task_names = _names(
-        candidates,
-        "allowed_task_signals",
-        "insertion_task_signal_candidates",
-        INSERTION_TASK_SIGNAL_NAMES,
-    )
-    pos_names = _names(
-        candidates,
-        "allowed_position_signals",
-        "insertion_position_signal_candidates",
-        INSERTION_POSITION_SIGNAL_NAMES,
-    )
-    operators = _weights(names, control["operator_scores"], default=2)
-    task_signals = _weights(task_names, control["task_signal_scores"], default=0)
-    position_signals = _weights(pos_names, control["position_signal_scores"], default=0)
-    return InsertionPolicy(operators, task_signals, position_signals)
-
-
-def compile_destroy_control(
-    control: Dict[str, Any], candidates: PublicCandidates | Dict[str, Any]
-) -> DestroyPolicy:
-    names = _names(
-        candidates,
-        "allowed_destroy_operators",
-        "destroy_operator_candidates",
-        DESTROY_OPERATOR_NAMES,
-    )
-    signal_names = _names(
-        candidates,
-        "allowed_destroy_signals",
-        "destroy_signal_candidates",
-        DESTROY_SIGNAL_NAMES,
-    )
-    operators = _weights(names, control["operator_scores"], default=2)
-    signals = _weights(signal_names, control["signal_scores"], default=0)
-    score = int(control["intensity_score"])
-    return DestroyPolicy(operators, signals, score, 0.05 + 0.03 * score)
-
-
 def compile_acceptance(control: Dict[str, Any]) -> AcceptancePolicy:
     mode = str(control["mode"])
     score = int(control["intensity_score"])
@@ -555,7 +365,8 @@ def compile_solver_control(
         fallback = _baseline_from_observation(
             {
                 "working_summary": dict(
-                    (observation or {}).get("state_digest", {}).get("working", {}) or {}
+                    (observation or {}).get("solution_state", {}).get("working", {})
+                    or {}
                 )
             }
         )
@@ -569,7 +380,7 @@ def compile_solver_control(
         if not fallback:
             fallback = dict(
                 (observation or {})
-                .get("state_digest", {})
+                .get("solution_state", {})
                 .get("working", {})
                 .get("quality", {})
                 or {}
@@ -581,7 +392,9 @@ def compile_solver_control(
     action = str(decision["action"])
     action_space = dict((observation or {}).get("action_space", {}) or {})
     target_id = str(decision.get("target_id", ""))
+    target = _target_from_observation(observation, target_id)
     compiled: Dict[str, Any] = {
+        "target": target,
         "feasibility": _manifest_feasibility(contract.feasibility_policy),
         "resource": dict(contract.resource_policy),
         "protected_metric_baseline": dict(contract.protected_metric_baseline),
@@ -630,6 +443,7 @@ def compile_solver_control(
             "all_candidate_names_valid": True,
             "all_operational_fields_consumed": operational.issubset(consumed),
             "explanation_ignored_by_runtime": "explanation" not in compiled,
+            "target_resolved": bool(target.get("target_id") == target_id),
         },
     )
 
@@ -712,14 +526,6 @@ def derive_solver_request(
         time_limit_sec=remaining_time / remaining_actions,
         max_iters=max(1, remaining_iters // remaining_actions),
     )
-
-
-def format_instance_summary(summary: Dict[str, Any]) -> str:
-    return "\n".join(f"- {key}: {value}" for key, value in summary.items())
-
-
-def format_solution_summary(summary: Dict[str, Any]) -> str:
-    return "\n".join(f"- {key}: {value}" for key, value in summary.items())
 
 
 def _compile_insertion_manifest(
@@ -828,20 +634,53 @@ def _compile_acceptance_manifest(control: Dict[str, Any]) -> Dict[str, Any]:
 def _manifest_feasibility(policy: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "mode": str(policy.get("mode", "strict")),
-        "limits": {
-            str(name): float(values.get("limit_ratio", 0.0))
+        "per_type": {
+            str(name): {
+                "limit_ratio": float(values.get("limit_ratio", 0.0)),
+                "delta_ratio": float(values.get("delta_ratio", 0.0)),
+            }
             for name, values in dict(policy.get("per_type", {}) or {}).items()
         },
     }
 
 
-def _weights(
-    names: Sequence[str], items: List[Dict[str, Any]], *, default: int
-) -> Dict[str, int]:
-    out = {str(name): int(default) for name in names}
-    for item in items:
-        out[str(item["name"])] = int(item["score"])
-    return out
+def feasibility_policy_from_manifest(
+    manifest: RuntimeControlManifest | Dict[str, Any],
+) -> Dict[str, Any]:
+    raw = manifest.as_dict() if isinstance(manifest, RuntimeControlManifest) else manifest
+    feasibility = dict((raw.get("compiled", {}) or {}).get("feasibility", {}) or {})
+    return {
+        "mode": str(feasibility.get("mode", "strict")),
+        "per_type": {
+            str(name): {
+                "limit_ratio": float(values.get("limit_ratio", 0.0)),
+                "delta_ratio": float(values.get("delta_ratio", 0.0)),
+            }
+            for name, values in dict(feasibility.get("per_type", {}) or {}).items()
+        },
+    }
+
+
+def _target_from_observation(
+    observation: Optional[Dict[str, Any]], target_id: str
+) -> Dict[str, Any]:
+    for item in (observation or {}).get("decision_targets", []) or []:
+        if not isinstance(item, dict) or str(item.get("target_id", "")) != target_id:
+            continue
+        facts = dict(item.get("actionable_facts", {}) or {})
+        top_tasks = list(facts.get("top_tasks", []) or [])
+        task_ids = [
+            int(task["task_id"])
+            for task in top_tasks
+            if isinstance(task, dict) and task.get("task_id") is not None
+        ]
+        return {
+            "target_id": target_id,
+            "kind": str(item.get("kind", "")),
+            "task_ids": task_ids,
+            "actionable_facts": facts,
+        }
+    raise ValueError(f"target_id is not present in observation: {target_id}")
 
 
 def _weights_with_defaults(
@@ -860,20 +699,6 @@ def _weights_with_defaults(
             out[str(name)] = int(default)
             defaults.append(f"{prefix}.{name}={default}")
     return out
-
-
-def _names(
-    source: PublicCandidates | Dict[str, Any],
-    action_key: str,
-    candidate_key: str,
-    fallback: Sequence[str],
-) -> List[str]:
-    if isinstance(source, dict):
-        values = source.get(action_key, [])
-        return [str(item) for item in values] or list(fallback)
-    if source is not None and hasattr(source, "names"):
-        return list(source.names(candidate_key))
-    return list(fallback)
 
 
 def _names_from_space(
@@ -934,20 +759,6 @@ def _relaxation_scale_context(tasks: List[Task], agents: List[Agent]) -> Dict[st
     }
 
 
-def _contract_feasibility_view(
-    control: Dict[str, Any], policy: Dict[str, Any]
-) -> Dict[str, Any]:
-    view = dict(control)
-    view["relaxation_ratios"] = [
-        dict(item) for item in control.get("relaxation_ratios", [])
-    ]
-    view["compiled_policy_summary"] = {
-        name: dict(values)
-        for name, values in dict(policy.get("per_type", {}) or {}).items()
-    }
-    return view
-
-
 def _numericize(node: Any) -> Any:
     if isinstance(node, dict):
         return {str(key): _numericize(value) for key, value in node.items()}
@@ -960,26 +771,17 @@ def _numericize(node: Any) -> Any:
 
 __all__ = [
     "QUALITY_METRICS",
-    "MinimalObservation",
-    "ActionSpace",
-    "SolverActionIntent",
     "SearchContract",
     "ContractProgress",
     "RuntimeControlManifest",
-    "ExecutionTrace",
-    "OutcomeVerification",
-    "VerifiedActionRecord",
     "llm_solution_summary",
     "llm_instance_summary",
     "compile_global_objective",
-    "compile_insertion_control",
-    "compile_destroy_control",
     "compile_acceptance",
     "compile_solver_control",
+    "feasibility_policy_from_manifest",
     "alns_policy_from_manifest",
     "insertion_policy_from_manifest",
     "compile_contract",
     "derive_solver_request",
-    "format_instance_summary",
-    "format_solution_summary",
 ]

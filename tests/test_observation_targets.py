@@ -20,6 +20,12 @@ class ObservationTargetTests(unittest.TestCase):
             active_contract={
                 **contract().as_dict(),
                 "contract_type": "initial_construction",
+                "target_policy": {
+                    "preferred_target_kinds": [
+                        "unassigned_priority",
+                        "insertion_scarce_unassigned",
+                    ]
+                },
             },
             contract_progress={},
             remaining_contract_resources={"actions": 1, "iters": 1, "time_sec": 1.0},
@@ -43,13 +49,13 @@ class ObservationTargetTests(unittest.TestCase):
         observation = self._observation(solution)
         scarce = next(
             item
-            for item in observation["task_buildability_view"]["target_buckets"]
+            for item in observation["decision_targets"]
             if item["target_id"] == "T_scarce_unassigned"
         )
         self.assertNotIn("task_ids", scarce)
         self.assertEqual(scarce["kind"], "insertion_scarce_unassigned")
-        self.assertTrue(scarce["top_tasks"])
-        self.assertEqual(scarce["priority_mass"], 5.0)
+        self.assertTrue(scarce["actionable_facts"]["top_tasks"])
+        self.assertEqual(scarce["actionable_facts"]["priority_mass"], 5.0)
         self.assertNotIn(
             "destroy_control.signal_scores", scarce["recommended_controls"]
         )

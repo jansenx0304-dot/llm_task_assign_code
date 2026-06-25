@@ -294,9 +294,10 @@ def validate_contract(
     _allowed_exact(raw, allowed, required, "contract")
     contract_type = _string(raw, "contract_type", "contract")
     type_allowed = set(allowed_contract_types or CONTRACT_TYPES)
-    if observation is not None and observation.get("allowed_contract_types"):
+    supervisor_space = _supervisor_action_space(observation)
+    if supervisor_space.get("allowed_contract_types"):
         type_allowed &= set(
-            str(x) for x in observation.get("allowed_contract_types", [])
+            str(x) for x in supervisor_space.get("allowed_contract_types", [])
         )
     if contract_type not in type_allowed:
         raise ValueError(f"contract.contract_type is not allowed: {contract_type}")
@@ -307,9 +308,9 @@ def validate_contract(
         if candidates is not None
         else QUALITY_METRICS
     )
-    if observation is not None and observation.get("allowed_objective_metrics"):
+    if supervisor_space.get("allowed_objective_metrics"):
         allowed_objectives &= set(
-            str(x) for x in observation.get("allowed_objective_metrics", [])
+            str(x) for x in supervisor_space.get("allowed_objective_metrics", [])
         )
     if not 1 <= len(layers) <= min(4, len(allowed_objectives)):
         raise ValueError("contract.objective_layers must contain 1 to 4 metrics")
@@ -320,7 +321,11 @@ def validate_contract(
             "contract.objective_layers must be unique allowed objective candidates"
         )
 
-    validate_feasibility_control(raw["feasibility_control"], candidates, config)
+    feasibility = validate_feasibility_control(
+        raw["feasibility_control"], candidates, config
+    )
+    if contract_type == "initial_construction" and feasibility["mode"] != "strict":
+        raise ValueError("initial_construction requires strict feasibility_control")
     _target_policy(raw["target_policy"])
     _protected_metrics(raw["protected_metrics"])
     _resource_policy(raw["resource_policy"], remaining_budget)
@@ -348,7 +353,7 @@ def validate_solver_decision(
     root = _root(payload, "solver_decision")
     action = _string(root, "action", "solver_decision")
     contract_type = active_contract_type or str(
-        ((observation or {}).get("contract_view") or {}).get("contract_type", "")
+        ((observation or {}).get("active_contract") or {}).get("contract_type", "")
     )
     if observation is not None:
         allowed_actions = set(
@@ -399,15 +404,20 @@ def validate_solver_decision(
         _allowed_exact(root, allowed_fields, {"action", "target_id"}, "solver_decision")
     target_id = _string(root, "target_id", "solver_decision")
     if observation is not None:
-        target_ids = {
-            str(item.get("target_id", ""))
+        targets = {
+            str(item.get("target_id", "")): str(item.get("kind", ""))
             for item in observation.get("decision_targets", [])
             if isinstance(item, dict)
         }
-        if target_id not in target_ids:
+        if target_id not in targets:
             raise ValueError(
                 f"solver_decision.target_id is not in decision_targets: {target_id}"
             )
+        target_kind = targets[target_id]
+        if action == "request_supervisor_review" and target_kind != "contract_review":
+            raise ValueError("request_supervisor_review requires a contract_review target")
+        if action != "request_supervisor_review" and target_kind == "contract_review":
+            raise ValueError("solver execution action cannot use a contract_review target")
     _explanation_optional(root)
     return payload
 
@@ -430,8 +440,11 @@ def _global_objective(
         if candidates is not None
         else QUALITY_METRICS
     )
-    if observation is not None and observation.get("allowed_objective_metrics"):
-        allowed &= set(str(x) for x in observation.get("allowed_objective_metrics", []))
+    supervisor_space = _supervisor_action_space(observation)
+    if supervisor_space.get("allowed_objective_metrics"):
+        allowed &= set(
+            str(x) for x in supervisor_space.get("allowed_objective_metrics", [])
+        )
     if not 1 <= len(layers) <= min(4, len(allowed)):
         raise ValueError(
             "global_objective.objective_layers must contain 1 to 4 metrics"
@@ -577,18 +590,33 @@ def _split_observation_candidates(
     return None, value if candidates is None else candidates
 
 
+def _supervisor_action_space(
+    observation: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not isinstance(observation, dict):
+        return {}
+    value = observation.get("action_space", {}) or {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _budget_from_observation(
     observation: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, float]]:
     if not isinstance(observation, dict):
         return None
-    if "budget_caps" in observation:
-        caps = observation.get("budget_caps") or {}
+    limits = _supervisor_action_space(observation).get(
+        "next_contract_resource_limits", {}
+    ) or {}
+    if limits:
         return {
-            "step_calls": float(caps.get("max_solver_actions", 0) or 0),
-            "solver_calls": float(caps.get("max_solver_actions", 0) or 0),
-            "time_sec": float(caps.get("max_time_sec", 0.0) or 0.0),
-            "iters": float(caps.get("max_iters", 0) or 0),
+            "step_calls": float(
+                limits.get("max_solver_actions_allowed", 0) or 0
+            ),
+            "solver_calls": float(
+                limits.get("max_solver_actions_allowed", 0) or 0
+            ),
+            "time_sec": float(limits.get("max_time_sec_allowed", 0.0) or 0.0),
+            "iters": float(limits.get("max_iters_allowed", 0) or 0),
         }
     return None
 

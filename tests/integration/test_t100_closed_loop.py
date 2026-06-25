@@ -29,7 +29,7 @@ class T100ClosedLoopIntegrationTests(unittest.TestCase):
             },
         )
         with tempfile.TemporaryDirectory() as directory:
-            result_path = Path(directory) / "result.md"
+            result_path = Path(directory) / "result.txt"
             reporter = RunReporter(
                 result_path,
                 {"instance": "T100", "dummy_llm": True},

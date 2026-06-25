@@ -18,7 +18,6 @@ from typing import (
 )
 
 from ..config import Config
-from ..constraint_checker import check_constraints
 from ..models import Instance, Location
 from ..solution import AssignmentSolution
 from .features import enumerate_filtered_insert_positions
@@ -307,41 +306,6 @@ def enumerate_route_rebalance_removal(
             )
         )
     return _scored_moves(moves, sol, instance, config, policy)
-
-
-def enumerate_violation_removal(
-    sol: AssignmentSolution,
-    instance: Instance,
-    config: Config,
-    policy: DestroyPolicy,
-    strength: DestroyStrength,
-    rng: random.Random,
-) -> List[DestroyMove]:
-    del rng
-    report, _ = check_constraints(sol, instance, config, update_solution_schedule=False)
-    contributions = []
-    for tid_s, values in report.violation_by_task.items():
-        total = sum(float(value) for value in dict(values).values())
-        if total > _EPS:
-            contributions.append((total, int(tid_s)))
-    contributions.sort(key=lambda item: (-float(item[0]), int(item[1])))
-    if not contributions or strength.target_k <= 0:
-        return []
-    selected = tuple(
-        tid
-        for _, tid in contributions[: min(int(strength.target_k), len(contributions))]
-    )
-    move = _make_move(
-        operator_name="violation_removal",
-        shape="violation_task_set",
-        task_ids=selected,
-        affected_routes=_affected_routes_for_tasks(sol, selected),
-        metadata={
-            "target_k": int(strength.target_k),
-            "source": "constraint_report.violation_by_task",
-        },
-    )
-    return _score_moves([move], sol, instance, config, policy)
 
 
 DESTROY_OPERATORS: Dict[str, DestroyOperator] = {
