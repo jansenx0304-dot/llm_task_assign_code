@@ -72,11 +72,15 @@ class RunMemory:
         verification["contract_id"] = manifest_dict.get(
             "contract_id", verification.get("contract_id", "")
         )
-        verification["target_id"] = manifest_dict.get(
-            "target_id", verification.get("target_id", "")
+        verification["intent_id"] = manifest_dict.get(
+            "intent_id", verification.get("intent_id", "")
         )
         verification["trace"] = dict(trace)
-        target_kind = _target_kind(observation, str(verification.get("target_id", "")))
+        decision_root = dict(decision.get("solver_decision", decision) or {})
+        intent_id = str(
+            decision_root.get("intent_id", manifest_dict.get("intent_id", ""))
+        )
+        intent_type = _intent_type(observation, intent_id)
         item = {
             "record_id": record_id,
             "kind": "verified_action",
@@ -86,8 +90,11 @@ class RunMemory:
             "manifest_id": verification.get("manifest_id", ""),
             "trace_id": trace_id,
             "verification_id": verification_id,
-            "target_id": verification.get("target_id", ""),
-            "target_kind": target_kind,
+            "intent_id": intent_id,
+            "intent_type": intent_type,
+            "situation_assessment": dict(
+                decision_root.get("situation_assessment", {}) or {}
+            ),
             "action": manifest_dict.get("action", verification.get("action", "")),
             "control_fingerprint": _control_fingerprint(manifest_dict),
             "outcome_fingerprint": _outcome_fingerprint(verification),
@@ -143,10 +150,8 @@ class RunMemory:
     def for_solver(
         self,
         contract: Optional[Any] = None,
-        decision_targets: Optional[List[Dict[str, Any]]] = None,
         limit: int = 3,
     ) -> List[Dict[str, Any]]:
-        del decision_targets
         contract_id = None
         if contract is not None:
             raw = contract.as_dict() if hasattr(contract, "as_dict") else dict(contract)
@@ -175,17 +180,23 @@ class RunMemory:
 
     def as_dict(self) -> Dict[str, Any]:
         return {
-            "observations": self.observations,
-            "decisions": self.decisions,
-            "verified_actions": self.verified_actions,
-            "contract_summaries": self.contract_summaries,
+            "observations": [
+                _observation_memory_item(item) for item in self.observations
+            ],
+            "decisions": [_decision_memory_item(item) for item in self.decisions],
+            "verified_actions": [
+                _verified_action_memory_item(item) for item in self.verified_actions
+            ],
+            "contract_summaries": [
+                _contract_summary_memory_item(item) for item in self.contract_summaries
+            ],
         }
 
 
-def _target_kind(observation: Dict[str, Any], target_id: str) -> str:
-    for item in observation.get("decision_targets", []) or []:
-        if isinstance(item, dict) and str(item.get("target_id", "")) == target_id:
-            return str(item.get("kind", ""))
+def _intent_type(observation: Dict[str, Any], intent_id: str) -> str:
+    for item in ((observation.get("active_contract", {}) or {}).get("target_intents") or []):
+        if isinstance(item, dict) and str(item.get("intent_id", "")) == intent_id:
+            return str(item.get("intent_type", ""))
     return ""
 
 
@@ -194,6 +205,70 @@ def _observation_id(observation: Dict[str, Any]) -> str:
         (observation.get("run_context", {}) or {}).get("observation_id")
         or observation.get("observation_id", "")
     )
+
+
+def _observation_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    context = dict(item.get("run_context", {}) or {})
+    return {
+        "observation_id": str(context.get("observation_id", "")),
+        "phase": str(context.get("phase", "")),
+        "contract_id": str(context.get("contract_id", "")),
+        "step_index": context.get("step_index"),
+    }
+
+
+def _decision_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(item.get("payload", {}) or {})
+    decision = dict(
+        payload.get("solver_decision", payload.get("supervisor_decision", {})) or {}
+    )
+    return {
+        "decision_id": item.get("decision_id"),
+        "observation_id": item.get("observation_id"),
+        "action": decision.get("action", ""),
+        "intent_id": decision.get("intent_id", ""),
+    }
+
+
+def _verified_action_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "record_id": item.get("record_id"),
+        "kind": item.get("kind"),
+        "contract_id": item.get("contract_id"),
+        "observation_id": item.get("observation_id"),
+        "decision_id": item.get("decision_id"),
+        "manifest_id": item.get("manifest_id"),
+        "trace_id": item.get("trace_id"),
+        "verification_id": item.get("verification_id"),
+        "intent_id": item.get("intent_id"),
+        "intent_type": item.get("intent_type"),
+        "situation_assessment": dict(item.get("situation_assessment", {}) or {}),
+        "action": item.get("action"),
+        "control_fingerprint": dict(item.get("control_fingerprint", {}) or {}),
+        "outcome_fingerprint": dict(item.get("outcome_fingerprint", {}) or {}),
+    }
+
+
+def _contract_summary_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    completion = dict(item.get("completion", {}) or {})
+    progress = dict(item.get("progress", {}) or {})
+    return {
+        "summary_id": item.get("summary_id"),
+        "kind": item.get("kind"),
+        "contract_id": item.get("contract_id"),
+        "contract_type": item.get("contract_type"),
+        "objective_layers": list(item.get("objective_layers", []) or []),
+        "protected_metrics": list(item.get("protected_metrics", []) or []),
+        "completion_status": completion.get("completion_status", ""),
+        "completion_reason": completion.get("completion_reason", ""),
+        "solver_actions": int(progress.get("solver_actions", 0) or 0),
+        "contract_objective_status_counts": dict(
+            progress.get("contract_objective_status_counts", {}) or {}
+        ),
+        "dominant_blocker_counts": dict(
+            progress.get("dominant_blocker_counts", {}) or {}
+        ),
+    }
 
 
 def _control_fingerprint(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -225,7 +300,7 @@ def _control_fingerprint(manifest: Dict[str, Any]) -> Dict[str, Any]:
 def _outcome_fingerprint(verification: Dict[str, Any]) -> Dict[str, Any]:
     working = (verification.get("metric_delta", {}) or {}).get("working", {}) or {}
     return {
-        "intent_status": verification.get("intent_status"),
+        "contract_objective_status": verification.get("contract_objective_status"),
         "dominant_blocker": verification.get("dominant_blocker"),
         "run_global_best_improved": bool(
             (verification.get("improvement_flags", {}) or {}).get(
@@ -256,10 +331,11 @@ def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "record_id": item.get("record_id"),
         "contract_id": item.get("contract_id"),
         "action": item.get("action"),
-        "target_id": item.get("target_id"),
-        "target_kind": item.get("target_kind"),
+        "intent_id": item.get("intent_id"),
+        "intent_type": item.get("intent_type"),
+        "situation_assessment": dict(item.get("situation_assessment", {}) or {}),
         "compiled_controls": dict(control),
-        "intent_status": outcome.get("intent_status"),
+        "contract_objective_status": outcome.get("contract_objective_status"),
         "dominant_blocker": outcome.get("dominant_blocker"),
         "metric_delta": dict(outcome.get("metric_delta", {}) or {}),
         "debt_delta": dict(outcome.get("debt_delta", {}) or {}),
@@ -273,22 +349,27 @@ def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
 
 def _supervisor_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
     if item.get("kind") == "contract_summary":
+        progress = dict(item.get("progress", {}) or {})
+        completion = dict(item.get("completion", {}) or {})
         return {
             "summary_id": item.get("summary_id"),
             "contract_id": item.get("contract_id"),
             "contract_type": item.get("contract_type"),
-            "completion_status": (item.get("completion", {}) or {}).get(
-                "completion_status"
+            "completion_status": completion.get("completion_status"),
+            "completion_reason": completion.get("completion_reason"),
+            "solver_actions": int(progress.get("solver_actions", 0) or 0),
+            "contract_objective_status_counts": dict(
+                progress.get("contract_objective_status_counts", {}) or {}
             ),
-            "condition_report": (item.get("completion", {}) or {}).get(
-                "condition_report", []
+            "dominant_blocker_counts": dict(
+                progress.get("dominant_blocker_counts", {}) or {}
             ),
         }
     return {
         "record_id": item.get("record_id"),
         "contract_id": item.get("contract_id"),
-        "intent_status": (item.get("outcome_fingerprint", {}) or {}).get(
-            "intent_status"
+        "contract_objective_status": (item.get("outcome_fingerprint", {}) or {}).get(
+            "contract_objective_status"
         ),
         "dominant_blocker": (item.get("outcome_fingerprint", {}) or {}).get(
             "dominant_blocker"

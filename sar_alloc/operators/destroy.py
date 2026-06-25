@@ -386,8 +386,8 @@ def build_destroy_landscape(
                 else 0.0
             ),
             "route_len_max": int(max(route_lengths)) if route_lengths else 0,
-            "route_cost_imbalance_level": _cv_level(route_costs),
-            "route_load_imbalance_level": _cv_level([float(x) for x in route_lengths]),
+            "route_cost_cv": _cv_value(route_costs),
+            "route_load_cv": _cv_value([float(x) for x in route_lengths]),
         },
         "candidate_move_landscape": candidate_landscape,
         "recent_destroy_feedback": _compact_recent_destroy_feedback(
@@ -896,19 +896,24 @@ def _normalized_level(value: float) -> str:
 
 
 def _cv_level(values: Sequence[float]) -> str:
-    if not values:
+    cv = _cv_value(values)
+    if cv < 0.15:
         return "low"
+    if cv < 0.35:
+        return "medium"
+    return "high"
+
+
+def _cv_value(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
     mean = sum(float(x) for x in values) / max(1, len(values))
     if abs(mean) <= _EPS:
         cv = 0.0
     else:
         variance = sum((float(x) - mean) ** 2 for x in values) / max(1, len(values))
         cv = math.sqrt(max(0.0, variance)) / abs(mean)
-    if cv < 0.15:
-        return "low"
-    if cv < 0.35:
-        return "medium"
-    return "high"
+    return _round(cv)
 
 
 def _compact_recent_destroy_feedback(summary: Mapping[str, Any]) -> Dict[str, Any]:

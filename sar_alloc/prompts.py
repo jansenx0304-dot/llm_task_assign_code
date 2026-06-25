@@ -20,8 +20,9 @@ def get_supervisor_kickoff_prompt(
         "SUPERVISOR_KICKOFF",
         (
             "You are the stage supervisor. Use only the observation fields. Output a "
-            "global objective and one executable initial contract. Operational fields "
-            "will be compiled and enforced. Put human-readable text only in explanation."
+            "global objective, your situation_assessment, and one executable initial "
+            "contract with LLM-created target_intents. Observation is evidence only; "
+            "it contains no recommended strategy."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,
@@ -34,9 +35,9 @@ def get_supervisor_review_prompt(
     return _prompt(
         "SUPERVISOR_REVIEW",
         (
-            "Use contract_result, verification_summary, solution_state, and the current "
-            "action_space to decide whether to stop or issue the next executable contract. "
-            "Put human-readable text only in contract_review or explanation."
+            "Use contract_result, verification_summary, solution_evidence, and hard "
+            "resource constraints to decide whether to stop or issue the next executable "
+            "contract. If issuing a contract, create target_intents yourself from evidence."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,
@@ -49,12 +50,14 @@ def get_solver_prompt(
     return _prompt(
         "SOLVER",
         (
-            "Choose one allowed action. If executing a solver action, choose one target_id "
-            "from decision_targets and choose controls only from action_space. Every "
-            "operational field will be compiled and executed exactly. Each score name "
-            "must be selected from the enum of that exact output field. Do not move names "
-            "between destroy operator, destroy signal, insertion operator, task signal, "
-            "and position signal fields."
+            "Choose one hard-executable action. Observation is an evidence packet and "
+            "contains no recommended strategy. If executing a solver action, choose one "
+            "intent_id from active_contract.target_intents, write your own "
+            "situation_assessment, and choose controls only from control_catalog. Every "
+            "nonzero operator/signal weight must appear explicitly in your control output; "
+            "unmentioned weights execute as zero. Do not move names between destroy "
+            "operator, destroy signal, insertion operator, task signal, and position "
+            "signal fields."
         ),
         {"user_goal": user_goal_text, "observation": observation},
         json_schema,

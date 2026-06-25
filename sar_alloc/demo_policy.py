@@ -28,7 +28,7 @@ def demo_supervisor_kickoff(
                 success=[
                     {
                         "condition_id": "S_initial",
-                        "source": "last.intent_status",
+                        "source": "last.contract_objective_status",
                         "op": "==",
                         "value": "achieved",
                         "window": 1,
@@ -37,7 +37,7 @@ def demo_supervisor_kickoff(
                 failure=[
                     {
                         "condition_id": "F_initial",
-                        "source": "last.intent_status",
+                        "source": "last.contract_objective_status",
                         "op": "==",
                         "value": "not_achieved",
                         "window": 1,
@@ -108,13 +108,20 @@ def demo_supervisor_review(
 def demo_solver_decision(
     observation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    action_space = (observation or {}).get("action_space", {}) or {}
-    allowed_actions = [str(value) for value in action_space.get("allowed_actions", [])]
+    action_space = (observation or {}).get("execution_state", {}) or {}
+    catalog = (observation or {}).get("control_catalog", {}) or {}
+    allowed_actions = [
+        str(value) for value in action_space.get("hard_executable_actions", [])
+    ]
     if allowed_actions == ["request_supervisor_review"]:
         return {
             "solver_decision": {
                 "action": "request_supervisor_review",
-                "target_id": _review_target(observation),
+                "situation_assessment": _assessment("Request supervisor review."),
+                "review_request": {
+                    "reason": "No useful executable search action is available under the current contract.",
+                    "evidence_refs": ["execution_state", "last_verification"],
+                },
                 "explanation": {
                     "reason_summary": "No executable search action is available."
                 },
@@ -128,8 +135,16 @@ def demo_solver_decision(
         return {
             "solver_decision": {
                 "action": "construct_initial",
-                "target_id": _first_target(observation, "T_unassigned_priority"),
-                "insertion_control": _insertion_control(action_space),
+                "situation_assessment": _assessment(
+                    "Construct an initial solution using the selected contract intent."
+                ),
+                "intent_id": _first_intent(observation),
+                "insertion_control": _insertion_control(catalog),
+                "solver_budget": _solver_budget(observation),
+                "expected_effects": [
+                    {"metric": "missed_priority", "direction": "decrease"},
+                    {"metric": "unassigned_count", "direction": "decrease"},
+                ],
                 "explanation": {
                     "reason_summary": "Use priority and scarcity aware construction."
                 },
@@ -138,26 +153,34 @@ def demo_solver_decision(
     return {
         "solver_decision": {
             "action": "run_alns",
-            "target_id": _first_target(observation, "T_unassigned_priority"),
+            "situation_assessment": _assessment(
+                "Run ALNS with explicit controls selected by the solver decision."
+            ),
+            "intent_id": _first_intent(observation),
             "destroy_control": {
                 "operator_scores": _preferred_scores(
-                    action_space,
-                    "allowed_destroy_operators",
+                    catalog,
+                    "destroy_operators",
                     ["related_cluster_removal"],
                     8,
                 ),
                 "signal_scores": _preferred_scores(
-                    action_space, "allowed_destroy_signals", ["coupling_pressure"], 8
+                    catalog, "destroy_signals", ["coupling_pressure"], 8
                 ),
                 "intensity_score": 5,
             },
-            "insertion_control": _insertion_control(action_space),
+            "insertion_control": _insertion_control(catalog),
             "acceptance_control": {
                 "mode": _preferred_name(
-                    action_space, "allowed_acceptance_modes", "threshold"
+                    catalog, "acceptance_modes", "threshold"
                 ),
                 "intensity_score": 4,
             },
+            "solver_budget": _solver_budget(observation),
+            "expected_effects": [
+                {"metric": "missed_priority", "direction": "decrease"},
+                {"metric": "energy_total", "direction": "decrease"},
+            ],
             "explanation": {"reason_summary": "Run one bounded local rebuild."},
         }
     }
@@ -179,13 +202,31 @@ def _contract(
         "contract_type": contract_type,
         "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
         "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
-        "target_policy": {
-            "preferred_target_kinds": (
-                ["unassigned_priority", "insertion_scarce_unassigned"]
-                if contract_type == "initial_construction"
-                else ["unassigned_priority", "energy_debt"]
-            )
-        },
+        "situation_assessment": _assessment(explanation),
+        "target_intents": [
+            {
+                "intent_id": (
+                    "construct_coverage"
+                    if contract_type == "initial_construction"
+                    else "search_coverage_energy"
+                ),
+                "intent_type": (
+                    "construction"
+                    if contract_type == "initial_construction"
+                    else "improvement"
+                ),
+                "evidence_refs": [
+                    "candidate_landscape.insertion_evidence",
+                    "solution_evidence.working.quality",
+                ],
+                "expected_effects": [
+                    {"metric": "missed_priority", "direction": "decrease"},
+                    {"metric": "unassigned_count", "direction": "decrease"},
+                    {"metric": "energy_total", "direction": "decrease"},
+                ],
+                "rationale": explanation,
+            }
+        ],
         "protected_metrics": [{"metric": "unassigned_count", "max_worsen": 0}],
         "resource_policy": {
             "min_actions": min_actions,
@@ -202,19 +243,19 @@ def _insertion_control(action_space: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "operator_scores": _preferred_scores(
             action_space,
-            "allowed_insertion_operators",
+            "insertion_operators",
             ["scarcity_first_insertion", "regret_insertion"],
             8,
         ),
         "task_signal_scores": _preferred_scores(
             action_space,
-            "allowed_task_signals",
+            "insertion_task_signals",
             ["priority_loss", "scarcity_pressure"],
             9,
         ),
         "position_signal_scores": _preferred_scores(
             action_space,
-            "allowed_position_signals",
+            "insertion_position_signals",
             ["insert_cost", "future_slack"],
             8,
         ),
@@ -224,7 +265,10 @@ def _insertion_control(action_space: Dict[str, Any]) -> Dict[str, Any]:
 def _preferred_scores(
     action_space: Dict[str, Any], key: str, preferred: list[str], score: int
 ) -> list[Dict[str, Any]]:
-    allowed = [str(value) for value in action_space.get(key, [])]
+    allowed = [
+        str(value.get("name")) if isinstance(value, dict) else str(value)
+        for value in action_space.get(key, [])
+    ]
     selected = [name for name in preferred if name in allowed]
     if not selected and allowed:
         selected = allowed[:1]
@@ -235,7 +279,10 @@ def _preferred_scores(
 
 
 def _preferred_name(action_space: Dict[str, Any], key: str, preferred: str) -> str:
-    allowed = [str(value) for value in action_space.get(key, [])]
+    allowed = [
+        str(value.get("name")) if isinstance(value, dict) else str(value)
+        for value in action_space.get(key, [])
+    ]
     if preferred in allowed:
         return preferred
     if allowed:
@@ -297,18 +344,35 @@ def _allowed_actions(
     )
 
 
-def _first_target(observation: Optional[Dict[str, Any]], fallback: str) -> str:
-    for item in (observation or {}).get("decision_targets", []) or []:
-        if isinstance(item, dict) and item.get("kind") != "contract_review":
-            return str(item.get("target_id", fallback))
-    return fallback
+def _first_intent(observation: Optional[Dict[str, Any]]) -> str:
+    for item in ((observation or {}).get("active_contract", {}) or {}).get(
+        "target_intents", []
+    ):
+        if isinstance(item, dict) and item.get("intent_id"):
+            return str(item["intent_id"])
+    return "construct_coverage"
 
 
-def _review_target(observation: Optional[Dict[str, Any]]) -> str:
-    for item in (observation or {}).get("decision_targets", []) or []:
-        if isinstance(item, dict) and item.get("kind") == "contract_review":
-            return str(item.get("target_id", "contract_review"))
-    return "contract_review"
+def _solver_budget(observation: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    remaining = (
+        ((observation or {}).get("execution_state", {}) or {}).get(
+            "remaining_contract_resources", {}
+        )
+        or {}
+    )
+    return {
+        "max_iters": max(1, min(1, int(float(remaining.get("iters", 1) or 1)))),
+        "max_time_sec": max(
+            1e-6, min(1.0, float(remaining.get("time_sec", 1.0) or 1.0))
+        ),
+    }
+
+
+def _assessment(summary: str) -> Dict[str, str]:
+    return {
+        "summary": summary,
+        "reasoning_from_evidence": "Demo mode uses deterministic evidence references for a mock LLM decision.",
+    }
 
 
 def _cap_time(remaining: Dict[str, float], desired: float) -> float:

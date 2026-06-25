@@ -62,12 +62,7 @@ def build_public_candidates(
         ("relaxed_recoverable", ""),
         ("recovery_only", ""),
     ]
-    current_solution = (
-        getattr(state, "working_solution", None) if state is not None else None
-    )
-    current_eval = getattr(current_solution, "eval", None)
-    if current_eval is not None and bool(getattr(current_eval, "is_feasible", False)):
-        feasibility = [item for item in feasibility if item[0] != "recovery_only"]
+    del state
 
     return PublicCandidates(
         objective_candidates=_items(
@@ -78,22 +73,25 @@ def build_public_candidates(
         ),
         insertion_task_signal_candidates=_items(
             [
-                ("priority_loss", "Prefer unassigned tasks with high missed priority."),
+                (
+                    "priority_loss",
+                    "Task-level signal equal to missed priority contribution.",
+                ),
                 (
                     "scarcity_pressure",
-                    "Prefer unassigned tasks with scarce feasible insertion options.",
+                    "Task-level signal measuring limited feasible insertion options.",
                 ),
                 (
                     "regret_pressure",
-                    "Prefer tasks whose alternatives are much worse than the best option.",
+                    "Task-level signal measuring the gap between best and alternative insertion options.",
                 ),
                 (
                     "bottleneck_pressure",
-                    "Prefer tasks with few feasible agents or positions.",
+                    "Task-level signal measuring limited feasible agents or positions.",
                 ),
                 (
                     "mobility_opportunity",
-                    "Prefer tasks with better reassignment or insertion opportunity.",
+                    "Task-level signal measuring reassignment or insertion opportunity.",
                 ),
             ]
         ),
@@ -108,23 +106,23 @@ def build_public_candidates(
             [
                 (
                     "cost_pressure",
-                    "Prefer removing assigned structures with high cost release.",
+                    "Destroy signal measuring cost released by removing an assigned component.",
                 ),
                 (
                     "coupling_pressure",
-                    "Prefer removing strongly related local structures.",
+                    "Destroy signal measuring relatedness of local assigned structures.",
                 ),
                 (
                     "route_balance_pressure",
-                    "Prefer removing from overloaded or imbalanced routes.",
+                    "Destroy signal measuring route load or cost imbalance pressure.",
                 ),
                 (
                     "mobility_opportunity",
-                    "Prefer removing tasks that are easy to reinsert elsewhere.",
+                    "Destroy signal measuring reassignment opportunity after removal.",
                 ),
                 (
                     "scarcity_protection",
-                    "Protect scarce assigned tasks from removal by reducing their destroy score.",
+                    "Destroy signal that decreases removal score for scarce reassignment options.",
                 ),
             ]
         ),

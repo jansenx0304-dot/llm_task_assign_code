@@ -292,8 +292,8 @@ class ConsoleTracePrinter:
         if event_type == "execution_trace":
             return self._execution_trace_summary(payload)
         if event_type in {"outcome_audit", "outcome_verification"}:
-            if isinstance(payload, dict) and "intent_status" in payload:
-                return f"status={payload.get('intent_status')} blocker={payload.get('dominant_blocker')}"
+            if isinstance(payload, dict) and "contract_objective_status" in payload:
+                return f"status={payload.get('contract_objective_status')} blocker={payload.get('dominant_blocker')}"
             return (
                 f"events={payload.get('events', [])}"
                 if isinstance(payload, dict)
@@ -351,14 +351,14 @@ class ConsoleTracePrinter:
             return "manifest compiled"
         compiled = payload.get("compiled", {}) or {}
         action = payload.get("action")
-        target = payload.get("target_id")
+        intent = payload.get("intent_id")
         if action == "run_alns":
             destroy = (compiled.get("destroy", {}) or {}).get("operator_weights", {})
             insertion = (compiled.get("insertion", {}) or {}).get(
                 "operator_weights", {}
             )
-            return f"action={action} target={target} destroy={self._format_operator_weights(destroy)} insertion={self._format_operator_weights(insertion)}"
-        return f"action={action} target={target}"
+            return f"action={action} intent={intent} destroy={self._format_operator_weights(destroy)} insertion={self._format_operator_weights(insertion)}"
+        return f"action={action} intent={intent}"
 
     def _execution_trace_summary(self, payload: Any) -> str:
         if not isinstance(payload, dict):

@@ -78,11 +78,11 @@ def verify_initial_construction(
         manifest=manifest,
         trace=trace,
         action="construct_initial",
-        target_id=_manifest_target(manifest),
+        intent_id=_manifest_intent(manifest),
     )
     verification.update(
         {
-            "intent_status": status,
+            "contract_objective_status": status,
             "metric_delta": {
                 "working": (
                     _metric_values(working_evaluation, _contract_metrics(contract))
@@ -164,7 +164,9 @@ def verify_alns_action(
     status = (
         "regressed"
         if not protected["passed"]
-        else _intent_status(before_working_eval, chosen_after, metrics, debt_delta)
+        else _contract_objective_status(
+            before_working_eval, chosen_after, metrics, debt_delta
+        )
     )
     blocker = (
         "protected_metric_violated"
@@ -220,11 +222,11 @@ def verify_alns_action(
         manifest=manifest,
         trace=trace,
         action="run_alns",
-        target_id=_manifest_target(manifest),
+        intent_id=_manifest_intent(manifest),
     )
     verification.update(
         {
-            "intent_status": status,
+            "contract_objective_status": status,
             "metric_delta": {"working": working_delta, "best_feasible": best_delta},
             "debt_delta": debt_delta,
             "protected_metric_result": protected,
@@ -281,13 +283,13 @@ def verify_review_request(
         manifest=manifest,
         trace=trace,
         action="request_supervisor_review",
-        target_id=(decision.get("solver_decision", decision)).get(
-            "target_id", "contract_review"
+        intent_id=(decision.get("solver_decision", decision)).get(
+            "intent_id", "contract_review"
         ),
     )
     verification.update(
         {
-            "intent_status": "not_applicable",
+            "contract_objective_status": "not_applicable",
             "metric_delta": {"working": {}, "best_feasible": {}},
             "debt_delta": {},
             "protected_metric_result": {"passed": True, "violations": []},
@@ -316,7 +318,7 @@ def _base_verification(
     manifest: Optional[Any],
     trace: Dict[str, Any],
     action: str,
-    target_id: str,
+    intent_id: str,
 ) -> Dict[str, Any]:
     manifest_dict = (
         manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
@@ -328,7 +330,7 @@ def _base_verification(
         "manifest_id": manifest_dict.get("manifest_id", ""),
         "trace_id": trace.get("trace_id", ""),
         "action": action,
-        "target_id": target_id,
+        "intent_id": intent_id,
         "protected_metric_baseline": _protected_metric_baseline(contract),
     }
 
@@ -493,7 +495,7 @@ def _dominant_blocker_from_trace(trace: Dict[str, Any], status: str) -> str:
     return "none"
 
 
-def _intent_status(
+def _contract_objective_status(
     before: EvalResult,
     after: EvalResult,
     layers: List[Dict[str, Any]],
@@ -632,16 +634,18 @@ def _contract_id(contract: Any) -> str:
     return str(raw.get("contract_id", ""))
 
 
-def _manifest_target(manifest: Optional[Any]) -> str:
+def _manifest_intent(manifest: Optional[Any]) -> str:
     raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
-    return str(raw.get("target_id", ""))
+    return str(raw.get("intent_id", ""))
 
 
 def _manifest_review_reasons(manifest: Optional[Any]) -> List[str]:
     raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
-    target = dict((raw.get("compiled", {}) or {}).get("target", {}) or {})
-    facts = dict(target.get("actionable_facts", {}) or {})
-    return [str(value) for value in facts.get("eligibility_reasons", []) or []]
+    review_request = dict((raw.get("compiled", {}) or {}).get("review_request", {}) or {})
+    reasons = [str(value) for value in review_request.get("evidence_refs", []) or []]
+    if review_request.get("reason"):
+        reasons.insert(0, str(review_request["reason"]))
+    return reasons
 
 
 def _verification_objective_keys(

@@ -22,13 +22,7 @@ QUALITY_METRICS = {
     "makespan",
     "route_balance",
 }
-TARGET_KINDS = {
-    "unassigned_priority",
-    "insertion_scarce_unassigned",
-    "energy_debt",
-    "time_window_debt",
-    "route_balance",
-}
+INTENT_TYPES = {"construction", "repair", "improvement", "diversification", "review"}
 
 
 def validate_sparse_score_items(
@@ -285,7 +279,8 @@ def validate_contract(
         "contract_type",
         "objective_layers",
         "feasibility_control",
-        "target_policy",
+        "situation_assessment",
+        "target_intents",
         "protected_metrics",
         "resource_policy",
         "exit_conditions",
@@ -324,9 +319,8 @@ def validate_contract(
     feasibility = validate_feasibility_control(
         raw["feasibility_control"], candidates, config
     )
-    if contract_type == "initial_construction" and feasibility["mode"] != "strict":
-        raise ValueError("initial_construction requires strict feasibility_control")
-    _target_policy(raw["target_policy"])
+    _situation_assessment(raw["situation_assessment"], "contract.situation_assessment")
+    _target_intents(raw["target_intents"])
     _protected_metrics(raw["protected_metrics"])
     _resource_policy(raw["resource_policy"], remaining_budget)
     _exit_conditions(raw["exit_conditions"])
@@ -344,7 +338,10 @@ def validate_solver_decision(
     observation = (
         observation_or_candidates
         if isinstance(observation_or_candidates, dict)
-        and "action_space" in observation_or_candidates
+        and (
+            "execution_state" in observation_or_candidates
+            or "control_catalog" in observation_or_candidates
+        )
         else None
     )
     candidate_source = candidates or (
@@ -359,7 +356,10 @@ def validate_solver_decision(
         allowed_actions = set(
             str(x)
             for x in (
-                (observation.get("action_space") or {}).get("allowed_actions") or []
+                (observation.get("execution_state") or {}).get(
+                    "hard_executable_actions"
+                )
+                or []
             )
         )
     elif contract_type == "initial_construction":
@@ -369,25 +369,55 @@ def validate_solver_decision(
     if action not in allowed_actions:
         raise ValueError(f"illegal solver action for {contract_type}: {action}")
 
-    allowed_fields = {"action", "target_id", "explanation"}
+    allowed_fields = {"action", "situation_assessment", "explanation"}
     if action == "construct_initial":
-        allowed_fields.add("insertion_control")
-        required = {"action", "target_id", "insertion_control"}
+        allowed_fields |= {
+            "intent_id",
+            "insertion_control",
+            "solver_budget",
+            "expected_effects",
+        }
+        required = {
+            "action",
+            "situation_assessment",
+            "intent_id",
+            "insertion_control",
+            "solver_budget",
+            "expected_effects",
+        }
         _allowed_exact(root, allowed_fields, required, "solver_decision")
+        _situation_assessment(root["situation_assessment"], "situation_assessment")
+        _validate_intent_id(root["intent_id"], observation)
+        _solver_budget(root["solver_budget"], observation)
+        _expected_effects(root["expected_effects"])
         validate_insertion_control(
             root["insertion_control"],
             _action_space_or_candidates(observation, candidate_source),
         )
     elif action == "run_alns":
-        allowed_fields |= {"destroy_control", "insertion_control", "acceptance_control"}
-        required = {
-            "action",
-            "target_id",
+        allowed_fields |= {
+            "intent_id",
             "destroy_control",
             "insertion_control",
             "acceptance_control",
+            "solver_budget",
+            "expected_effects",
+        }
+        required = {
+            "action",
+            "situation_assessment",
+            "intent_id",
+            "destroy_control",
+            "insertion_control",
+            "acceptance_control",
+            "solver_budget",
+            "expected_effects",
         }
         _allowed_exact(root, allowed_fields, required, "solver_decision")
+        _situation_assessment(root["situation_assessment"], "situation_assessment")
+        _validate_intent_id(root["intent_id"], observation)
+        _solver_budget(root["solver_budget"], observation)
+        _expected_effects(root["expected_effects"])
         validate_destroy_control(
             root["destroy_control"],
             _action_space_or_candidates(observation, candidate_source),
@@ -401,23 +431,15 @@ def validate_solver_decision(
             _action_space_or_candidates(observation, candidate_source),
         )
     else:
-        _allowed_exact(root, allowed_fields, {"action", "target_id"}, "solver_decision")
-    target_id = _string(root, "target_id", "solver_decision")
-    if observation is not None:
-        targets = {
-            str(item.get("target_id", "")): str(item.get("kind", ""))
-            for item in observation.get("decision_targets", [])
-            if isinstance(item, dict)
-        }
-        if target_id not in targets:
-            raise ValueError(
-                f"solver_decision.target_id is not in decision_targets: {target_id}"
-            )
-        target_kind = targets[target_id]
-        if action == "request_supervisor_review" and target_kind != "contract_review":
-            raise ValueError("request_supervisor_review requires a contract_review target")
-        if action != "request_supervisor_review" and target_kind == "contract_review":
-            raise ValueError("solver execution action cannot use a contract_review target")
+        allowed_fields.add("review_request")
+        _allowed_exact(
+            root,
+            allowed_fields,
+            {"action", "situation_assessment", "review_request"},
+            "solver_decision",
+        )
+        _situation_assessment(root["situation_assessment"], "situation_assessment")
+        _review_request(root["review_request"])
     _explanation_optional(root)
     return payload
 
@@ -464,14 +486,101 @@ def _contract_review(raw_value: Any) -> None:
         _string(raw, key, "contract_review")
 
 
-def _target_policy(raw_value: Any) -> None:
-    raw = _object(raw_value, "target_policy")
-    _exact(raw, {"preferred_target_kinds"}, "target_policy")
-    kinds = _string_list(raw, "preferred_target_kinds", "target_policy")
-    if len(kinds) > 4 or any(kind not in TARGET_KINDS for kind in kinds):
-        raise ValueError(
-            "target_policy.preferred_target_kinds contains invalid target kind"
+def _situation_assessment(raw_value: Any, context: str) -> None:
+    raw = _object(raw_value, context)
+    _exact(raw, {"summary", "reasoning_from_evidence"}, context)
+    _string(raw, "summary", context)
+    _string(raw, "reasoning_from_evidence", context)
+
+
+def _target_intents(raw_value: Any) -> None:
+    values = _list(raw_value, "target_intents")
+    if not 1 <= len(values) <= 6:
+        raise ValueError("target_intents must contain 1 to 6 items")
+    seen: Set[str] = set()
+    for index, value in enumerate(values):
+        context = f"target_intents[{index}]"
+        item = _object(value, context)
+        _exact(
+            item,
+            {
+                "intent_id",
+                "intent_type",
+                "evidence_refs",
+                "expected_effects",
+                "rationale",
+            },
+            context,
         )
+        intent_id = _string(item, "intent_id", context)
+        if intent_id in seen:
+            raise ValueError(f"duplicate intent_id: {intent_id}")
+        seen.add(intent_id)
+        if _string(item, "intent_type", context) not in INTENT_TYPES:
+            raise ValueError(f"{context}.intent_type is invalid")
+        refs = _string_list(item, "evidence_refs", context)
+        if not 1 <= len(refs) <= 8:
+            raise ValueError(f"{context}.evidence_refs must contain 1 to 8 refs")
+        _expected_effects(item["expected_effects"])
+        _string(item, "rationale", context)
+
+
+def _expected_effects(raw_value: Any) -> None:
+    values = _list(raw_value, "expected_effects")
+    if len(values) > 4:
+        raise ValueError("expected_effects must contain at most 4 items")
+    for index, value in enumerate(values):
+        context = f"expected_effects[{index}]"
+        item = _object(value, context)
+        _exact(item, {"metric", "direction"}, context)
+        if _string(item, "metric", context) not in QUALITY_METRICS:
+            raise ValueError(f"{context}.metric is invalid")
+        if _string(item, "direction", context) not in {
+            "decrease",
+            "increase",
+            "maintain",
+        }:
+            raise ValueError(f"{context}.direction is invalid")
+
+
+def _validate_intent_id(raw_value: Any, observation: Optional[Dict[str, Any]]) -> None:
+    intent_id = raw_value if isinstance(raw_value, str) else ""
+    if not intent_id.strip():
+        raise ValueError("solver_decision.intent_id must be a non-empty string")
+    if observation is None:
+        return
+    intents = {
+        str(item.get("intent_id", ""))
+        for item in ((observation.get("active_contract") or {}).get("target_intents") or [])
+        if isinstance(item, dict)
+    }
+    if intent_id not in intents:
+        raise ValueError(f"solver_decision.intent_id is not in target_intents: {intent_id}")
+
+
+def _solver_budget(raw_value: Any, observation: Optional[Dict[str, Any]]) -> None:
+    raw = _object(raw_value, "solver_budget")
+    _exact(raw, {"max_iters", "max_time_sec"}, "solver_budget")
+    max_iters = _positive_int(raw, "max_iters", "solver_budget")
+    max_time = _positive_number(raw, "max_time_sec", "solver_budget")
+    if observation is not None:
+        remaining = (
+            ((observation.get("execution_state") or {}).get("remaining_contract_resources"))
+            or {}
+        )
+        if max_iters > int(float(remaining.get("iters", max_iters))):
+            raise ValueError("solver_budget.max_iters exceeds remaining contract iters")
+        if max_time > float(remaining.get("time_sec", max_time)) + 1e-9:
+            raise ValueError("solver_budget.max_time_sec exceeds remaining contract time")
+
+
+def _review_request(raw_value: Any) -> None:
+    raw = _object(raw_value, "review_request")
+    _exact(raw, {"reason", "evidence_refs"}, "review_request")
+    _string(raw, "reason", "review_request")
+    refs = _string_list(raw, "evidence_refs", "review_request")
+    if not 1 <= len(refs) <= 8:
+        raise ValueError("review_request.evidence_refs must contain 1 to 8 refs")
 
 
 def _protected_metrics(raw_value: Any) -> None:
@@ -565,8 +674,20 @@ def _exit_conditions(raw_value: Any) -> None:
 
 def _allowed(source: Any, action_space_key: str, candidate_key: str) -> List[str]:
     if isinstance(source, dict):
-        values = source.get(action_space_key, [])
-        return [str(item) for item in values]
+        key_aliases = {
+            "allowed_insertion_operators": "insertion_operators",
+            "allowed_task_signals": "insertion_task_signals",
+            "allowed_position_signals": "insertion_position_signals",
+            "allowed_destroy_operators": "destroy_operators",
+            "allowed_destroy_signals": "destroy_signals",
+            "allowed_acceptance_modes": "acceptance_modes",
+        }
+        key = action_space_key if action_space_key in source else key_aliases.get(action_space_key, action_space_key)
+        values = source.get(key, [])
+        return [
+            str(item.get("name")) if isinstance(item, dict) else str(item)
+            for item in values
+        ]
     if source is not None and hasattr(source, "names"):
         return list(source.names(candidate_key))
     return []
@@ -576,7 +697,7 @@ def _action_space_or_candidates(
     observation: Optional[Dict[str, Any]], candidates: Any
 ) -> Any:
     return (
-        (observation or {}).get("action_space")
+        (observation or {}).get("control_catalog")
         if observation is not None
         else candidates
     )

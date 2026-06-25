@@ -23,17 +23,17 @@ def update_contract_progress(
     vid = str(verification.get("verification_id", ""))
     if vid:
         progress.verification_ids.append(vid)
-    status = str(verification.get("intent_status", ""))
+    status = str(verification.get("contract_objective_status", ""))
     blocker = str(verification.get("dominant_blocker", "none"))
-    progress.intent_status_counts[status] = (
-        progress.intent_status_counts.get(status, 0) + 1
+    progress.contract_objective_status_counts[status] = (
+        progress.contract_objective_status_counts.get(status, 0) + 1
     )
     progress.dominant_blocker_counts[blocker] = (
         progress.dominant_blocker_counts.get(blocker, 0) + 1
     )
-    progress.recent_intent_statuses.append(status)
+    progress.recent_contract_objective_statuses.append(status)
     progress.recent_blockers.append(blocker)
-    progress.recent_intent_statuses[:] = progress.recent_intent_statuses[-5:]
+    progress.recent_contract_objective_statuses[:] = progress.recent_contract_objective_statuses[-5:]
     progress.recent_blockers[:] = progress.recent_blockers[-5:]
     trace = verification.get("trace", {}) or {}
     progress.iters_used += int(trace.get("iters", 0) or 0)
@@ -93,9 +93,6 @@ def check_contract_completion(
                     f"failure_condition_passed:{item['condition_id']}",
                     condition_report,
                 )
-        built_in = _built_in_failure(verifications)
-        if built_in is not None:
-            return _completion("failure", built_in, condition_report)
     else:
         progress.condition_report = []
 
@@ -115,21 +112,6 @@ def check_contract_completion(
     return _completion("continue", reason, condition_report)
 
 
-def _built_in_failure(verifications: List[Dict[str, Any]]) -> Optional[str]:
-    window = verifications[-3:]
-    if len(window) < 3:
-        return None
-    blockers = [str(item.get("dominant_blocker", "none")) for item in window]
-    if blockers[0] not in {"", "none", "solver_requested_review"} and len(
-        set(blockers)
-    ) == 1:
-        return f"repeated_blocker:{blockers[0]}"
-    statuses = [str(item.get("intent_status", "")) for item in window]
-    if all(status in {"not_achieved", "regressed"} for status in statuses):
-        return "no_progress"
-    return None
-
-
 def resolve_condition_source(
     source: str,
     progress: ContractProgress,
@@ -145,8 +127,8 @@ def resolve_condition_source(
         return progress.iters_used
     if source == "progress.time_used_sec":
         return progress.time_used_sec
-    if source == "last.intent_status":
-        return _required_value(last, "intent_status", source)
+    if source == "last.contract_objective_status":
+        return _required_value(last, "contract_objective_status", source)
     if source == "last.dominant_blocker":
         return _required_value(last, "dominant_blocker", source)
     if source == "last.improvement_flags.run_global_best_improved":
@@ -156,7 +138,7 @@ def resolve_condition_source(
         name = source.split(".", 1)[1]
         if name == "solver_requested_review":
             return progress.dominant_blocker_counts.get("solver_requested_review", 0)
-        return progress.intent_status_counts.get(name, 0)
+        return progress.contract_objective_status_counts.get(name, 0)
     if source == "best_feasible.exists":
         return bool(solution_state.get("best_feasible"))
     scope, metric = source.split(".", 1)
@@ -206,7 +188,10 @@ def _evaluate_condition(
                 for item in recent
             )
         else:
-            actual = sum(str(item.get("intent_status", "")) == name for item in recent)
+            actual = sum(
+                str(item.get("contract_objective_status", "")) == name
+                for item in recent
+            )
     else:
         actual = resolve_condition_source(source, progress, solution_state, last)
     try:

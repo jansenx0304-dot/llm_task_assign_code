@@ -30,13 +30,16 @@ def build_initial_solution_with_insertion(
         instance, put_all_unassigned=False
     )
     compiled_target = dict((manifest or {}).get("compiled", {}).get("target", {}) or {})
+    compiled_feasibility = dict(
+        (manifest or {}).get("compiled", {}).get("feasibility", {}) or {}
+    )
     solution = run_insertion_kernel(
         partial_solution=empty_solution,
         candidate_tasks=sorted(int(tid) for tid in instance.all_task_ids()),
         insertion_policy=insertion_policy,
         context=InsertionContext(
             kind="initial",
-            feasibility_mode="strict",
+            feasibility_mode=str(compiled_feasibility.get("mode", "strict")),
             target_task_ids=tuple(
                 int(tid) for tid in compiled_target.get("task_ids", []) or []
             ),

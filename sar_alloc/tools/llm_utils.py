@@ -46,7 +46,8 @@ class SearchContract:
     objective_layers: List[Dict[str, str]]
     feasibility_control: Dict[str, Any]
     feasibility_policy: Dict[str, Any]
-    target_policy: Dict[str, Any]
+    situation_assessment: Dict[str, str]
+    target_intents: List[Dict[str, Any]]
     protected_metrics: List[Dict[str, Any]]
     resource_policy: Dict[str, Any]
     exit_conditions: Dict[str, List[Dict[str, Any]]]
@@ -66,7 +67,8 @@ class SearchContract:
                 ],
             },
             "feasibility_policy": dict(self.feasibility_policy),
-            "target_policy": dict(self.target_policy),
+            "situation_assessment": dict(self.situation_assessment),
+            "target_intents": [dict(item) for item in self.target_intents],
             "protected_metrics": [dict(item) for item in self.protected_metrics],
             "protected_metric_baseline": dict(self.protected_metric_baseline),
             "resource_policy": dict(self.resource_policy),
@@ -89,9 +91,9 @@ class ContractProgress:
     time_used_sec: float = 0.0
     iters_used: int = 0
     verification_ids: List[str] = field(default_factory=list)
-    intent_status_counts: Dict[str, int] = field(default_factory=dict)
+    contract_objective_status_counts: Dict[str, int] = field(default_factory=dict)
     dominant_blocker_counts: Dict[str, int] = field(default_factory=dict)
-    recent_intent_statuses: List[str] = field(default_factory=list)
+    recent_contract_objective_statuses: List[str] = field(default_factory=list)
     recent_blockers: List[str] = field(default_factory=list)
     condition_report: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -102,9 +104,13 @@ class ContractProgress:
             "time_used_sec": round(self.time_used_sec, 6),
             "iters_used": self.iters_used,
             "verification_ids": list(self.verification_ids),
-            "intent_status_counts": dict(self.intent_status_counts),
+            "contract_objective_status_counts": dict(
+                self.contract_objective_status_counts
+            ),
             "dominant_blocker_counts": dict(self.dominant_blocker_counts),
-            "recent_intent_statuses": list(self.recent_intent_statuses[-5:]),
+            "recent_contract_objective_statuses": list(
+                self.recent_contract_objective_statuses[-5:]
+            ),
             "recent_blockers": list(self.recent_blockers[-5:]),
             "condition_report": [dict(item) for item in self.condition_report],
         }
@@ -116,7 +122,7 @@ class RuntimeControlManifest:
     source_decision_id: str
     contract_id: str
     action: str
-    target_id: str
+    intent_id: str
     trace_id: str
     compiled: Dict[str, Any]
     defaults_applied: List[str]
@@ -128,7 +134,7 @@ class RuntimeControlManifest:
             "source_decision_id": self.source_decision_id,
             "contract_id": self.contract_id,
             "action": self.action,
-            "target_id": self.target_id,
+            "intent_id": self.intent_id,
             "trace_id": self.trace_id,
             "compiled": _numericize(self.compiled),
             "defaults_applied": list(self.defaults_applied),
@@ -304,9 +310,10 @@ def compile_contract(
         ],
         feasibility_control=feasibility_control,
         feasibility_policy=feasibility_policy,
-        target_policy=dict(
-            raw_contract.get("target_policy", {"preferred_target_kinds": []})
-        ),
+        situation_assessment=dict(raw_contract.get("situation_assessment", {}) or {}),
+        target_intents=[
+            dict(item) for item in raw_contract.get("target_intents", []) or []
+        ],
         protected_metrics=[
             dict(item) for item in raw_contract.get("protected_metrics", [])
         ],
@@ -365,7 +372,7 @@ def compile_solver_control(
         fallback = _baseline_from_observation(
             {
                 "working_summary": dict(
-                    (observation or {}).get("solution_state", {}).get("working", {})
+                    (observation or {}).get("solution_evidence", {}).get("working", {})
                     or {}
                 )
             }
@@ -380,7 +387,7 @@ def compile_solver_control(
         if not fallback:
             fallback = dict(
                 (observation or {})
-                .get("solution_state", {})
+                .get("solution_evidence", {})
                 .get("working", {})
                 .get("quality", {})
                 or {}
@@ -390,13 +397,16 @@ def compile_solver_control(
         }
     decision = solver_decision.get("solver_decision", solver_decision)
     action = str(decision["action"])
-    action_space = dict((observation or {}).get("action_space", {}) or {})
-    target_id = str(decision.get("target_id", ""))
-    target = _target_from_observation(observation, target_id)
+    action_space = dict((observation or {}).get("control_catalog", {}) or {})
+    intent_id = str(decision.get("intent_id", ""))
+    intent = _intent_from_contract(contract, intent_id) if intent_id else {}
+    solver_budget = dict(decision.get("solver_budget", {}) or {})
     compiled: Dict[str, Any] = {
-        "target": target,
+        "llm_selected_intent": intent,
+        "situation_assessment": dict(decision.get("situation_assessment", {}) or {}),
+        "expected_effects": list(decision.get("expected_effects", []) or []),
         "feasibility": _manifest_feasibility(contract.feasibility_policy),
-        "resource": dict(contract.resource_policy),
+        "resource": _manifest_solver_budget(contract, solver_budget),
         "protected_metric_baseline": dict(contract.protected_metric_baseline),
         "protected_metric_bounds": [
             {
@@ -410,7 +420,14 @@ def compile_solver_control(
         ],
     }
     defaults: List[str] = []
-    consumed = {"action", "target_id", "explanation"}
+    consumed = {
+        "action",
+        "intent_id",
+        "situation_assessment",
+        "solver_budget",
+        "expected_effects",
+        "explanation",
+    }
 
     if action in {"construct_initial", "run_alns"}:
         insertion = _compile_insertion_manifest(
@@ -427,7 +444,8 @@ def compile_solver_control(
         compiled["acceptance"] = acceptance
         consumed |= {"destroy_control", "acceptance_control"}
     if action == "request_supervisor_review":
-        compiled["review_request"] = {"requested": True}
+        compiled["review_request"] = dict(decision.get("review_request", {}) or {})
+        consumed.add("review_request")
 
     operational = {key for key in decision if key != "explanation"}
     return RuntimeControlManifest(
@@ -435,7 +453,7 @@ def compile_solver_control(
         source_decision_id=decision_id,
         contract_id=contract.contract_id,
         action=action,
-        target_id=target_id,
+        intent_id=intent_id,
         trace_id=str(trace_id or f"X_{manifest_id}"),
         compiled=compiled,
         defaults_applied=defaults,
@@ -443,7 +461,12 @@ def compile_solver_control(
             "all_candidate_names_valid": True,
             "all_operational_fields_consumed": operational.issubset(consumed),
             "explanation_ignored_by_runtime": "explanation" not in compiled,
-            "target_resolved": bool(target.get("target_id") == target_id),
+            "intent_resolved": bool(
+                not intent_id or intent.get("intent_id") == intent_id
+            ),
+            "nonzero_weights_from_llm": _nonzero_weights_have_llm_source(
+                decision, compiled
+            ),
         },
     )
 
@@ -528,6 +551,17 @@ def derive_solver_request(
     )
 
 
+def solver_request_from_manifest(
+    manifest: RuntimeControlManifest | Dict[str, Any],
+) -> SolverRequest:
+    raw = manifest.as_dict() if isinstance(manifest, RuntimeControlManifest) else manifest
+    resource = dict((raw.get("compiled", {}) or {}).get("resource", {}) or {})
+    return SolverRequest(
+        time_limit_sec=max(1e-6, float(resource.get("max_time_sec", 1e-6) or 1e-6)),
+        max_iters=max(1, int(resource.get("max_iters", 1) or 1)),
+    )
+
+
 def _compile_insertion_manifest(
     control: Dict[str, Any],
     action_space: Dict[str, Any],
@@ -536,21 +570,21 @@ def _compile_insertion_manifest(
 ) -> Dict[str, Any]:
     operator_names = _names_from_space(
         action_space,
-        "allowed_insertion_operators",
+        "insertion_operators",
         candidates,
         "insertion_operator_candidates",
         INSERTION_OPERATOR_NAMES,
     )
     task_names = _names_from_space(
         action_space,
-        "allowed_task_signals",
+        "insertion_task_signals",
         candidates,
         "insertion_task_signal_candidates",
         INSERTION_TASK_SIGNAL_NAMES,
     )
     position_names = _names_from_space(
         action_space,
-        "allowed_position_signals",
+        "insertion_position_signals",
         candidates,
         "insertion_position_signal_candidates",
         INSERTION_POSITION_SIGNAL_NAMES,
@@ -588,14 +622,14 @@ def _compile_destroy_manifest(
 ) -> Dict[str, Any]:
     operator_names = _names_from_space(
         action_space,
-        "allowed_destroy_operators",
+        "destroy_operators",
         candidates,
         "destroy_operator_candidates",
         DESTROY_OPERATOR_NAMES,
     )
     signal_names = _names_from_space(
         action_space,
-        "allowed_destroy_signals",
+        "destroy_signals",
         candidates,
         "destroy_signal_candidates",
         DESTROY_SIGNAL_NAMES,
@@ -661,26 +695,30 @@ def feasibility_policy_from_manifest(
     }
 
 
-def _target_from_observation(
-    observation: Optional[Dict[str, Any]], target_id: str
+def _intent_from_contract(
+    contract: SearchContract, intent_id: str
 ) -> Dict[str, Any]:
-    for item in (observation or {}).get("decision_targets", []) or []:
-        if not isinstance(item, dict) or str(item.get("target_id", "")) != target_id:
+    for item in contract.target_intents:
+        if not isinstance(item, dict) or str(item.get("intent_id", "")) != intent_id:
             continue
-        facts = dict(item.get("actionable_facts", {}) or {})
-        top_tasks = list(facts.get("top_tasks", []) or [])
-        task_ids = [
-            int(task["task_id"])
-            for task in top_tasks
-            if isinstance(task, dict) and task.get("task_id") is not None
-        ]
-        return {
-            "target_id": target_id,
-            "kind": str(item.get("kind", "")),
-            "task_ids": task_ids,
-            "actionable_facts": facts,
-        }
-    raise ValueError(f"target_id is not present in observation: {target_id}")
+        return dict(item)
+    raise ValueError(f"intent_id is not present in active contract: {intent_id}")
+
+
+def _manifest_solver_budget(
+    contract: SearchContract, solver_budget: Dict[str, Any]
+) -> Dict[str, Any]:
+    policy = dict(contract.resource_policy)
+    return {
+        "max_time_sec": min(
+            float(policy.get("max_time_sec", 1e-6)),
+            float(solver_budget.get("max_time_sec", policy.get("max_time_sec", 1e-6))),
+        ),
+        "max_iters": min(
+            int(policy.get("max_iters", 1)),
+            int(solver_budget.get("max_iters", policy.get("max_iters", 1))),
+        ),
+    }
 
 
 def _weights_with_defaults(
@@ -690,15 +728,47 @@ def _weights_with_defaults(
     prefix: str,
     defaults: List[str],
 ) -> Dict[str, int]:
+    del default, prefix, defaults
     selected = {str(item["name"]): int(item["score"]) for item in items}
     out: Dict[str, int] = {}
     for name in names:
-        if name in selected:
-            out[str(name)] = selected[name]
-        else:
-            out[str(name)] = int(default)
-            defaults.append(f"{prefix}.{name}={default}")
+        out[str(name)] = selected.get(str(name), 0)
     return out
+
+
+def _nonzero_weights_have_llm_source(
+    decision: Dict[str, Any], compiled: Dict[str, Any]
+) -> bool:
+    selected: set[tuple[str, str, str]] = set()
+    mapping = (
+        ("destroy_control", "operator_scores", "destroy", "operator_weights"),
+        ("destroy_control", "signal_scores", "destroy", "signal_weights"),
+        ("insertion_control", "operator_scores", "insertion", "operator_weights"),
+        ("insertion_control", "task_signal_scores", "insertion", "task_signal_weights"),
+        (
+            "insertion_control",
+            "position_signal_scores",
+            "insertion",
+            "position_signal_weights",
+        ),
+    )
+    for control_key, score_key, compiled_key, weights_key in mapping:
+        for item in (decision.get(control_key, {}) or {}).get(score_key, []) or []:
+            if isinstance(item, dict) and int(item.get("score", 0) or 0) > 0:
+                selected.add((compiled_key, weights_key, str(item.get("name", ""))))
+    for compiled_key, weights_key in (
+        ("destroy", "operator_weights"),
+        ("destroy", "signal_weights"),
+        ("insertion", "operator_weights"),
+        ("insertion", "task_signal_weights"),
+        ("insertion", "position_signal_weights"),
+    ):
+        for name, value in dict(
+            (compiled.get(compiled_key, {}) or {}).get(weights_key, {}) or {}
+        ).items():
+            if int(value) > 0 and (compiled_key, weights_key, str(name)) not in selected:
+                return False
+    return True
 
 
 def _names_from_space(
@@ -709,7 +779,10 @@ def _names_from_space(
     fallback: Sequence[str],
 ) -> List[str]:
     if action_space.get(action_key):
-        return [str(item) for item in action_space.get(action_key, [])]
+        return [
+            str(item.get("name")) if isinstance(item, dict) else str(item)
+            for item in action_space.get(action_key, [])
+        ]
     return (
         list(candidates.names(candidate_key))
         if candidates is not None
@@ -784,4 +857,5 @@ __all__ = [
     "insertion_policy_from_manifest",
     "compile_contract",
     "derive_solver_request",
+    "solver_request_from_manifest",
 ]

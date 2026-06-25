@@ -60,12 +60,12 @@ from .tools import (
     compile_contract,
     compile_global_objective,
     compile_solver_control,
-    derive_solver_request,
     feasibility_policy_from_manifest,
     insertion_policy_from_manifest,
     instance_summary,
     solution_summary,
     solve_assignment,
+    solver_request_from_manifest,
 )
 
 
@@ -364,8 +364,8 @@ def run_orchestrator(
                     "trace_id",
                     "verification_id",
                     "action",
-                    "target_id",
-                    "target_kind",
+                    "intent_id",
+                    "intent_type",
                     "control_fingerprint",
                     "outcome_fingerprint",
                 )
@@ -484,14 +484,11 @@ def run_orchestrator(
         "elapsed_sec": round(time.time() - started_at, 6),
     }
     final_solution.run_summary = run_summary
-    final_solution_payload = final_solution.to_dict()
-    final_solution_payload.pop("solver_diagnostics", None)
-    final_solution_payload.pop("run_summary", None)
     _trace(
         state,
         "final_result",
         {
-            "solution": final_solution_payload,
+            "solution_digest": _solution_digest(final_solution),
             "summary": final_summary,
             "run_summary": run_summary,
         },
@@ -583,9 +580,7 @@ def _execute_alns_action(
         raise OrchestratorError("run_alns requested before a working solution exists")
     compiled_policy = alns_policy_from_manifest(manifest)
     runtime_feasibility_policy = feasibility_policy_from_manifest(manifest)
-    solver_request = derive_solver_request(
-        contract, state.contract_progress or ContractProgress(contract.contract_id)
-    )
+    solver_request = solver_request_from_manifest(manifest)
     _trace(
         state,
         "solver_request",
@@ -617,7 +612,7 @@ def _execute_alns_action(
             contract.protected_metrics,
             contract.protected_metric_baseline,
         ),
-        runtime_target=dict(manifest.compiled.get("target", {}) or {}),
+        runtime_target={},
     )
     result.trace["trace_id"] = trace_id
     state.working_solution = result.working_solution
@@ -954,6 +949,22 @@ def _eval(
     return evaluate(solution, instance, config, update_solution_schedule=True)
 
 
+def _solution_digest(solution: AssignmentSolution) -> Dict[str, Any]:
+    routes = {
+        int(aid): [int(tid) for tid in route]
+        for aid, route in sorted(solution.routes.items(), key=lambda item: int(item[0]))
+    }
+    route_lengths = {int(aid): len(route) for aid, route in routes.items()}
+    assigned_count = sum(route_lengths.values())
+    unassigned = sorted(int(tid) for tid in solution.unassigned)
+    return {
+        "assigned_count": int(assigned_count),
+        "unassigned_count": len(unassigned),
+        "unassigned_task_ids": unassigned,
+        "route_lengths": route_lengths,
+    }
+
+
 def _public_landscape(
     destroy: Dict[str, Any], insertion: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -992,12 +1003,13 @@ def _public_landscape(
         "zero_candidate_tasks": int(
             candidate_stats.get("zero_candidate_tasks", 0) or 0
         ),
-        "route_imbalance_level": str(
-            route_structure.get("route_load_imbalance_level", "unknown")
-        ),
-        "route_cost_imbalance_level": str(
-            route_structure.get("route_cost_imbalance_level", "unknown")
-        ),
+        "route_distribution": {
+            "route_len_min": int(route_structure.get("route_len_min", 0) or 0),
+            "route_len_mean": float(route_structure.get("route_len_mean", 0.0) or 0.0),
+            "route_len_max": int(route_structure.get("route_len_max", 0) or 0),
+            "route_load_cv": float(route_structure.get("route_load_cv", 0.0) or 0.0),
+            "route_cost_cv": float(route_structure.get("route_cost_cv", 0.0) or 0.0),
+        },
     }
 
 

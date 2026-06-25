@@ -34,13 +34,12 @@ FIELD_CANDIDATES: Dict[str, Tuple[str, ...]] = {
 OBSERVATION_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
     "run_context": ("prompt", "memory.trace_link"),
     "active_contract": ("action_gate", "compiler", "contract_monitor"),
-    "progress": ("review_gate", "resource_gate", "contract_monitor"),
-    "solution_state": ("action_gate", "decision_target_builder"),
-    "decision_targets": ("schema.target_enum", "validator", "compiler", "runtime"),
-    "action_space": ("schema.enums", "validator", "compiler"),
-    "candidate_landscape": ("decision_target_builder", "llm_decision"),
+    "execution_state": ("hard_action_gate", "resource_gate", "contract_monitor"),
+    "solution_evidence": ("llm_decision",),
+    "candidate_landscape": ("llm_decision",),
+    "control_catalog": ("schema.enums", "validator", "compiler"),
     "recent_memory": ("llm_decision",),
-    "last_verification": ("review_gate", "llm_decision"),
+    "last_verification": ("llm_decision",),
 }
 
 SUPERVISOR_KICKOFF_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
@@ -64,10 +63,14 @@ SUPERVISOR_REVIEW_BLOCK_CONSUMERS: Dict[str, Tuple[str, ...]] = {
 
 SOLVER_OUTPUT_FIELD_CONSUMERS: Dict[str, Tuple[str, ...]] = {
     "action": ("validator", "compiler", "orchestrator"),
-    "target_id": ("validator", "compiler", "runtime"),
+    "situation_assessment": ("validator", "compiler", "trace"),
+    "intent_id": ("validator", "compiler", "trace"),
     "destroy_control": ("validator", "compiler", "destroy_operator"),
     "insertion_control": ("validator", "compiler", "insertion_operator"),
     "acceptance_control": ("validator", "compiler", "acceptance_runtime"),
+    "solver_budget": ("validator", "compiler", "runtime"),
+    "expected_effects": ("validator", "compiler", "verifier_trace"),
+    "review_request": ("validator", "compiler", "contract_monitor"),
     "explanation": ("validator", "audit_only"),
 }
 
@@ -77,7 +80,8 @@ SUPERVISOR_OUTPUT_FIELD_CONSUMERS: Dict[str, Tuple[str, ...]] = {
     "next_contract.contract_type": ("validator", "action_gate"),
     "next_contract.objective_layers": ("validator", "solver_comparator"),
     "next_contract.feasibility_control": ("validator", "compiler", "runtime"),
-    "next_contract.target_policy": ("validator", "decision_target_builder"),
+    "next_contract.situation_assessment": ("validator", "trace"),
+    "next_contract.target_intents": ("validator", "solver_intent_enum", "trace"),
     "next_contract.protected_metrics": ("validator", "runtime_hard_gate"),
     "next_contract.resource_policy": ("validator", "solver_budget", "contract_monitor"),
     "next_contract.exit_conditions": ("validator", "contract_monitor"),

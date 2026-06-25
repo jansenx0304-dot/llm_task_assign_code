@@ -35,7 +35,7 @@ SUPPORTED_CONDITION_SOURCES = (
     "progress.solver_actions",
     "progress.iters_used",
     "progress.time_used_sec",
-    "last.intent_status",
+    "last.contract_objective_status",
     "last.dominant_blocker",
     "last.improvement_flags.run_global_best_improved",
     "aggregate.achieved",
@@ -249,27 +249,62 @@ FEASIBILITY_CONTROL_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
 }
 
-TARGET_POLICY_SCHEMA: Dict[str, Any] = {
+SITUATION_ASSESSMENT_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "description": "Executable target preference for the next contract.",
+    "description": "LLM-authored interpretation of evidence. Runtime records it but does not execute it.",
     "properties": {
-        "preferred_target_kinds": {
+        "summary": {"type": "string"},
+        "reasoning_from_evidence": {"type": "string"},
+    },
+    "required": ["summary", "reasoning_from_evidence"],
+    "additionalProperties": False,
+}
+
+EXPECTED_EFFECT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "description": "LLM-authored expected metric effect used for traceability.",
+    "properties": {
+        "metric": {"type": "string", "enum": list(QUALITY_METRICS)},
+        "direction": {"type": "string", "enum": ["decrease", "increase", "maintain"]},
+    },
+    "required": ["metric", "direction"],
+    "additionalProperties": False,
+}
+
+TARGET_INTENT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "description": "Supervisor-created intent anchor. It does not automatically control the algorithm; Solver controls do.",
+    "properties": {
+        "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_\\-]{0,63}$",
+            "description": "Supervisor-defined stable id unique inside the contract.",
+        },
+        "intent_type": {
+            "type": "string",
+            "enum": ["construction", "repair", "improvement", "diversification", "review"],
+        },
+        "evidence_refs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {"type": "string"},
+        },
+        "expected_effects": {
             "type": "array",
             "minItems": 0,
             "maxItems": 4,
-            "items": {
-                "type": "string",
-                "enum": [
-                    "unassigned_priority",
-                    "insertion_scarce_unassigned",
-                    "energy_debt",
-                    "time_window_debt",
-                    "route_balance",
-                ],
-            },
-        }
+            "items": EXPECTED_EFFECT_SCHEMA,
+        },
+        "rationale": {"type": "string"},
     },
-    "required": ["preferred_target_kinds"],
+    "required": [
+        "intent_id",
+        "intent_type",
+        "evidence_refs",
+        "expected_effects",
+        "rationale",
+    ],
     "additionalProperties": False,
 }
 
@@ -342,7 +377,13 @@ CONTRACT_SCHEMA: Dict[str, Any] = {
             "items": {"type": "string", "enum": list(QUALITY_METRICS)},
         },
         "feasibility_control": FEASIBILITY_CONTROL_SCHEMA,
-        "target_policy": TARGET_POLICY_SCHEMA,
+        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+        "target_intents": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": TARGET_INTENT_SCHEMA,
+        },
         "protected_metrics": {
             "type": "array",
             "maxItems": 4,
@@ -356,7 +397,8 @@ CONTRACT_SCHEMA: Dict[str, Any] = {
         "contract_type",
         "objective_layers",
         "feasibility_control",
-        "target_policy",
+        "situation_assessment",
+        "target_intents",
         "protected_metrics",
         "resource_policy",
         "exit_conditions",
@@ -439,29 +481,69 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "const": "construct_initial"},
-                        "target_id": _string("Target id from decision_targets."),
+                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "intent_id": _string("Intent id from active_contract.target_intents."),
                         "insertion_control": INSERTION_CONTROL_SCHEMA,
+                        "solver_budget": {
+                            "type": "object",
+                            "properties": {
+                                "max_iters": {"type": "integer", "minimum": 1},
+                                "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
+                            },
+                            "required": ["max_iters", "max_time_sec"],
+                            "additionalProperties": False,
+                        },
+                        "expected_effects": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "items": EXPECTED_EFFECT_SCHEMA,
+                        },
                         "explanation": EXPLANATION_SCHEMA,
                     },
-                    "required": ["action", "target_id", "insertion_control"],
+                    "required": [
+                        "action",
+                        "situation_assessment",
+                        "intent_id",
+                        "insertion_control",
+                        "solver_budget",
+                        "expected_effects",
+                    ],
                     "additionalProperties": False,
                 },
                 {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "const": "run_alns"},
-                        "target_id": _string("Target id from decision_targets."),
+                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "intent_id": _string("Intent id from active_contract.target_intents."),
                         "destroy_control": DESTROY_CONTROL_SCHEMA,
                         "insertion_control": INSERTION_CONTROL_SCHEMA,
                         "acceptance_control": ACCEPTANCE_CONTROL_SCHEMA,
+                        "solver_budget": {
+                            "type": "object",
+                            "properties": {
+                                "max_iters": {"type": "integer", "minimum": 1},
+                                "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
+                            },
+                            "required": ["max_iters", "max_time_sec"],
+                            "additionalProperties": False,
+                        },
+                        "expected_effects": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "items": EXPECTED_EFFECT_SCHEMA,
+                        },
                         "explanation": EXPLANATION_SCHEMA,
                     },
                     "required": [
                         "action",
-                        "target_id",
+                        "situation_assessment",
+                        "intent_id",
                         "destroy_control",
                         "insertion_control",
                         "acceptance_control",
+                        "solver_budget",
+                        "expected_effects",
                     ],
                     "additionalProperties": False,
                 },
@@ -472,12 +554,24 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                             "type": "string",
                             "const": "request_supervisor_review",
                         },
-                        "target_id": _string(
-                            "Target id from decision_targets, usually contract_review."
-                        ),
+                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "review_request": {
+                            "type": "object",
+                            "properties": {
+                                "reason": {"type": "string"},
+                                "evidence_refs": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 8,
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": ["reason", "evidence_refs"],
+                            "additionalProperties": False,
+                        },
                         "explanation": EXPLANATION_SCHEMA,
                     },
-                    "required": ["action", "target_id"],
+                    "required": ["action", "situation_assessment", "review_request"],
                     "additionalProperties": False,
                 },
             ]
@@ -493,13 +587,24 @@ def solver_decision_schema_for_candidates(
 ) -> Dict[str, Any]:
     """Build a Solver schema whose executable fields use their own candidate enums."""
     action_space = (
-        observation.get("action_space") if isinstance(observation, Mapping) else None
+        observation.get("execution_state") if isinstance(observation, Mapping) else None
+    )
+    catalog = (
+        observation.get("control_catalog") if isinstance(observation, Mapping) else None
     )
 
     def allowed(action_key: str, candidate_key: str) -> tuple[str, ...]:
         if isinstance(action_space, Mapping) and action_key in action_space:
             values = action_space.get(action_key) or []
             return tuple(dict.fromkeys(str(value) for value in values))
+        if isinstance(catalog, Mapping) and action_key in catalog:
+            values = catalog.get(action_key) or []
+            return tuple(
+                dict.fromkeys(
+                    str(value.get("name")) if isinstance(value, Mapping) else str(value)
+                    for value in values
+                )
+            )
         if candidates is not None and hasattr(candidates, "names"):
             return tuple(
                 dict.fromkeys(str(value) for value in candidates.names(candidate_key))
@@ -516,40 +621,44 @@ def solver_decision_schema_for_candidates(
 
     insertion = deepcopy(INSERTION_CONTROL_SCHEMA)
     insertion["properties"]["operator_scores"] = _score_array_for(
-        allowed("allowed_insertion_operators", "insertion_operator_candidates"),
+        allowed("insertion_operators", "insertion_operator_candidates"),
         "Sparse emphasis scores for insertion operators.",
     )
     insertion["properties"]["task_signal_scores"] = _score_array_for(
-        allowed("allowed_task_signals", "insertion_task_signal_candidates"),
+        allowed("insertion_task_signals", "insertion_task_signal_candidates"),
         "Sparse emphasis scores for choosing the next task.",
     )
     insertion["properties"]["position_signal_scores"] = _score_array_for(
-        allowed("allowed_position_signals", "insertion_position_signal_candidates"),
+        allowed("insertion_position_signals", "insertion_position_signal_candidates"),
         "Sparse emphasis scores for choosing an insertion position.",
     )
 
     destroy = deepcopy(DESTROY_CONTROL_SCHEMA)
     destroy["properties"]["operator_scores"] = _score_array_for(
-        allowed("allowed_destroy_operators", "destroy_operator_candidates"),
+        allowed("destroy_operators", "destroy_operator_candidates"),
         "Sparse emphasis scores for destroy operators.",
     )
     destroy["properties"]["signal_scores"] = _score_array_for(
-        allowed("allowed_destroy_signals", "destroy_signal_candidates"),
+        allowed("destroy_signals", "destroy_signal_candidates"),
         "Sparse emphasis scores for destroy signals.",
     )
 
     acceptance = deepcopy(ACCEPTANCE_CONTROL_SCHEMA)
     acceptance["properties"]["mode"] = _enum_string(
-        allowed("allowed_acceptance_modes", "acceptance_candidates"),
+        allowed("acceptance_modes", "acceptance_candidates"),
         "Acceptance mode allowed for the current action space.",
     )
 
     schema = deepcopy(_SOLVER_DECISION_SCHEMA_TEMPLATE)
     branches = schema["properties"]["solver_decision"]["oneOf"]
     allowed_actions = None
-    if isinstance(action_space, Mapping) and "allowed_actions" in action_space:
+    if isinstance(action_space, Mapping) and "hard_executable_actions" in action_space:
         allowed_actions = {
             str(value) for value in (action_space.get("allowed_actions") or [])
+        }
+        allowed_actions = {
+            str(value)
+            for value in (action_space.get("hard_executable_actions") or [])
         }
         branches[:] = [
             branch
@@ -557,28 +666,19 @@ def solver_decision_schema_for_candidates(
             if branch["properties"]["action"].get("const") in allowed_actions
         ]
 
-    target_ids = []
-    review_target_ids = []
+    intent_ids = []
     if isinstance(observation, Mapping):
-        for item in observation.get("decision_targets") or []:
-            if not isinstance(item, Mapping) or item.get("target_id") is None:
+        for item in ((observation.get("active_contract") or {}).get("target_intents") or []):
+            if not isinstance(item, Mapping) or item.get("intent_id") is None:
                 continue
-            target_id = str(item["target_id"])
-            if str(item.get("kind", "")) == "contract_review":
-                review_target_ids.append(target_id)
-            else:
-                target_ids.append(target_id)
+            intent_ids.append(str(item["intent_id"]))
     for branch in branches:
         properties = branch["properties"]
         action = branch["properties"]["action"].get("const")
-        branch_targets = (
-            review_target_ids
-            if action == "request_supervisor_review"
-            else target_ids
-        )
-        properties["target_id"] = _enum_string(
-            branch_targets, "Target id executable for this action."
-        )
+        if action != "request_supervisor_review":
+            properties["intent_id"] = _enum_string(
+                intent_ids, "Intent id executable for this action."
+            )
         if "insertion_control" in properties:
             properties["insertion_control"] = deepcopy(insertion)
         if "destroy_control" in properties:
