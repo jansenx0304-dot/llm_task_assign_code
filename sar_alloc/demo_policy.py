@@ -16,7 +16,7 @@ def demo_supervisor_kickoff(
                     "unassigned_count",
                     "energy_total",
                 ],
-                "explanation": {"summary": "Prioritize coverage, then energy."},
+                "audit_note": "Prioritize coverage, then energy.",
             },
             "next_contract": _contract(
                 "initial_construction",
@@ -117,14 +117,15 @@ def demo_solver_decision(
         return {
             "solver_decision": {
                 "action": "request_supervisor_review",
-                "situation_assessment": _assessment("Request supervisor review."),
+                **_basis_fields(
+                    "Request supervisor review.",
+                    ["execution_state.hard_executable_actions"],
+                ),
                 "review_request": {
                     "reason": "No useful executable search action is available under the current contract.",
-                    "evidence_refs": ["execution_state", "last_verification"],
+                    "evidence_refs": ["execution_state"],
                 },
-                "explanation": {
-                    "reason_summary": "No executable search action is available."
-                },
+                "audit_note": "No executable search action is available.",
             }
         }
     contract = (
@@ -135,28 +136,44 @@ def demo_solver_decision(
         return {
             "solver_decision": {
                 "action": "construct_initial",
-                "situation_assessment": _assessment(
-                    "Construct an initial solution using the selected contract intent."
+                **_basis_fields(
+                    "Construct an initial solution using the selected contract intent.",
+                    [
+                        "active_contract.target_intents",
+                        "targetable_evidence.visible_task_ids",
+                    ],
                 ),
                 "intent_id": _first_intent(observation),
+                "runtime_target": _runtime_target(
+                    observation,
+                    prefer_routes=False,
+                    focus_metrics=["missed_priority", "unassigned_count"],
+                ),
                 "insertion_control": _insertion_control(catalog),
                 "solver_budget": _solver_budget(observation),
                 "expected_effects": [
-                    {"metric": "missed_priority", "direction": "decrease"},
-                    {"metric": "unassigned_count", "direction": "decrease"},
+                    _effect("E1", "missed_priority", "decrease"),
+                    _effect("E2", "unassigned_count", "decrease"),
                 ],
-                "explanation": {
-                    "reason_summary": "Use priority and scarcity aware construction."
-                },
+                "audit_note": "Use coverage-oriented construction.",
             }
         }
     return {
         "solver_decision": {
             "action": "run_alns",
-            "situation_assessment": _assessment(
-                "Run ALNS with explicit controls selected by the solver decision."
+            **_basis_fields(
+                "Run ALNS with explicit controls selected by the solver decision.",
+                [
+                    "solution_evidence.working.quality",
+                    "runtime_feedback.operator_effectiveness_recent",
+                ],
             ),
             "intent_id": _first_intent(observation),
+            "runtime_target": _runtime_target(
+                observation,
+                prefer_routes=True,
+                focus_metrics=["missed_priority", "energy_total"],
+            ),
             "destroy_control": {
                 "operator_scores": _preferred_scores(
                     catalog,
@@ -178,10 +195,10 @@ def demo_solver_decision(
             },
             "solver_budget": _solver_budget(observation),
             "expected_effects": [
-                {"metric": "missed_priority", "direction": "decrease"},
-                {"metric": "energy_total", "direction": "decrease"},
+                _effect("E1", "missed_priority", "decrease"),
+                _effect("E2", "energy_total", "decrease"),
             ],
-            "explanation": {"reason_summary": "Run one bounded local rebuild."},
+            "audit_note": "Run one bounded local rebuild.",
         }
     }
 
@@ -202,7 +219,13 @@ def _contract(
         "contract_type": contract_type,
         "objective_layers": ["missed_priority", "unassigned_count", "energy_total"],
         "feasibility_control": {"mode": "strict", "relaxation_ratios": []},
-        "situation_assessment": _assessment(explanation),
+        **_basis_fields(
+            explanation,
+            [
+                "run_context.remaining_global_resources",
+                "action_space.next_contract_resource_limits",
+            ],
+        ),
         "target_intents": [
             {
                 "intent_id": (
@@ -216,13 +239,13 @@ def _contract(
                     else "improvement"
                 ),
                 "evidence_refs": [
-                    "candidate_landscape.insertion_evidence",
-                    "solution_evidence.working.quality",
+                    "run_context.remaining_global_resources",
+                    "action_space.next_contract_resource_limits",
                 ],
                 "expected_effects": [
-                    {"metric": "missed_priority", "direction": "decrease"},
-                    {"metric": "unassigned_count", "direction": "decrease"},
-                    {"metric": "energy_total", "direction": "decrease"},
+                    _effect("E1", "missed_priority", "decrease"),
+                    _effect("E2", "unassigned_count", "decrease"),
+                    _effect("E3", "energy_total", "decrease"),
                 ],
                 "rationale": explanation,
             }
@@ -235,7 +258,7 @@ def _contract(
             "max_iters": _cap_iters(remaining, max_iters),
         },
         "exit_conditions": {"success": success, "failure": failure},
-        "explanation": {"stage_summary": explanation},
+        "audit_note": explanation,
     }
 
 
@@ -368,10 +391,68 @@ def _solver_budget(observation: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _runtime_target(
+    observation: Optional[Dict[str, Any]],
+    *,
+    prefer_routes: bool,
+    focus_metrics: list[str],
+) -> Dict[str, Any]:
+    evidence = ((observation or {}).get("targetable_evidence", {}) or {})
+    task_ids = [
+        int(tid)
+        for tid in evidence.get("visible_task_ids", []) or []
+        if not isinstance(tid, bool)
+    ][:3]
+    agent_ids = [
+        int(aid)
+        for aid in evidence.get("visible_agent_ids", []) or []
+        if not isinstance(aid, bool)
+    ][:1]
+    if not prefer_routes:
+        agent_ids = []
+    if task_ids and agent_ids:
+        scope_kind = "mixed_scope"
+    elif task_ids:
+        scope_kind = "task_scope"
+    elif agent_ids:
+        scope_kind = "route_scope"
+    else:
+        scope_kind = "global"
+    return {
+        "scope_kind": scope_kind,
+        "task_ids": task_ids if scope_kind in {"task_scope", "mixed_scope"} else [],
+        "agent_ids": agent_ids if scope_kind in {"route_scope", "mixed_scope"} else [],
+        "focus_metrics": list(dict.fromkeys(focus_metrics))[:3] or ["missed_priority"],
+    }
+
+
 def _assessment(summary: str) -> Dict[str, str]:
     return {
         "summary": summary,
         "reasoning_from_evidence": "Demo mode uses deterministic evidence references for a mock LLM decision.",
+    }
+
+
+def _basis_fields(summary: str, evidence_refs: list[str]) -> Dict[str, Any]:
+    return {
+        "decision_basis": [
+            {
+                "basis_id": "B1",
+                "claim": summary,
+                "evidence_refs": evidence_refs,
+            }
+        ],
+        "situation_summary": {"summary": summary, "basis_ids": ["B1"]},
+    }
+
+
+def _effect(effect_id: str, metric: str, direction: str) -> Dict[str, Any]:
+    return {
+        "effect_id": effect_id,
+        "metric": metric,
+        "direction": direction,
+        "scope": "working",
+        "basis_ids": ["B1"],
     }
 
 

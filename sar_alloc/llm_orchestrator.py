@@ -63,6 +63,7 @@ from .tools import (
     feasibility_policy_from_manifest,
     insertion_policy_from_manifest,
     instance_summary,
+    runtime_target_from_manifest,
     solution_summary,
     solve_assignment,
     solver_request_from_manifest,
@@ -581,6 +582,7 @@ def _execute_alns_action(
     compiled_policy = alns_policy_from_manifest(manifest)
     runtime_feasibility_policy = feasibility_policy_from_manifest(manifest)
     solver_request = solver_request_from_manifest(manifest)
+    runtime_target = runtime_target_from_manifest(manifest)
     _trace(
         state,
         "solver_request",
@@ -612,7 +614,7 @@ def _execute_alns_action(
             contract.protected_metrics,
             contract.protected_metric_baseline,
         ),
-        runtime_target={},
+        runtime_target=runtime_target,
     )
     result.trace["trace_id"] = trace_id
     state.working_solution = result.working_solution
@@ -969,47 +971,27 @@ def _public_landscape(
     destroy: Dict[str, Any], insertion: Dict[str, Any]
 ) -> Dict[str, Any]:
     candidate_stats = dict(insertion.get("candidate_stats", {}) or {})
-    route_structure = dict(destroy.get("route_structure", {}) or {})
     return {
         "unassigned_count": int(insertion.get("unassigned_count", 0) or 0),
         "assigned_count": int(insertion.get("assigned_count", 0) or 0),
         "candidate_stats": candidate_stats,
-        "task_pressure": dict(insertion.get("task_pressure", {}) or {}),
-        "target_buckets": {
-            str(name): {
-                "task_count": int((bucket or {}).get("task_count", 0) or 0),
-                "priority_mass": float((bucket or {}).get("priority_mass", 0.0) or 0.0),
-                "top_tasks": list((bucket or {}).get("top_tasks", []) or []),
-            }
-            for name, bucket in dict(
-                insertion.get("target_buckets", {}) or {}
-            ).items()
-            if isinstance(bucket, dict)
-        },
-        "destroy_options": {
-            str(name): dict(value)
-            for name, value in dict(
-                destroy.get("candidate_move_landscape", {}) or {}
-            ).items()
-            if isinstance(value, dict)
-        },
+        "destroy_facts": dict(destroy.get("destroy_facts", {}) or {}),
+        "insertion_facts": dict(insertion.get("insertion_facts", {}) or {}),
         "average_candidate_positions": float(
             candidate_stats.get("avg_candidate_positions", 0.0) or 0.0
         ),
         "average_feasible_positions": float(
             candidate_stats.get("avg_feasible_positions", 0.0) or 0.0
         ),
-        "hard_to_insert_tasks": int(candidate_stats.get("no_feasible_tasks", 0) or 0),
+        "no_feasible_position_tasks": int(candidate_stats.get("no_feasible_tasks", 0) or 0),
         "zero_candidate_tasks": int(
             candidate_stats.get("zero_candidate_tasks", 0) or 0
         ),
-        "route_distribution": {
-            "route_len_min": int(route_structure.get("route_len_min", 0) or 0),
-            "route_len_mean": float(route_structure.get("route_len_mean", 0.0) or 0.0),
-            "route_len_max": int(route_structure.get("route_len_max", 0) or 0),
-            "route_load_cv": float(route_structure.get("route_load_cv", 0.0) or 0.0),
-            "route_cost_cv": float(route_structure.get("route_cost_cv", 0.0) or 0.0),
-        },
+        "candidate_routes": [
+            dict(item)
+            for item in destroy.get("candidate_routes", []) or []
+            if isinstance(item, dict)
+        ],
     }
 
 

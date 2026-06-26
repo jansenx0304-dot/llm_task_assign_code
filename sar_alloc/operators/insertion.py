@@ -47,6 +47,7 @@ class InsertionContext:
     kind: str
     feasibility_mode: str = "strict"
     target_task_ids: Tuple[int, ...] = ()
+    target_agent_ids: Tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in {"initial", "alns"}:
@@ -628,55 +629,33 @@ def build_insertion_landscape(
         candidate_counts.append(stats.candidate_count)
         feasible_counts.append(stats.feasible_count)
         task_stats[int(tid)] = stats
-    scarce_capability_threshold = max(1, int(math.ceil(0.25 * len(instance.agents))))
-    scarce_position_threshold = 1
-    scarce_ids = [
-        tid
-        for tid in unassigned
-        if _count_basic_feasible_agents(instance, config, instance.task_by_id(tid))
-        <= scarce_capability_threshold
-        or task_stats[tid].feasible_count <= scarce_position_threshold
-    ]
-
-    def bucket(task_ids: Sequence[int]) -> Dict[str, Any]:
-        ordered = sorted(
-            (int(tid) for tid in task_ids),
-            key=lambda tid: (-float(instance.task_by_id(tid).priority), tid),
+    task_facts = []
+    for tid in unassigned:
+        task = instance.task_by_id(tid)
+        stats = task_stats[tid]
+        task_facts.append(
+            {
+                "task_id": int(tid),
+                "priority": float(task.priority),
+                "capable_agent_count": _count_basic_feasible_agents(
+                    instance, config, task
+                ),
+                "candidate_position_count": int(stats.candidate_count),
+                "feasible_position_count": int(stats.feasible_count),
+                "hard_failure_counts": {
+                    "time_window": int(stats.recent_tw_fail_count),
+                    "energy": int(stats.recent_energy_fail_count),
+                    "capacity": 0,
+                },
+            }
         )
-        return {
-            "task_ids": ordered,
-            "task_count": len(task_ids),
-            "priority_mass": float(
-                sum(instance.task_by_id(int(tid)).priority for tid in task_ids)
-            ),
-            "top_tasks": [
-                {
-                    "task_id": tid,
-                    "priority": float(instance.task_by_id(tid).priority),
-                    "capable_agents": _count_basic_feasible_agents(
-                        instance, config, instance.task_by_id(tid)
-                    ),
-                    "candidate_positions": int(task_stats[tid].candidate_count),
-                    "feasible_positions": int(task_stats[tid].feasible_count),
-                    "dominant_reason": (
-                        "no_candidate_position"
-                        if task_stats[tid].candidate_count == 0
-                        else (
-                            "no_feasible_position"
-                            if task_stats[tid].feasible_count == 0
-                            else "limited_insertion_options"
-                        )
-                    ),
-                }
-                for tid in ordered[:5]
-            ],
-        }
 
     return {
         "unassigned_count": len(unassigned),
         "assigned_count": len(sol.all_assigned_tasks()),
         "candidate_stats": {
             "zero_candidate_tasks": sum(value == 0 for value in candidate_counts),
+            "one_candidate_position_tasks": sum(value == 1 for value in candidate_counts),
             "no_feasible_tasks": sum(value == 0 for value in feasible_counts),
             "one_feasible_position_tasks": sum(value == 1 for value in feasible_counts),
             "avg_candidate_positions": _mean(candidate_counts),
@@ -692,12 +671,32 @@ def build_insertion_landscape(
                 "p75": _percentile(feasible_counts, 0.75),
             },
         },
-        "target_buckets": {
-            "unassigned_priority": bucket(unassigned),
-            "insertion_scarce_unassigned": bucket(scarce_ids),
+        "insertion_facts": {
+            "unassigned_task_count": len(unassigned),
+            "unassigned_task_ids": [int(tid) for tid in unassigned],
+            "candidate_position_count_distribution": {
+                "zero": sum(value == 0 for value in candidate_counts),
+                "one": sum(value == 1 for value in candidate_counts),
+                "p25": _percentile(candidate_counts, 0.25),
+                "p50": _percentile(candidate_counts, 0.50),
+                "p75": _percentile(candidate_counts, 0.75),
+                "max": max(candidate_counts, default=0),
+            },
+            "feasible_position_count_distribution": {
+                "zero": sum(value == 0 for value in feasible_counts),
+                "one": sum(value == 1 for value in feasible_counts),
+                "p25": _percentile(feasible_counts, 0.25),
+                "p50": _percentile(feasible_counts, 0.50),
+                "p75": _percentile(feasible_counts, 0.75),
+                "max": max(feasible_counts, default=0),
+            },
+            "unassigned_task_facts": task_facts[:50],
+            "truncation": {
+                "method": "stable_task_id_order",
+                "not_a_priority_ranking": True,
+                "visible_id_list_is_complete": len(task_facts) <= 50,
+            },
         },
-        "task_pressure": _task_pressure_summary(sol, instance, config),
-        "route_pressure": _route_pressure_summary(sol, instance, config),
         "recent_insertion_feedback": dict(recent_insertion_summary or {}),
     }
 
@@ -748,6 +747,34 @@ def run_insertion_kernel(
             _add_stats_diagnostics(diagnostics, stats, diag)
 
         stats_by_tid = _score_candidate_task_stats(stats_by_tid, insertion_policy)
+        target_set = {int(tid) for tid in context.target_task_ids}
+        target_agents = {int(aid) for aid in context.target_agent_ids}
+        target_stats = [
+            stats_by_tid[int(tid)]
+            for tid in sorted(set(stats_by_tid) & target_set)
+        ]
+        _extend_unique_ints(
+            diagnostics["target_tasks_attempted"],
+            [int(stats.tid) for stats in target_stats],
+        )
+        target_available = [
+            stats
+            for stats in target_stats
+            if _stats_has_context_candidate(stats, context, out)
+        ]
+        if target_set and any(int(tid) in pending for tid in target_set) and not target_available:
+            diagnostics["target_insertion_fallback_count"] += 1
+        target_agent_position_count = _target_agent_position_count(
+            stats_by_tid, context
+        )
+        diagnostics["target_agent_engagement"][
+            "candidate_positions_on_target_agents"
+        ] += target_agent_position_count
+        if target_agents and target_agent_position_count <= 0:
+            diagnostics["target_agent_engagement"]["fallback_count"] += 1
+            diagnostics["target_agent_engagement"]["fallback_reasons"][
+                "no_feasible_position_on_target_agent"
+            ] += 1
         operator_name = _weighted_choice(insertion_policy.operator_weights, rng)
         choice = _choose_for_context(
             operator_name,
@@ -763,6 +790,9 @@ def run_insertion_kernel(
             break
         stats, candidate = choice
         out.add_task(candidate.agent_id, stats.tid, position=candidate.position)
+        if target_agents and int(candidate.agent_id) in target_agents:
+            diagnostics["target_agent_engagement"]["attempts_on_target_agents"] += 1
+            diagnostics["target_agent_engagement"]["insertions_on_target_agents"] += 1
         latest_attempts[int(stats.tid)] = TaskInsertionAttempt(
             task_id=int(stats.tid),
             candidate_positions=int(stats.candidate_count),
@@ -777,6 +807,8 @@ def run_insertion_kernel(
             chosen_position=int(candidate.position),
         )
         pending.discard(stats.tid)
+        if int(stats.tid) in target_set:
+            _extend_unique_ints(diagnostics["target_tasks_inserted"], [int(stats.tid)])
         diagnostics["inserted_count"] += 1
         diagnostics["operator_use"][operator_name] = (
             diagnostics["operator_use"].get(operator_name, 0) + 1
@@ -785,6 +817,11 @@ def run_insertion_kernel(
 
     diagnostics["unassigned_after"] = len(out.unassigned)
     diagnostics["failed_count"] = len(pending)
+    diagnostics["target_tasks_failed"] = [
+        int(tid)
+        for tid in diagnostics.get("target_task_ids", [])
+        if int(tid) in pending
+    ][:20]
     diagnostics["top_failed_tasks"] = _top_failed_attempts(latest_attempts, instance)
     diagnostics["time_ms"] = round((time.perf_counter() - started_at) * 1000.0, 4)
     out.solver_diagnostics = dict(out.solver_diagnostics or {})
@@ -824,6 +861,24 @@ def _choose_for_context(
             available[tid] = candidates
     if not available:
         return None
+
+    target_agents = {int(aid) for aid in context.target_agent_ids}
+    if target_agents:
+        target_available = {
+            tid: tuple(
+                candidate
+                for candidate in candidates
+                if int(candidate.agent_id) in target_agents
+            )
+            for tid, candidates in available.items()
+        }
+        target_available = {
+            tid: candidates
+            for tid, candidates in target_available.items()
+            if candidates
+        }
+        if target_available and not context.target_task_ids:
+            available = target_available
 
     eligible = [stats_by_tid[tid] for tid in available]
     targeted = [
@@ -879,6 +934,14 @@ def _choose_for_context(
         )
 
     positions = list(available[stats.tid])
+    if target_agents:
+        target_positions = [
+            candidate
+            for candidate in positions
+            if int(candidate.agent_id) in target_agents
+        ]
+        if target_positions:
+            positions = target_positions
     if operator_name == "diversified_insertion":
         candidate = _sample_rank_weighted(
             positions,
@@ -940,6 +1003,21 @@ def _new_insertion_diagnostics(
         "context": context.kind,
         "feasibility_mode": context.feasibility_mode,
         "target_task_ids": [int(tid) for tid in context.target_task_ids],
+        "target_agent_ids": [int(aid) for aid in context.target_agent_ids],
+        "target_tasks_attempted": [],
+        "target_tasks_inserted": [],
+        "target_tasks_failed": [],
+        "target_insertion_fallback_count": 0,
+        "target_agent_engagement": {
+            "target_agent_ids": [int(aid) for aid in context.target_agent_ids],
+            "candidate_positions_on_target_agents": 0,
+            "attempts_on_target_agents": 0,
+            "insertions_on_target_agents": 0,
+            "fallback_count": 0,
+            "fallback_reasons": {
+                "no_feasible_position_on_target_agent": 0,
+            },
+        },
         "operator_weights": dict(policy.operator_weights),
         "task_signal_weights": dict(policy.task_signal_weights),
         "position_signal_weights": dict(policy.position_signal_weights),
@@ -982,6 +1060,57 @@ def _add_stats_diagnostics(
         breakdown["no_feasible"] += 1
 
 
+def _stats_has_context_candidate(
+    stats: TaskInsertionStats,
+    context: InsertionContext,
+    current: AssignmentSolution,
+) -> bool:
+    if context.feasibility_mode == "recovery_only":
+        current_violation = (
+            math.inf
+            if current.eval is None
+            else float(current.eval.get_metric("violation_total"))
+        )
+        return any(
+            float(candidate.constraint_delta.get("violation_total", math.inf))
+            < current_violation - _EPS
+            for candidate in stats.sorted_relaxed_candidates
+        )
+    if context.feasibility_mode == "relaxed_recoverable":
+        return bool(stats.sorted_feasible_candidates or stats.sorted_relaxed_candidates)
+    return bool(stats.sorted_feasible_candidates)
+
+
+def _target_agent_position_count(
+    stats_by_tid: Mapping[int, TaskInsertionStats],
+    context: InsertionContext,
+) -> int:
+    target_agents = {int(aid) for aid in context.target_agent_ids}
+    if not target_agents:
+        return 0
+    total = 0
+    for stats in stats_by_tid.values():
+        candidates = stats.sorted_feasible_candidates
+        if context.feasibility_mode != "strict" and not candidates:
+            candidates = stats.sorted_relaxed_candidates
+        total += sum(
+            1 for candidate in candidates if int(candidate.agent_id) in target_agents
+        )
+    return int(total)
+
+
+def _extend_unique_ints(target: List[int], values: Sequence[int], limit: int = 20) -> None:
+    seen = {int(value) for value in target}
+    for value in values:
+        item = int(value)
+        if item in seen:
+            continue
+        seen.add(item)
+        target.append(item)
+        if len(target) >= limit:
+            return
+
+
 def _failure_reasons(stats: TaskInsertionStats) -> Dict[str, int]:
     if stats.candidate_count == 0:
         return {"no_candidate_position": 1}
@@ -999,7 +1128,7 @@ def _top_failed_attempts(
     for attempt in failed[:limit]:
         task = instance.task_by_id(int(attempt.task_id))
         reasons = dict(attempt.failure_reasons)
-        dominant = (
+        reason = (
             max(reasons.items(), key=lambda item: int(item[1]))[0]
             if reasons
             else "none"
@@ -1016,7 +1145,7 @@ def _top_failed_attempts(
                 "candidate_positions": int(attempt.candidate_positions),
                 "hard_feasible_positions": int(attempt.hard_feasible_positions),
                 "hard_filter_rejections": reasons,
-                "dominant_reason": dominant,
+                "failure_reason": reason,
             }
         )
     return out
@@ -1206,76 +1335,6 @@ def _route_pressure_map_for_routes(
     return out
 
 
-def _route_pressure_summary(
-    sol: AssignmentSolution, instance: Instance, config: Config
-) -> Dict[str, float]:
-    pressure = _route_pressure_map(sol, instance, config)
-    values = list(float(x) for x in pressure.values())
-    min_energy_ratio = math.inf
-    min_slack = math.inf
-    for aid in instance.all_agent_ids():
-        _, metrics = _simulate_route(
-            instance, config, int(aid), list(sol.routes.get(int(aid), []))
-        )
-        agent = instance.agent_by_id(int(aid))
-        min_energy_ratio = min(
-            min_energy_ratio,
-            (float(agent.init_energy) - float(metrics.energy))
-            / max(float(agent.init_energy), _EPS),
-        )
-        min_slack = min(min_slack, float(metrics.min_slack))
-    return {
-        "max_pressure": max(values) if values else 0.0,
-        "pressure_std": _std(values),
-        "min_energy_ratio": (
-            0.0 if math.isinf(min_energy_ratio) else float(min_energy_ratio)
-        ),
-        "min_slack": 0.0 if math.isinf(min_slack) else float(min_slack),
-    }
-
-
-def _task_pressure_summary(
-    sol: AssignmentSolution, instance: Instance, config: Config
-) -> Dict[str, int]:
-    tids = sorted(int(tid) for tid in sol.unassigned)
-    if not tids:
-        return {
-            "high_priority_unassigned": 0,
-            "tight_tw_unassigned": 0,
-            "skill_scarce_unassigned": 0,
-            "energy_heavy_unassigned": 0,
-        }
-    tasks = [instance.task_by_id(tid) for tid in tids]
-    max_priority = max(float(task.priority) for task in tasks)
-    widths = [_time_window_width(task) for task in tasks]
-    energy_lbs = [_task_energy_lb(instance, config, task) for task in tasks]
-    median_width = _median(widths)
-    median_energy = _median(energy_lbs)
-    scarce_limit = max(1, int(math.ceil(0.25 * len(instance.agents))))
-    return {
-        "high_priority_unassigned": int(
-            sum(1 for task in tasks if float(task.priority) >= 0.75 * max_priority)
-        ),
-        "tight_tw_unassigned": int(
-            sum(1 for task in tasks if _time_window_width(task) <= median_width)
-        ),
-        "skill_scarce_unassigned": int(
-            sum(
-                1
-                for task in tasks
-                if _count_basic_feasible_agents(instance, config, task) <= scarce_limit
-            )
-        ),
-        "energy_heavy_unassigned": int(
-            sum(
-                1
-                for task in tasks
-                if _task_energy_lb(instance, config, task) >= median_energy
-            )
-        ),
-    }
-
-
 def _count_basic_feasible_agents(instance: Instance, config: Config, task: Task) -> int:
     count = 0
     for agent in instance.agents:
@@ -1349,15 +1408,6 @@ def _percentile(values: Sequence[float], q: float) -> float:
         return ordered[lower]
     fraction = position - lower
     return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
-
-
-def _std(values: Sequence[float]) -> float:
-    if not values:
-        return 0.0
-    mean = _mean(values)
-    return math.sqrt(
-        sum((float(value) - mean) ** 2 for value in values) / max(1, len(values))
-    )
 
 
 __all__ = [

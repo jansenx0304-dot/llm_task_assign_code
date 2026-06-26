@@ -335,6 +335,20 @@ def build_destroy_landscape(
         for aid, route in sol.routes.items()
         if route
     ]
+    candidate_routes = [
+        {
+            "agent_id": int(aid),
+            "route_len": int(len(route)),
+            "route_cost": _round(
+                route_cost(instance, config, int(aid), [int(tid) for tid in route])
+            ),
+        }
+        for aid, route in sol.routes.items()
+        if route
+    ]
+    candidate_routes.sort(
+        key=lambda item: (-float(item["route_cost"]), -int(item["route_len"]), int(item["agent_id"]))
+    )
     policy = DestroyPolicy(
         operator_weights={name: 5 for name in DESTROY_OPERATOR_NAMES},
         signal_weights={
@@ -348,7 +362,7 @@ def build_destroy_landscape(
         remove_ratio=float(strength_ratio),
     )
     rng = random.Random(0)
-    candidate_landscape: Dict[str, Any] = {}
+    operator_candidate_counts: Dict[str, int] = {}
     for name in (
         "worst_task_removal",
         "related_cluster_removal",
@@ -356,16 +370,7 @@ def build_destroy_landscape(
         "route_rebalance_removal",
     ):
         moves = DESTROY_OPERATORS[name](sol, instance, config, policy, strength, rng)
-        moves.sort(key=lambda move: -float(move.score))
-        top = moves[0] if moves else None
-        candidate_landscape[name] = {
-            "available": bool(top is not None),
-            "candidate_count_preview": int(len(moves)),
-            "top_pattern": "none" if top is None else _top_pattern(top.features),
-            "top_signal_levels": (
-                {} if top is None else _public_destroy_signal_levels(top.features)
-            ),
-        }
+        operator_candidate_counts[name] = int(len(moves))
 
     return {
         "solution_policy": "feasible_solution_only",
@@ -377,19 +382,14 @@ def build_destroy_landscape(
             "min_k": int(strength.min_k),
             "max_k": int(strength.max_k),
         },
-        "route_structure": {
-            "nonempty_route_count": int(len(route_lengths)),
-            "route_len_min": int(min(route_lengths)) if route_lengths else 0,
-            "route_len_mean": (
-                _round(sum(route_lengths) / max(1, len(route_lengths)))
-                if route_lengths
-                else 0.0
-            ),
-            "route_len_max": int(max(route_lengths)) if route_lengths else 0,
-            "route_cost_cv": _cv_value(route_costs),
-            "route_load_cv": _cv_value([float(x) for x in route_lengths]),
+        "destroy_facts": {
+            "removable_task_count": int(len(sol.all_assigned_tasks())),
+            "non_empty_route_count": int(len(route_lengths)),
+            "route_len_distribution": _distribution(route_lengths),
+            "route_cost_distribution": _distribution(route_costs),
+            "operator_candidate_counts": operator_candidate_counts,
         },
-        "candidate_move_landscape": candidate_landscape,
+        "candidate_routes": candidate_routes[:12],
         "recent_destroy_feedback": _compact_recent_destroy_feedback(
             recent_destroy_summary or {}
         ),
@@ -855,55 +855,6 @@ def _pairs(values: Sequence[int]) -> Iterable[Tuple[int, int]]:
             yield int(values[i]), int(values[j])
 
 
-def _feature_levels(features: LandscapeFeatures) -> Dict[str, str]:
-    return {
-        name: _normalized_level(float(getattr(features, name)))
-        for name in LANDSCAPE_METRIC_FIELDS
-    }
-
-
-def _public_destroy_signal_levels(features: LandscapeFeatures) -> Dict[str, str]:
-    return {
-        "cost_pressure": _normalized_level(features.cost_pressure),
-        "coupling_pressure": _normalized_level(features.coupling_pressure),
-        "route_balance_pressure": _normalized_level(features.route_balance_pressure),
-        "mobility_opportunity": _normalized_level(features.mobility_opportunity),
-        "scarcity_protection": _normalized_level(features.scarcity_pressure),
-    }
-
-
-def _top_pattern(features: LandscapeFeatures) -> str:
-    levels = _feature_levels(features)
-    if (
-        levels["cost_pressure"] == "high"
-        and levels["mobility_opportunity"] == "high"
-        and levels["scarcity_pressure"] == "low"
-    ):
-        return "high-cost mobile structures with low scarcity risk"
-    if levels["route_balance_pressure"] == "high":
-        return "high route-balance pressure candidates"
-    if levels["coupling_pressure"] == "high":
-        return "strongly coupled local structures"
-    return "mixed destroy candidates"
-
-
-def _normalized_level(value: float) -> str:
-    if float(value) < 0.33:
-        return "low"
-    if float(value) < 0.67:
-        return "medium"
-    return "high"
-
-
-def _cv_level(values: Sequence[float]) -> str:
-    cv = _cv_value(values)
-    if cv < 0.15:
-        return "low"
-    if cv < 0.35:
-        return "medium"
-    return "high"
-
-
 def _cv_value(values: Sequence[float]) -> float:
     if not values:
         return 0.0
@@ -914,6 +865,32 @@ def _cv_value(values: Sequence[float]) -> float:
         variance = sum((float(x) - mean) ** 2 for x in values) / max(1, len(values))
         cv = math.sqrt(max(0.0, variance)) / abs(mean)
     return _round(cv)
+
+
+def _distribution(values: Sequence[float]) -> Dict[str, float]:
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return {"min": 0.0, "p25": 0.0, "p50": 0.0, "p75": 0.0, "max": 0.0}
+    return {
+        "min": _round(ordered[0]),
+        "p25": _round(_percentile(ordered, 0.25)),
+        "p50": _round(_percentile(ordered, 0.50)),
+        "p75": _round(_percentile(ordered, 0.75)),
+        "max": _round(ordered[-1]),
+    }
+
+
+def _percentile(values: Sequence[float], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    position = max(0.0, min(1.0, float(q))) * (len(ordered) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
 def _compact_recent_destroy_feedback(summary: Mapping[str, Any]) -> Dict[str, Any]:

@@ -67,10 +67,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     }
     mode = "dummy" if args.dummy_llm else "api"
     reporter = RunReporter(
-        markdown_path=run_dir / "result.txt",
+        jsonl_path=run_dir / "events.jsonl",
         run_config=run_config,
         use_color=not args.no_color,
         use_emoji=not args.no_emoji,
+        markdown_path=run_dir / "trace.md",
+        summary_path=run_dir / "summary.md",
     )
     started_at = time.time()
     try:

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from .llm_public_interface import PublicCandidates
 from .models import Agent, Instance, Task
+from .operators.types import DESTROY_OPERATOR_NAMES, INSERTION_OPERATOR_NAMES
 
 
 def build_supervisor_kickoff_observation(
@@ -174,12 +175,19 @@ def build_solver_observation(
             "working": _state_digest_from_summary(working_summary or {}),
             "best_feasible": _best_digest(best_summary),
         },
-        "candidate_landscape": _candidate_evidence(
-            candidate_landscape or {}, working_summary or {}
+        "destroy_facts": dict((candidate_landscape or {}).get("destroy_facts", {}) or {}),
+        "insertion_facts": dict((candidate_landscape or {}).get("insertion_facts", {}) or {}),
+        "targetable_evidence": _targetable_evidence(
+            candidate_landscape or {}, working_summary or {}, last_verification
         ),
         "control_catalog": _control_catalog(candidates),
         "recent_memory": list(recent_memory or []),
-        "last_verification": _compact_last_verification(last_verification),
+        "runtime_feedback": {
+            "last_verification": _compact_last_verification(last_verification),
+            "operator_effectiveness_recent": _operator_effectiveness_recent(
+                recent_memory or [], last_verification
+            ),
+        },
     }
 
 
@@ -224,6 +232,10 @@ def _contract_view(
                 ).items()
             },
         },
+        "decision_basis": [
+            dict(item) for item in active_contract.get("decision_basis", []) or []
+        ],
+        "situation_summary": dict(active_contract.get("situation_summary", {}) or {}),
         "target_intents": [
             dict(item) for item in active_contract.get("target_intents", []) or []
         ],
@@ -248,6 +260,7 @@ def _contract_view(
                 )
             ],
         },
+        "audit_note": str(active_contract.get("audit_note", "") or ""),
     }
 
 
@@ -363,75 +376,74 @@ def _problem_evidence(
     }
 
 
-def _task_insertion_evidence(
-    working_summary: Dict[str, Any], landscape: Dict[str, Any]
+def _targetable_evidence(
+    landscape: Dict[str, Any],
+    working_summary: Dict[str, Any],
+    last_verification: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    raw_buckets = landscape.get("target_buckets", {}) or {}
-    quality = working_summary.get("quality_summary", {}) or {}
-    if "unassigned_priority" not in raw_buckets:
-        raw_buckets = dict(raw_buckets)
-        raw_buckets["unassigned_priority"] = {
-            "task_ids": [],
-            "task_count": int(quality.get("unassigned_count", 0) or 0),
-            "priority_mass": float(quality.get("missed_priority", 0.0) or 0.0),
+    del working_summary
+    insertion_facts = dict(landscape.get("insertion_facts", {}) or {})
+    unassigned_tasks = _targetable_unassigned_tasks(landscape)
+    candidate_routes = _targetable_routes(landscape)
+    visible_task_ids = sorted(
+        {
+            int(tid)
+            for tid in insertion_facts.get("unassigned_task_ids", []) or []
+            if not isinstance(tid, bool)
         }
-    unassigned = dict(raw_buckets.get("unassigned_priority", {}) or {})
-    scarce = dict(raw_buckets.get("insertion_scarce_unassigned", {}) or {})
+    )
+    visible_agent_ids = sorted(
+        {int(item["agent_id"]) for item in candidate_routes if "agent_id" in item}
+    )
+    compact_last = _compact_last_verification(last_verification)
     return {
-        "unassigned_count": int(
-            unassigned.get("task_count", quality.get("unassigned_count", 0)) or 0
-        ),
-        "unassigned_priority_mass": float(
-            unassigned.get("priority_mass", quality.get("missed_priority", 0.0)) or 0.0
-        ),
-        "scarce_unassigned_count": int(scarce.get("task_count", 0) or 0),
-        "scarce_unassigned_priority_mass": float(
-            scarce.get("priority_mass", 0.0) or 0.0
-        ),
-        "top_unassigned_tasks": list(unassigned.get("top_tasks", []) or []),
-        "top_scarce_tasks": list(scarce.get("top_tasks", []) or []),
+        "visible_task_ids": visible_task_ids,
+        "visible_agent_ids": visible_agent_ids,
+        "target_catalog": {
+            "tasks": unassigned_tasks,
+            "routes": candidate_routes,
+        },
+        "last_runtime_target": dict(compact_last.get("runtime_target", {}) or {}),
+        "last_target_engagement": dict(compact_last.get("target_engagement", {}) or {}),
+        "last_target_progress": dict(compact_last.get("target_progress", {}) or {}),
     }
 
 
-def _insertion_position_landscape(landscape: Dict[str, Any]) -> Dict[str, Any]:
-    stats = landscape.get("candidate_stats", {}) or {}
-    candidate_percentiles = stats.get("candidate_position_percentiles", {}) or {}
-    feasible_percentiles = stats.get("feasible_position_percentiles", {}) or {}
-    return {
-        "candidate_position_count": {
-            "p25": float(candidate_percentiles.get("p25", 0.0) or 0.0),
-            "p50": float(candidate_percentiles.get("p50", 0.0) or 0.0),
-            "p75": float(candidate_percentiles.get("p75", 0.0) or 0.0),
-            "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
-            "zero_count": int(stats.get("zero_candidate_tasks", 0) or 0),
-        },
-        "feasible_position_count": {
-            "p25": float(feasible_percentiles.get("p25", 0.0) or 0.0),
-            "p50": float(feasible_percentiles.get("p50", 0.0) or 0.0),
-            "p75": float(feasible_percentiles.get("p75", 0.0) or 0.0),
-            "low_count": int(stats.get("one_feasible_position_tasks", 0) or 0),
-            "zero_count": int(stats.get("no_feasible_tasks", 0) or 0),
-        },
-        "top_failed_tasks": list(stats.get("top_failed_tasks", []) or []),
-    }
+def _targetable_unassigned_tasks(landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
+    facts = dict(landscape.get("insertion_facts", {}) or {})
+    out = [
+        {
+            "task_id": int(item.get("task_id", 0) or 0),
+            "priority": float(item.get("priority", 0.0) or 0.0),
+            "candidate_position_count": int(
+                item.get("candidate_position_count", 0) or 0
+            ),
+            "feasible_position_count": int(
+                item.get("feasible_position_count", 0) or 0
+            ),
+            "capable_agent_count": int(item.get("capable_agent_count", 0) or 0),
+        }
+        for item in facts.get("unassigned_task_facts", []) or []
+        if isinstance(item, dict) and item.get("task_id") is not None
+    ]
+    out.sort(key=lambda item: int(item["task_id"]))
+    return out[:12]
 
 
-def _candidate_evidence(
-    landscape: Dict[str, Any], working_summary: Dict[str, Any]
-) -> Dict[str, Any]:
-    return {
-        "insertion_evidence": {
-            **_task_insertion_evidence(working_summary, landscape),
-            "position_distribution": _insertion_position_landscape(landscape),
-        },
-        "destroy_evidence": {
-            str(name): dict(value)
-            for name, value in dict(landscape.get("destroy_options", {}) or {}).items()
-            if isinstance(value, dict)
-        },
-        "route_distribution": dict(landscape.get("route_distribution", {}) or {}),
-        "task_pressure": dict(landscape.get("task_pressure", {}) or {}),
-    }
+def _targetable_routes(landscape: Dict[str, Any]) -> List[Dict[str, Any]]:
+    routes = [
+        {
+            "agent_id": int(item.get("agent_id", 0) or 0),
+            "route_len": int(item.get("route_len", 0) or 0),
+            "route_cost": float(item.get("route_cost", 0.0) or 0.0),
+        }
+        for item in landscape.get("candidate_routes", []) or []
+        if isinstance(item, dict) and item.get("agent_id") is not None
+    ]
+    for item in routes:
+        item["remaining_energy"] = float(item.get("remaining_energy", 0.0) or 0.0)
+    routes.sort(key=lambda item: int(item.get("agent_id", 0) or 0))
+    return routes[:12]
 
 
 def _state_digest_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -500,7 +512,56 @@ def _compact_last_verification(
             "accepted": int(flow.get("accepted_trials", 0) or 0),
             "global_best_updates": int(flow.get("global_best_improved_trials", 0) or 0),
         },
+        "runtime_target": dict(trace.get("runtime_target", {}) or {}),
+        "target_engagement": dict(trace.get("target_engagement", {}) or {}),
+        "target_progress": dict(trace.get("target_progress", {}) or {}),
+        "source": "program_verifier",
     }
+
+
+def _operator_effectiveness_recent(
+    recent_memory: List[Dict[str, Any]],
+    last_verification: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    destroy = {
+        str(name): {
+            "used": 0,
+            "accepted": 0,
+            "global_best_improved": 0,
+            "protected_rejects": 0,
+            "mean_removed_count": 0.0,
+            "total_reward": 0.0,
+        }
+        for name in DESTROY_OPERATOR_NAMES
+    }
+    insertion = {
+        str(name): {
+            "used": 0,
+            "accepted": 0,
+            "inserted_sum": 0,
+            "positions_checked_sum": 0,
+            "failed_insertions": 0,
+        }
+        for name in INSERTION_OPERATOR_NAMES
+    }
+    sources: List[Dict[str, Any]] = []
+    for item in recent_memory:
+        if isinstance(item, dict):
+            sources.append(item)
+    if last_verification:
+        sources.append({"verification": last_verification})
+    for item in sources[-3:]:
+        verification = dict(item.get("verification", item) or {})
+        trace = dict(verification.get("trace", {}) or {})
+        for name, values in dict(trace.get("operator_effectiveness", {}).get("destroy", {}) or {}).items():
+            if name in destroy and isinstance(values, dict):
+                for key in destroy[name]:
+                    destroy[name][key] += values.get(key, 0) or 0
+        for name, values in dict(trace.get("operator_effectiveness", {}).get("insertion", {}) or {}).items():
+            if name in insertion and isinstance(values, dict):
+                for key in insertion[name]:
+                    insertion[name][key] += values.get(key, 0) or 0
+    return {"destroy": destroy, "insertion": insertion}
 
 
 def _verification_summary(verifications: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -529,13 +590,11 @@ def _progress_view(
     status_counts = dict(
         contract_progress.get("contract_objective_status_counts", {}) or {}
     )
-    blocker_counts = dict(contract_progress.get("dominant_blocker_counts", {}) or {})
     recent_statuses = list(
         contract_progress.get("recent_contract_objective_statuses", []) or []
     )
-    recent_blockers = list(contract_progress.get("recent_blockers", []) or [])
     min_actions = int(policy.get("min_actions", 1) or 1)
-    blocker = str((last_verification or {}).get("dominant_blocker", "none") or "none")
+    del last_verification
     return {
         "actions_used": actions_used,
         "actions_remaining": int(remaining_contract_resources.get("actions", 0) or 0),
@@ -549,15 +608,11 @@ def _progress_view(
         "time_used_sec": float(contract_progress.get("time_used_sec", 0.0) or 0.0),
         "remaining_resources": dict(remaining_contract_resources),
         "contract_objective_status_counts": status_counts,
-        "dominant_blocker_counts": blocker_counts,
         "last_contract_objective_status": str(
-            (last_verification or {}).get("contract_objective_status", "none")
-            or "none"
+            recent_statuses[-1] if recent_statuses else "none"
         ),
-        "last_dominant_blocker": blocker,
         "recent_outcome_window": {
             "contract_objective_statuses": recent_statuses[-5:],
-            "blockers": recent_blockers[-5:],
         },
     }
 

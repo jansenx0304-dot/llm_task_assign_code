@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import Budget, Config
+from ..console import info, subsection
 from ..evaluator import build_objective_keys, compare_quality, evaluate as _evaluate_raw
 from ..feasibility_policy import check_feasibility_admissibility
 from ..models import Instance
@@ -91,8 +92,8 @@ def solve_assignment(
     cur = init_solution.clone(deep=True)
     cur.normalize(instance)
     cur_ev = evaluate(cur, instance, config, update_solution_schedule=False)
-    print(
-        "[ALNS] start "
+    subsection("ALNS START")
+    info(
         f"acceptance={policy.acceptance_policy.mode} "
         f"strength_ratio={float(policy.destroy_policy.remove_ratio)} "
         f"time_limit={budget.time_limit_sec} "
@@ -159,6 +160,7 @@ def _solve_weighted_alns(
     temperature = 0.05 + 0.50 * accept_level
     cooling = _clamp_float(0.999 - 0.02 * accept_level, 0.90, 0.9999)
     contract_start_solution = cur.clone(deep=True)
+    contract_start_eval = cur_ev
     contract_start_constraint_report = cur_ev.constraint_report
     initial_solution_feasible = bool(cur_ev.is_feasible)
     initial_protected_check = check_protected_metrics(
@@ -216,6 +218,8 @@ def _solve_weighted_alns(
 
     while _budget_ok(budget, started_at, iteration):
         iteration += 1
+        before_unassigned = {int(tid) for tid in cur.unassigned}
+        before_focus_values = _focus_metric_values(cur_ev, runtime_target)
         d_final = _blend_operator_weights(d_w, destroy_priors, prior_mix_lambda)
         d_name = _roulette_select(d_final, rng)
 
@@ -226,6 +230,7 @@ def _solve_weighted_alns(
             policy=policy.destroy_policy,
             operator=destroy_ops[d_name],
             rng=rng,
+            runtime_target=runtime_target,
         )
         actual_d_name = str(move.operator_name)
         d_used[actual_d_name] += 1
@@ -250,6 +255,9 @@ def _solve_weighted_alns(
                 feasibility_mode=str(feasibility_policy.get("mode", "strict")),
                 target_task_ids=tuple(
                     int(tid) for tid in runtime_target.get("task_ids", []) or []
+                ),
+                target_agent_ids=tuple(
+                    int(aid) for aid in runtime_target.get("agent_ids", []) or []
                 ),
             ),
             instance=instance,
@@ -277,6 +285,13 @@ def _solve_weighted_alns(
 
         trial.normalize(instance)
         ev_trial = evaluate(trial, instance, config, update_solution_schedule=False)
+        iter_target_progress = _target_progress_from_snapshot(
+            before_unassigned=before_unassigned,
+            after_unassigned={int(tid) for tid in trial.unassigned},
+            before_focus_values=before_focus_values,
+            after_eval=ev_trial,
+            runtime_target=runtime_target,
+        )
         protected_check = check_protected_metrics(
             evaluation_quality(ev_trial), protected_metric_bounds
         )
@@ -336,7 +351,8 @@ def _solve_weighted_alns(
                 f"contract_key={build_objective_keys(ev_trial, contract_objective_layers, global_objective_layers)['contract']['key']} "
                 f"unassigned={len(trial.unassigned)}"
             )
-            print(message)
+            subsection("ALNS ITERATION")
+            info(message)
 
         reward = 0.0
         if accepted:
@@ -426,6 +442,11 @@ def _solve_weighted_alns(
                 "protected_metric_passed": protected_check.passed,
                 "protected_metric_violations": list(protected_check.violations),
                 "rejection_reason": rejection_reason or None,
+                "destroy_target_metadata": dict(
+                    (last_destroy_move or {}).get("metadata", {}) or {}
+                ),
+                "target_insertion": _compact_insertion_target(last_insertion),
+                "target_progress": iter_target_progress,
             }
         )
 
@@ -496,6 +517,14 @@ def _solve_weighted_alns(
         },
         repair_failure_reasons=repair_failure_reasons,
         removed_task_count_sum=removed_task_count_sum,
+        operator_prior_trace={
+            "llm_prior": dict(destroy_priors),
+            "exploration_floor": 0.1,
+            "adaptive_weight_before": dict(d_w),
+            "final_sampling_weight": _blend_operator_weights(
+                d_w, destroy_priors, prior_mix_lambda
+            ),
+        },
         runtime_target=runtime_target,
         feasibility_policy=feasibility_policy,
         feasibility_rejection_reasons=feasibility_rejection_reasons,
@@ -507,6 +536,12 @@ def _solve_weighted_alns(
         returned_protected_result=returned_protected_check.as_dict(),
         actual_time_used_sec=actual_time_used_sec,
         returned_solution_source=returned_source,
+        iteration_trace=iteration_trace,
+        last_insertion=last_insertion,
+        before_solution=contract_start_solution,
+        after_solution=working_solution,
+        before_eval=contract_start_eval,
+        after_eval=working_solution.eval,
     )
     diagnostics = _build_solver_diagnostics(
         policy=policy,
@@ -569,8 +604,8 @@ def _solve_weighted_alns(
         "returned_solution_source": returned_source,
         "protected_metric_result": returned_protected_check.as_dict(),
     }
-    print(
-        "[ALNS] done "
+    subsection("ALNS DONE")
+    info(
         f"returned_source={returned_source} "
         f"total_iters={iteration} "
         f"best_update_count={len(best_update_iters)} "
@@ -603,27 +638,32 @@ def select_destroy_move(
     policy: DestroyPolicy,
     operator: DestroyOperator,
     rng: random.Random,
+    runtime_target: Optional[Dict[str, Any]] = None,
 ) -> DestroyMove:
+    target = dict(runtime_target or {})
     assigned = list(int(tid) for tid in sol.all_assigned_tasks())
     if not assigned:
-        return DestroyMove(
-            operator_name="random_removal",
-            shape="random",
-            task_ids=(),
-            affected_routes=(),
-            features=LandscapeFeatures(
-                cost_pressure=0.0,
-                priority_loss=0.0,
-                scarcity_pressure=0.0,
-                coupling_pressure=0.0,
-                mobility_opportunity=0.0,
-                route_balance_pressure=0.0,
-                violation_pressure=0.0,
-                regret_pressure=0.0,
-                bottleneck_pressure=0.0,
+        return _with_target_metadata(
+            DestroyMove(
+                operator_name="random_removal",
+                shape="random",
+                task_ids=(),
+                affected_routes=(),
+                features=LandscapeFeatures(
+                    cost_pressure=0.0,
+                    priority_loss=0.0,
+                    scarcity_pressure=0.0,
+                    coupling_pressure=0.0,
+                    mobility_opportunity=0.0,
+                    route_balance_pressure=0.0,
+                    violation_pressure=0.0,
+                    regret_pressure=0.0,
+                    bottleneck_pressure=0.0,
+                ),
+                score=0.0,
+                metadata={"target_k": 0},
             ),
-            score=0.0,
-            metadata={"target_k": 0},
+            **_target_destroy_metadata((), target, 0, 0, fallback=bool(_has_local_target(target))),
         )
     strength = compute_destroy_strength(sol, policy.remove_ratio)
     moves = operator(sol, instance, config, policy, strength, rng)
@@ -637,7 +677,80 @@ def select_destroy_move(
         moves,
         key=lambda move: (-float(move.score), tuple(int(tid) for tid in move.task_ids)),
     )
-    return _sample_rank_weighted_destroy_move(moves, rng)
+    candidate_count_before = len(moves)
+    target_moves = [
+        move for move in moves if _is_target_related_destroy_move(move, target)
+    ]
+    fallback = bool(_has_local_target(target) and not target_moves)
+    sample_pool = target_moves or moves
+    selected = _sample_rank_weighted_destroy_move(sample_pool, rng)
+    return _with_target_metadata(
+        selected,
+        **_target_destroy_metadata(
+            selected,
+            target,
+            candidate_count_before,
+            len(target_moves),
+            fallback=fallback,
+        ),
+    )
+
+
+def _is_target_related_destroy_move(
+    move: DestroyMove, runtime_target: Dict[str, Any]
+) -> bool:
+    target_tasks = {int(tid) for tid in runtime_target.get("task_ids", []) or []}
+    target_agents = {int(aid) for aid in runtime_target.get("agent_ids", []) or []}
+    move_tasks = {int(tid) for tid in move.task_ids}
+    move_agents = {int(aid) for aid in move.affected_routes}
+    return bool(
+        (target_tasks and move_tasks & target_tasks)
+        or (target_agents and move_agents & target_agents)
+    )
+
+
+def _target_destroy_metadata(
+    move: Any,
+    runtime_target: Dict[str, Any],
+    candidate_count_before: int,
+    candidate_count_after: int,
+    *,
+    fallback: bool,
+) -> Dict[str, Any]:
+    target_tasks = {int(tid) for tid in runtime_target.get("task_ids", []) or []}
+    target_agents = {int(aid) for aid in runtime_target.get("agent_ids", []) or []}
+    move_tasks = {int(tid) for tid in getattr(move, "task_ids", ())}
+    move_agents = {int(aid) for aid in getattr(move, "affected_routes", ())}
+    task_hits = sorted(move_tasks & target_tasks)
+    agent_hits = sorted(move_agents & target_agents)
+    return {
+        "target_related": bool(task_hits or agent_hits),
+        "target_destroy_fallback": bool(fallback),
+        "target_task_hit_count": len(task_hits),
+        "target_agent_hit_count": len(agent_hits),
+        "target_task_hits": task_hits[:20],
+        "target_agent_hits": agent_hits[:20],
+        "target_candidate_count_before_filter": int(candidate_count_before),
+        "target_candidate_count_after_filter": int(candidate_count_after),
+    }
+
+
+def _with_target_metadata(move: DestroyMove, **metadata: Any) -> DestroyMove:
+    return DestroyMove(
+        operator_name=move.operator_name,
+        shape=move.shape,
+        task_ids=move.task_ids,
+        affected_routes=move.affected_routes,
+        features=move.features,
+        score=move.score,
+        metadata={**dict(move.metadata), **metadata},
+    )
+
+
+def _has_local_target(runtime_target: Dict[str, Any]) -> bool:
+    return bool(
+        runtime_target.get("task_ids", []) or runtime_target.get("agent_ids", [])
+    )
 
 
 def _sample_rank_weighted_destroy_move(
@@ -910,6 +1023,7 @@ def _build_execution_trace(
     rejection_reasons: Dict[str, int],
     repair_failure_reasons: Dict[str, int],
     removed_task_count_sum: float,
+    operator_prior_trace: Dict[str, Any],
     runtime_target: Dict[str, Any],
     feasibility_policy: Dict[str, Any],
     feasibility_rejection_reasons: Dict[str, int],
@@ -921,6 +1035,12 @@ def _build_execution_trace(
     returned_protected_result: Dict[str, Any],
     actual_time_used_sec: float,
     returned_solution_source: str,
+    iteration_trace: List[Dict[str, Any]],
+    last_insertion: Optional[Dict[str, Any]],
+    before_solution: AssignmentSolution,
+    after_solution: AssignmentSolution,
+    before_eval: EvalResult,
+    after_eval: Optional[EvalResult],
 ) -> Dict[str, Any]:
     selected_counts = {
         str(name): int(values.get("used", 0) if isinstance(values, dict) else values)
@@ -942,6 +1062,19 @@ def _build_execution_trace(
         key=lambda item: int(item[1]),
         default=("none", 0),
     )[0]
+    target_engagement = _build_target_engagement(
+        runtime_target=runtime_target,
+        iteration_trace=iteration_trace,
+        last_insertion=last_insertion,
+    )
+    target_agent_engagement = _target_agent_engagement_from_insertion(last_insertion)
+    target_progress = _target_progress(
+        before_solution=before_solution,
+        after_solution=after_solution,
+        before_eval=before_eval,
+        after_eval=after_eval,
+        runtime_target=runtime_target,
+    )
     return {
         "trace_id": trace_id,
         "kind": "alns",
@@ -949,6 +1082,27 @@ def _build_execution_trace(
         "actual_time_used_sec": float(actual_time_used_sec),
         "returned_solution_source": str(returned_solution_source),
         "runtime_target": dict(runtime_target),
+        "target_engagement": target_engagement,
+        "target_agent_engagement": target_agent_engagement,
+        "target_progress": target_progress,
+        "operator_prior_trace": {
+            **dict(operator_prior_trace),
+            "actual_usage": selected_counts,
+            "accepted_usage": {
+                str(name): int(values.get("accepted", 0) or 0)
+                for name, values in destroy_operator_summary.items()
+                if isinstance(values, dict)
+            },
+            "reward": {
+                str(name): float(values.get("total_score", 0.0) or 0.0)
+                for name, values in destroy_operator_summary.items()
+                if isinstance(values, dict)
+            },
+        },
+        "operator_effectiveness": {
+            "destroy": _operator_effectiveness_destroy(destroy_operator_summary),
+            "insertion": _operator_effectiveness_insertion(insertion_operator_summary),
+        },
         "destroy": {
             "selected_operator_counts": selected_counts,
             "removed_task_count_avg": round(
@@ -989,6 +1143,206 @@ def _build_execution_trace(
             "returned_check": dict(returned_protected_result),
         },
     }
+
+
+def _build_target_engagement(
+    *,
+    runtime_target: Dict[str, Any],
+    iteration_trace: List[Dict[str, Any]],
+    last_insertion: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    destroy_used = 0
+    destroy_fallback = 0
+    destroy_available = 0
+    attempted: List[int] = []
+    inserted: List[int] = []
+    insertion_fallback = 0
+    still_unassigned: List[int] = []
+    for item in iteration_trace:
+        metadata = dict(item.get("destroy_target_metadata", {}) or {})
+        if metadata.get("target_related"):
+            destroy_used += 1
+        if metadata.get("target_destroy_fallback"):
+            destroy_fallback += 1
+        destroy_available += int(
+            metadata.get("target_candidate_count_after_filter", 0) or 0
+        )
+        target_insertion = dict(item.get("target_insertion", {}) or {})
+        attempted.extend(int(tid) for tid in target_insertion.get("target_tasks_attempted", []) or [])
+        inserted.extend(int(tid) for tid in target_insertion.get("target_tasks_inserted", []) or [])
+        insertion_fallback += int(
+            target_insertion.get("target_insertion_fallback_count", 0) or 0
+        )
+        progress = dict(item.get("target_progress", {}) or {})
+        still_unassigned = [
+            int(tid) for tid in progress.get("target_tasks_still_unassigned", []) or []
+        ]
+    if last_insertion:
+        attempted.extend(
+            int(tid) for tid in last_insertion.get("target_tasks_attempted", []) or []
+        )
+        inserted.extend(
+            int(tid) for tid in last_insertion.get("target_tasks_inserted", []) or []
+        )
+    return {
+        "target_scope_kind": str(runtime_target.get("scope_kind", "global")),
+        "target_task_count": len(runtime_target.get("task_ids", []) or []),
+        "target_agent_count": len(runtime_target.get("agent_ids", []) or []),
+        "target_destroy_moves_available": int(destroy_available),
+        "target_destroy_moves_used": int(destroy_used),
+        "target_destroy_fallback_count": int(destroy_fallback),
+        "target_tasks_attempted": _unique_ints(attempted),
+        "target_tasks_inserted": _unique_ints(inserted),
+        "target_tasks_still_unassigned": _unique_ints(still_unassigned),
+        "target_insertion_fallback_count": int(insertion_fallback),
+    }
+
+
+def _target_agent_engagement_from_insertion(
+    last_insertion: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    engagement = dict(
+        (last_insertion or {}).get("target_agent_engagement", {}) or {}
+    )
+    if engagement:
+        return engagement
+    return {
+        "target_agent_ids": [],
+        "candidate_positions_on_target_agents": 0,
+        "attempts_on_target_agents": 0,
+        "insertions_on_target_agents": 0,
+        "fallback_count": 0,
+        "fallback_reasons": {
+            "no_feasible_position_on_target_agent": 0,
+        },
+    }
+
+
+def _operator_effectiveness_destroy(
+    summary: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        str(name): {
+            "used": int(values.get("used", 0) or 0),
+            "accepted": int(values.get("accepted", 0) or 0),
+            "global_best_improved": int(values.get("global_best_improved", 0) or 0),
+            "protected_rejects": 0,
+            "mean_removed_count": float(values.get("mean_removed_count", 0.0) or 0.0),
+            "total_reward": float(values.get("total_score", 0.0) or 0.0),
+        }
+        for name, values in summary.items()
+        if isinstance(values, dict)
+    }
+
+
+def _operator_effectiveness_insertion(
+    summary: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        str(name): {
+            "used": int(values.get("used", 0) or 0),
+            "accepted": int(values.get("accepted", 0) or 0),
+            "inserted_sum": int(values.get("inserted_sum", 0) or 0),
+            "positions_checked_sum": int(
+                values.get("positions_checked_sum", 0) or 0
+            ),
+            "failed_insertions": int(values.get("unassigned_after_sum", 0) or 0),
+        }
+        for name, values in summary.items()
+        if isinstance(values, dict)
+    }
+
+
+def _compact_insertion_target(last_insertion: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    insertion = dict(last_insertion or {})
+    return {
+        "target_task_ids": _unique_ints(insertion.get("target_task_ids", []) or []),
+        "target_tasks_attempted": _unique_ints(
+            insertion.get("target_tasks_attempted", []) or []
+        ),
+        "target_tasks_inserted": _unique_ints(
+            insertion.get("target_tasks_inserted", []) or []
+        ),
+        "target_tasks_failed": _unique_ints(
+            insertion.get("target_tasks_failed", []) or []
+        ),
+        "target_insertion_fallback_count": int(
+            insertion.get("target_insertion_fallback_count", 0) or 0
+        ),
+        "target_agent_engagement": dict(
+            insertion.get("target_agent_engagement", {}) or {}
+        ),
+    }
+
+
+def _target_progress(
+    *,
+    before_solution: AssignmentSolution,
+    after_solution: AssignmentSolution,
+    before_eval: EvalResult,
+    after_eval: Optional[EvalResult],
+    runtime_target: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _target_progress_from_snapshot(
+        before_unassigned={int(tid) for tid in before_solution.unassigned},
+        after_unassigned={int(tid) for tid in after_solution.unassigned},
+        before_focus_values=_focus_metric_values(before_eval, runtime_target),
+        after_eval=after_eval,
+        runtime_target=runtime_target,
+    )
+
+
+def _target_progress_from_snapshot(
+    *,
+    before_unassigned: set[int],
+    after_unassigned: set[int],
+    before_focus_values: Dict[str, float],
+    after_eval: Optional[EvalResult],
+    runtime_target: Dict[str, Any],
+) -> Dict[str, Any]:
+    target_task_ids = _unique_ints(runtime_target.get("task_ids", []) or [])
+    inserted = [
+        tid for tid in target_task_ids
+        if int(tid) in before_unassigned and int(tid) not in after_unassigned
+    ]
+    focus_delta: Dict[str, float] = {}
+    if after_eval is not None:
+        for metric, before_value in before_focus_values.items():
+            focus_delta[str(metric)] = float(after_eval.get_metric(str(metric))) - float(before_value)
+    return {
+        "target_task_count": len(target_task_ids),
+        "target_tasks_inserted": inserted[:20],
+        "target_tasks_still_unassigned": [
+            tid for tid in target_task_ids if int(tid) in after_unassigned
+        ][:20],
+        "focus_metric_delta": focus_delta,
+    }
+
+
+def _focus_metric_values(
+    evaluation: EvalResult, runtime_target: Dict[str, Any]
+) -> Dict[str, float]:
+    return {
+        str(metric): float(evaluation.get_metric(str(metric)))
+        for metric in runtime_target.get("focus_metrics", []) or []
+        if str(metric)
+    }
+
+
+def _unique_ints(values: Any, limit: int = 20) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    for value in values or []:
+        if isinstance(value, bool):
+            continue
+        item = int(value)
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _violation_ratio_diagnostics(

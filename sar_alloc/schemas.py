@@ -64,22 +64,51 @@ def _string(description: str) -> Dict[str, Any]:
     return {"type": "string", "description": description}
 
 
-EXPLANATION_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Human-readable explanation ignored by validator/compiler/runtime.",
-    "additionalProperties": {"type": "string"},
+AUDIT_NOTE_SCHEMA: Dict[str, Any] = {
+    "type": "string",
+    "description": "Optional non-executable note retained only for audit.",
+}
+
+DECISION_BASIS_SCHEMA: Dict[str, Any] = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 4,
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["basis_id", "claim", "evidence_refs"],
+        "properties": {
+            "basis_id": {
+                "type": "string",
+                "description": "Stable local id, e.g. B1.",
+            },
+            "claim": {
+                "type": "string",
+                "description": "Concise LLM interpretation based only on cited observation evidence.",
+            },
+            "evidence_refs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "items": {
+                    "type": "string",
+                    "description": "Dot-path reference to a field visible in the current observation.",
+                },
+            },
+        },
+    },
 }
 
 SPARSE_SCORE_ITEM_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "description": "A sparse executable score item.",
+    "description": "A sparse score item.",
     "properties": {
         "name": _string("Candidate name from the current action_space."),
         "score": {
             "type": "integer",
             "minimum": 0,
             "maximum": 10,
-            "description": "Executable emphasis score from 0 to 10.",
+            "description": "Score from 0 to 10.",
         },
     },
     "required": ["name", "score"],
@@ -144,13 +173,13 @@ INSERTION_CONTROL_SCHEMA: Dict[str, Any] = {
     "description": "Executable insertion controls.",
     "properties": {
         "operator_scores": _score_array(
-            "Sparse emphasis scores for insertion operators."
+            "Sparse prior preference scores for insertion operators. These are not hard filters."
         ),
         "task_signal_scores": _score_array(
-            "Sparse emphasis scores for choosing the next task."
+            "Sparse direct scoring coefficients for choosing the next task."
         ),
         "position_signal_scores": _score_array(
-            "Sparse emphasis scores for choosing an insertion position."
+            "Sparse direct scoring coefficients for choosing an insertion position."
         ),
     },
     "required": ["operator_scores", "task_signal_scores", "position_signal_scores"],
@@ -162,9 +191,9 @@ DESTROY_CONTROL_SCHEMA: Dict[str, Any] = {
     "description": "Executable destroy controls.",
     "properties": {
         "operator_scores": _score_array(
-            "Sparse emphasis scores for destroy operators."
+            "Sparse prior preference scores for destroy operators. These are not hard filters."
         ),
-        "signal_scores": _score_array("Sparse emphasis scores for destroy signals."),
+        "signal_scores": _score_array("Sparse direct scoring coefficients for destroy signals."),
         "intensity_score": {
             "type": "integer",
             "minimum": 0,
@@ -203,7 +232,7 @@ GLOBAL_OBJECTIVE_SHAPE: Dict[str, Any] = {
             "maxItems": 4,
             "items": {"type": "string", "enum": list(QUALITY_METRICS)},
         },
-        "explanation": EXPLANATION_SCHEMA,
+        "audit_note": AUDIT_NOTE_SCHEMA,
     },
     "required": ["objective_layers"],
     "additionalProperties": False,
@@ -249,25 +278,38 @@ FEASIBILITY_CONTROL_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
 }
 
-SITUATION_ASSESSMENT_SCHEMA: Dict[str, Any] = {
+SITUATION_SUMMARY_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "description": "LLM-authored interpretation of evidence. Runtime records it but does not execute it.",
+    "description": "LLM-authored summary linked to decision_basis items.",
     "properties": {
         "summary": {"type": "string"},
-        "reasoning_from_evidence": {"type": "string"},
+        "basis_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {"type": "string"},
+        },
     },
-    "required": ["summary", "reasoning_from_evidence"],
+    "required": ["summary", "basis_ids"],
     "additionalProperties": False,
 }
 
 EXPECTED_EFFECT_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "description": "LLM-authored expected metric effect used for traceability.",
+    "description": "LLM-authored expected metric effect linked to decision_basis.",
     "properties": {
+        "effect_id": {"type": "string"},
         "metric": {"type": "string", "enum": list(QUALITY_METRICS)},
-        "direction": {"type": "string", "enum": ["decrease", "increase", "maintain"]},
+        "direction": {"type": "string", "enum": ["decrease", "increase", "stabilize"]},
+        "scope": {"type": "string", "enum": ["working", "best", "contract"]},
+        "basis_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {"type": "string"},
+        },
     },
-    "required": ["metric", "direction"],
+    "required": ["effect_id", "metric", "direction", "scope", "basis_ids"],
     "additionalProperties": False,
 }
 
@@ -305,6 +347,45 @@ TARGET_INTENT_SCHEMA: Dict[str, Any] = {
         "expected_effects",
         "rationale",
     ],
+    "additionalProperties": False,
+}
+
+RUNTIME_TARGET_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "Executable target chosen by Solver for this action. It binds the "
+        "selected intent_id to concrete visible tasks/routes/metrics and is "
+        "consumed by runtime insertion and destroy logic."
+    ),
+    "properties": {
+        "scope_kind": {
+            "type": "string",
+            "enum": ["global", "task_scope", "route_scope", "mixed_scope"],
+            "description": "Target scope for this action.",
+        },
+        "task_ids": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 8,
+            "items": {"type": "integer"},
+            "description": "Task ids selected from observation.targetable_evidence.visible_task_ids.",
+        },
+        "agent_ids": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 6,
+            "items": {"type": "integer"},
+            "description": "Agent/route ids selected from observation.targetable_evidence.visible_agent_ids.",
+        },
+        "focus_metrics": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {"type": "string", "enum": list(QUALITY_METRICS)},
+            "description": "Metrics used to audit target progress for this action.",
+        },
+    },
+    "required": ["scope_kind", "task_ids", "agent_ids", "focus_metrics"],
     "additionalProperties": False,
 }
 
@@ -377,7 +458,8 @@ CONTRACT_SCHEMA: Dict[str, Any] = {
             "items": {"type": "string", "enum": list(QUALITY_METRICS)},
         },
         "feasibility_control": FEASIBILITY_CONTROL_SCHEMA,
-        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+        "decision_basis": DECISION_BASIS_SCHEMA,
+        "situation_summary": SITUATION_SUMMARY_SCHEMA,
         "target_intents": {
             "type": "array",
             "minItems": 1,
@@ -391,13 +473,14 @@ CONTRACT_SCHEMA: Dict[str, Any] = {
         },
         "resource_policy": RESOURCE_POLICY_SCHEMA,
         "exit_conditions": EXIT_CONDITIONS_SCHEMA,
-        "explanation": EXPLANATION_SCHEMA,
+        "audit_note": AUDIT_NOTE_SCHEMA,
     },
     "required": [
         "contract_type",
         "objective_layers",
         "feasibility_control",
-        "situation_assessment",
+        "decision_basis",
+        "situation_summary",
         "target_intents",
         "protected_metrics",
         "resource_policy",
@@ -481,8 +564,10 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "const": "construct_initial"},
-                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "decision_basis": DECISION_BASIS_SCHEMA,
+                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
                         "intent_id": _string("Intent id from active_contract.target_intents."),
+                        "runtime_target": RUNTIME_TARGET_SCHEMA,
                         "insertion_control": INSERTION_CONTROL_SCHEMA,
                         "solver_budget": {
                             "type": "object",
@@ -498,12 +583,14 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                             "maxItems": 4,
                             "items": EXPECTED_EFFECT_SCHEMA,
                         },
-                        "explanation": EXPLANATION_SCHEMA,
+                        "audit_note": AUDIT_NOTE_SCHEMA,
                     },
                     "required": [
                         "action",
-                        "situation_assessment",
+                        "decision_basis",
+                        "situation_summary",
                         "intent_id",
+                        "runtime_target",
                         "insertion_control",
                         "solver_budget",
                         "expected_effects",
@@ -514,8 +601,10 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "const": "run_alns"},
-                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "decision_basis": DECISION_BASIS_SCHEMA,
+                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
                         "intent_id": _string("Intent id from active_contract.target_intents."),
+                        "runtime_target": RUNTIME_TARGET_SCHEMA,
                         "destroy_control": DESTROY_CONTROL_SCHEMA,
                         "insertion_control": INSERTION_CONTROL_SCHEMA,
                         "acceptance_control": ACCEPTANCE_CONTROL_SCHEMA,
@@ -533,12 +622,14 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                             "maxItems": 4,
                             "items": EXPECTED_EFFECT_SCHEMA,
                         },
-                        "explanation": EXPLANATION_SCHEMA,
+                        "audit_note": AUDIT_NOTE_SCHEMA,
                     },
                     "required": [
                         "action",
-                        "situation_assessment",
+                        "decision_basis",
+                        "situation_summary",
                         "intent_id",
+                        "runtime_target",
                         "destroy_control",
                         "insertion_control",
                         "acceptance_control",
@@ -554,7 +645,8 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                             "type": "string",
                             "const": "request_supervisor_review",
                         },
-                        "situation_assessment": SITUATION_ASSESSMENT_SCHEMA,
+                        "decision_basis": DECISION_BASIS_SCHEMA,
+                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
                         "review_request": {
                             "type": "object",
                             "properties": {
@@ -569,9 +661,9 @@ _SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
                             "required": ["reason", "evidence_refs"],
                             "additionalProperties": False,
                         },
-                        "explanation": EXPLANATION_SCHEMA,
+                        "audit_note": AUDIT_NOTE_SCHEMA,
                     },
-                    "required": ["action", "situation_assessment", "review_request"],
+                    "required": ["action", "decision_basis", "situation_summary", "review_request"],
                     "additionalProperties": False,
                 },
             ]
@@ -820,6 +912,7 @@ __all__ = [
     "SUPERVISOR_REVIEW_SCHEMA",
     "SOLVER_DECISION_SCHEMA",
     "CONTRACT_SCHEMA",
+    "RUNTIME_TARGET_SCHEMA",
     "schema_text",
     "solver_decision_schema_for_candidates",
     "supervisor_kickoff_schema_for_limits",

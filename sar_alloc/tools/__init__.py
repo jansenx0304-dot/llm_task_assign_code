@@ -17,6 +17,7 @@ from .llm_utils import (
     llm_instance_summary as instance_summary,
     llm_solution_summary as solution_summary,
     insertion_policy_from_manifest,
+    runtime_target_from_manifest,
     solver_request_from_manifest,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "evaluate",
     "instance_summary",
     "insertion_policy_from_manifest",
+    "runtime_target_from_manifest",
     "solution_summary",
     "solve_assignment",
     "solver_request_from_manifest",

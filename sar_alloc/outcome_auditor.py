@@ -80,17 +80,23 @@ def verify_initial_construction(
         action="construct_initial",
         intent_id=_manifest_intent(manifest),
     )
+    initial_working_delta = (
+        _metric_delta_from_baseline(
+            _protected_metric_baseline(contract),
+            working_evaluation,
+            _contract_metrics(contract),
+        )
+        if working_evaluation is not None
+        else {}
+    )
     verification.update(
         {
+            "source": "program_verifier",
             "contract_objective_status": status,
             "metric_delta": {
-                "working": (
-                    _metric_values(working_evaluation, _contract_metrics(contract))
-                    if working_evaluation is not None
-                    else {}
-                ),
+                "working": initial_working_delta,
                 "best_feasible": (
-                    _metric_values(working_evaluation, _contract_metrics(contract))
+                    initial_working_delta
                     if working_evaluation is not None and working_evaluation.is_feasible
                     else {}
                 ),
@@ -115,6 +121,8 @@ def verify_initial_construction(
             "objective_keys": _verification_objective_keys(
                 working_evaluation, _contract_metrics(contract)
             ),
+            "target_result": _target_result(trace, manifest),
+            "effect_audit": _effect_audit(manifest, {"working": initial_working_delta}),
             "trace": trace,
         }
     )
@@ -226,6 +234,7 @@ def verify_alns_action(
     )
     verification.update(
         {
+            "source": "program_verifier",
             "contract_objective_status": status,
             "metric_delta": {"working": working_delta, "best_feasible": best_delta},
             "debt_delta": debt_delta,
@@ -245,6 +254,10 @@ def verify_alns_action(
                 chosen_after,
                 metrics,
                 global_objective_layers or metrics,
+            ),
+            "target_result": _target_result(trace, manifest),
+            "effect_audit": _effect_audit(
+                manifest, {"working": working_delta, "best_feasible": best_delta}
             ),
             "trace": trace,
         }
@@ -289,6 +302,7 @@ def verify_review_request(
     )
     verification.update(
         {
+            "source": "program_verifier",
             "contract_objective_status": "not_applicable",
             "metric_delta": {"working": {}, "best_feasible": {}},
             "debt_delta": {},
@@ -350,6 +364,24 @@ def _metric_delta(
         for layer in metrics
         if str(layer.get("metric", layer.get("name", "")))
     }
+
+
+def _metric_delta_from_baseline(
+    baseline: Dict[str, float],
+    after: Optional[EvalResult],
+    metrics: List[Dict[str, Any]],
+) -> Dict[str, float]:
+    if after is None:
+        return {}
+    out: Dict[str, float] = {}
+    for layer in metrics:
+        metric = str(layer.get("metric", layer.get("name", "")))
+        if not metric:
+            continue
+        out[metric] = float(after.get_metric(metric)) - float(
+            baseline.get(metric, 0.0)
+        )
+    return out
 
 
 def _metric_values(
@@ -646,6 +678,102 @@ def _manifest_review_reasons(manifest: Optional[Any]) -> List[str]:
     if review_request.get("reason"):
         reasons.insert(0, str(review_request["reason"]))
     return reasons
+
+
+def _effect_audit(
+    manifest: Optional[Any],
+    metric_delta: Dict[str, Dict[str, float]],
+) -> List[Dict[str, Any]]:
+    raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
+    effects = list((raw.get("compiled", {}) or {}).get("expected_effects", []) or [])
+    out: List[Dict[str, Any]] = []
+    for item in effects:
+        if not isinstance(item, dict):
+            continue
+        scope = str(item.get("scope", "working"))
+        metric = str(item.get("metric", ""))
+        direction = str(item.get("direction", ""))
+        values = dict(metric_delta.get(scope, {}) or {})
+        if metric not in values:
+            out.append(
+                {
+                    "effect_id": str(item.get("effect_id", "")),
+                    "metric": metric,
+                    "expected_direction": direction,
+                    "matched": False,
+                    "reason": "metric_not_found_in_verification",
+                }
+            )
+            continue
+        delta = float(values[metric])
+        if direction == "decrease":
+            matched = delta < 0.0
+        elif direction == "increase":
+            matched = delta > 0.0
+        else:
+            matched = abs(delta) <= 1e-9
+        out.append(
+            {
+                "effect_id": str(item.get("effect_id", "")),
+                "metric": metric,
+                "expected_direction": direction,
+                "actual_delta": delta,
+                "matched": bool(matched),
+                "source": f"metric_delta.{scope}.{metric}",
+            }
+        )
+    return out
+
+
+def _target_result(trace: Dict[str, Any], manifest: Optional[Any]) -> Dict[str, Any]:
+    raw = manifest.as_dict() if hasattr(manifest, "as_dict") else dict(manifest or {})
+    manifest_target = dict((raw.get("compiled", {}) or {}).get("target", {}) or {})
+    runtime_target = dict(trace.get("runtime_target", {}) or {})
+    engagement = dict(trace.get("target_engagement", {}) or {})
+    agent_engagement = dict(trace.get("target_agent_engagement", {}) or {})
+    progress = dict(trace.get("target_progress", {}) or {})
+    focus_delta = dict(progress.get("focus_metric_delta", {}) or {})
+    target_present = bool(manifest_target)
+    runtime_received = bool(
+        target_present
+        and str(runtime_target.get("scope_kind", "")) == str(manifest_target.get("scope_kind", ""))
+        and _int_list(runtime_target.get("task_ids", [])) == _int_list(manifest_target.get("task_ids", []))
+        and _int_list(runtime_target.get("agent_ids", [])) == _int_list(manifest_target.get("agent_ids", []))
+        and [str(x) for x in runtime_target.get("focus_metrics", []) or []]
+        == [str(x) for x in manifest_target.get("focus_metrics", []) or []]
+    )
+    destroy_used = int(engagement.get("target_destroy_moves_used", 0) or 0)
+    destroy_fallback = int(engagement.get("target_destroy_fallback_count", 0) or 0)
+    insertion_fallback = int(engagement.get("target_insertion_fallback_count", 0) or 0)
+    inserted = _int_list(engagement.get("target_tasks_inserted", []) or [])
+    attempted = _int_list(engagement.get("target_tasks_attempted", []) or [])
+    local_scope = str(manifest_target.get("scope_kind", "global")) != "global"
+    target_engaged = bool(
+        not local_scope
+        or destroy_used
+        or inserted
+        or attempted
+        or destroy_fallback
+        or insertion_fallback
+    )
+    progress_detected = bool(
+        inserted
+        or any(abs(float(value)) > 1e-9 for value in focus_delta.values())
+    )
+    return {
+        "intent_id": str(manifest_target.get("intent_id", raw.get("intent_id", ""))),
+        "target_present": target_present,
+        "runtime_received_target": runtime_received,
+        "target_engaged": target_engaged,
+        "target_progress_detected": progress_detected,
+        "target_fallback": bool(destroy_fallback or insertion_fallback),
+        "focus_metric_delta": {str(k): float(v) for k, v in focus_delta.items()},
+        "target_agent_engagement": agent_engagement,
+    }
+
+
+def _int_list(values: Any) -> List[int]:
+    return [int(value) for value in values or [] if not isinstance(value, bool)]
 
 
 def _verification_objective_keys(

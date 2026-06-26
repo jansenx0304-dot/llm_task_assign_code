@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..config import Config
+from ..console import info, subsection
 from ..evaluator import evaluate
 from ..models import Instance
 from ..operators import InsertionPolicy
@@ -43,6 +44,9 @@ def build_initial_solution_with_insertion(
             target_task_ids=tuple(
                 int(tid) for tid in compiled_target.get("task_ids", []) or []
             ),
+            target_agent_ids=tuple(
+                int(aid) for aid in compiled_target.get("agent_ids", []) or []
+            ),
         ),
         instance=instance,
         config=config,
@@ -54,8 +58,25 @@ def build_initial_solution_with_insertion(
         solution, instance, str((manifest or {}).get("trace_id", "X_initial"))
     )
     trace["runtime_target"] = compiled_target
-    print(
-        f"[INITIAL INSERTION] assigned={len(solution.all_assigned_tasks())} "
+    diagnostics = dict(
+        (solution.solver_diagnostics or {}).get("last_insertion", {}) or {}
+    )
+    trace["target_engagement"] = _initial_target_engagement(
+        solution=solution,
+        diagnostics=diagnostics,
+        target=compiled_target,
+        instance=instance,
+    )
+    trace["target_agent_engagement"] = dict(
+        diagnostics.get("target_agent_engagement", {}) or {}
+    )
+    trace["target_progress"] = _initial_target_progress(
+        solution=solution,
+        target=compiled_target,
+    )
+    subsection("INITIAL INSERTION")
+    info(
+        f"assigned={len(solution.all_assigned_tasks())} "
         f"unassigned={len(solution.unassigned)}"
     )
     return InitialConstructionResult(
@@ -93,6 +114,73 @@ def _initial_trace(
         "dominant_failure_reason": str(dominant),
         "operator_use": dict(diagnostics.get("operator_use", {}) or {}),
     }
+
+
+def _initial_target_engagement(
+    *,
+    solution: AssignmentSolution,
+    diagnostics: Dict[str, Any],
+    target: Dict[str, Any],
+    instance: Instance,
+) -> Dict[str, Any]:
+    target_task_ids = _target_task_ids(target)
+    assigned = solution.all_assigned_tasks()
+    still_unassigned = {int(tid) for tid in solution.unassigned}
+    all_tasks = {int(tid) for tid in instance.all_task_ids()}
+    inserted = [tid for tid in target_task_ids if tid in assigned]
+    attempted = [tid for tid in target_task_ids if tid in all_tasks]
+    return {
+        "target_scope_kind": str(target.get("scope_kind", "global")),
+        "target_task_count": len(target_task_ids),
+        "target_agent_count": len(target.get("agent_ids", []) or []),
+        "target_tasks_attempted": _limited_ints(attempted),
+        "target_tasks_inserted": _limited_ints(inserted),
+        "target_tasks_still_unassigned": _limited_ints(
+            [tid for tid in target_task_ids if tid in still_unassigned]
+        ),
+        "target_insertion_fallback_count": int(bool(target_task_ids and not inserted)),
+        "target_agent_engagement": dict(
+            diagnostics.get("target_agent_engagement", {}) or {}
+        ),
+        "insertion_target_task_ids": _limited_ints(
+            [int(tid) for tid in diagnostics.get("target_task_ids", []) or []]
+        ),
+    }
+
+
+def _initial_target_progress(
+    *, solution: AssignmentSolution, target: Dict[str, Any]
+) -> Dict[str, Any]:
+    target_task_ids = _target_task_ids(target)
+    assigned = solution.all_assigned_tasks()
+    unassigned = {int(tid) for tid in solution.unassigned}
+    return {
+        "target_task_count": len(target_task_ids),
+        "target_tasks_inserted": _limited_ints(
+            [tid for tid in target_task_ids if tid in assigned]
+        ),
+        "target_tasks_still_unassigned": _limited_ints(
+            [tid for tid in target_task_ids if tid in unassigned]
+        ),
+        "focus_metric_delta": {},
+    }
+
+
+def _target_task_ids(target: Dict[str, Any]) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    for value in target.get("task_ids", []) or []:
+        if isinstance(value, bool):
+            continue
+        tid = int(value)
+        if tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return out
+
+
+def _limited_ints(values: List[int], limit: int = 20) -> List[int]:
+    return [int(value) for value in values[:limit]]
 
 
 __all__ = ["InitialConstructionResult", "build_initial_solution_with_insertion"]

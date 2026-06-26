@@ -46,12 +46,13 @@ class SearchContract:
     objective_layers: List[Dict[str, str]]
     feasibility_control: Dict[str, Any]
     feasibility_policy: Dict[str, Any]
-    situation_assessment: Dict[str, str]
+    decision_basis: List[Dict[str, Any]]
+    situation_summary: Dict[str, Any]
     target_intents: List[Dict[str, Any]]
     protected_metrics: List[Dict[str, Any]]
     resource_policy: Dict[str, Any]
     exit_conditions: Dict[str, List[Dict[str, Any]]]
-    explanation: Dict[str, str] = field(default_factory=dict)
+    audit_note: str = ""
     protected_metric_baseline: Dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
@@ -67,7 +68,8 @@ class SearchContract:
                 ],
             },
             "feasibility_policy": dict(self.feasibility_policy),
-            "situation_assessment": dict(self.situation_assessment),
+            "decision_basis": [dict(item) for item in self.decision_basis],
+            "situation_summary": dict(self.situation_summary),
             "target_intents": [dict(item) for item in self.target_intents],
             "protected_metrics": [dict(item) for item in self.protected_metrics],
             "protected_metric_baseline": dict(self.protected_metric_baseline),
@@ -80,7 +82,7 @@ class SearchContract:
                     dict(item) for item in self.exit_conditions.get("failure", [])
                 ],
             },
-            "explanation": dict(self.explanation),
+            "audit_note": str(self.audit_note),
         }
 
 
@@ -310,7 +312,10 @@ def compile_contract(
         ],
         feasibility_control=feasibility_control,
         feasibility_policy=feasibility_policy,
-        situation_assessment=dict(raw_contract.get("situation_assessment", {}) or {}),
+        decision_basis=[
+            dict(item) for item in raw_contract.get("decision_basis", []) or []
+        ],
+        situation_summary=dict(raw_contract.get("situation_summary", {}) or {}),
         target_intents=[
             dict(item) for item in raw_contract.get("target_intents", []) or []
         ],
@@ -328,7 +333,7 @@ def compile_contract(
                 for item in raw_contract.get("exit_conditions", {}).get("failure", [])
             ],
         },
-        explanation=dict(raw_contract.get("explanation", {}) or {}),
+        audit_note=str(raw_contract.get("audit_note", "") or ""),
         protected_metric_baseline={
             str(name): float(value) for name, value in baseline.items()
         },
@@ -401,10 +406,31 @@ def compile_solver_control(
     intent_id = str(decision.get("intent_id", ""))
     intent = _intent_from_contract(contract, intent_id) if intent_id else {}
     solver_budget = dict(decision.get("solver_budget", {}) or {})
+    runtime_target = (
+        _compile_runtime_target(
+            dict(decision.get("runtime_target", {}) or {}),
+            intent_id=intent_id,
+            intent=intent,
+        )
+        if action in {"construct_initial", "run_alns"}
+        else {}
+    )
     compiled: Dict[str, Any] = {
         "llm_selected_intent": intent,
-        "situation_assessment": dict(decision.get("situation_assessment", {}) or {}),
+        "target": runtime_target,
+        "decision_basis": [dict(item) for item in decision.get("decision_basis", []) or []],
+        "situation_summary": dict(decision.get("situation_summary", {}) or {}),
         "expected_effects": list(decision.get("expected_effects", []) or []),
+        "basis_ref_validation": {
+            "all_refs_resolved": True,
+            "unresolved_refs": [],
+        },
+        "execution_semantics": {
+            "operator_scores": "llm_prior_not_hard_filter",
+            "exploration_enabled": True,
+            "low_prior_operator_may_still_be_sampled": True,
+            "signal_scores": "direct_scoring_coefficients",
+        },
         "feasibility": _manifest_feasibility(contract.feasibility_policy),
         "resource": _manifest_solver_budget(contract, solver_budget),
         "protected_metric_baseline": dict(contract.protected_metric_baseline),
@@ -423,10 +449,12 @@ def compile_solver_control(
     consumed = {
         "action",
         "intent_id",
-        "situation_assessment",
+        "runtime_target",
+        "decision_basis",
+        "situation_summary",
         "solver_budget",
         "expected_effects",
-        "explanation",
+        "audit_note",
     }
 
     if action in {"construct_initial", "run_alns"}:
@@ -447,7 +475,7 @@ def compile_solver_control(
         compiled["review_request"] = dict(decision.get("review_request", {}) or {})
         consumed.add("review_request")
 
-    operational = {key for key in decision if key != "explanation"}
+    operational = {key for key in decision if key != "audit_note"}
     return RuntimeControlManifest(
         manifest_id=manifest_id,
         source_decision_id=decision_id,
@@ -460,7 +488,6 @@ def compile_solver_control(
         validation_report={
             "all_candidate_names_valid": True,
             "all_operational_fields_consumed": operational.issubset(consumed),
-            "explanation_ignored_by_runtime": "explanation" not in compiled,
             "intent_resolved": bool(
                 not intent_id or intent.get("intent_id") == intent_id
             ),
@@ -560,6 +587,29 @@ def solver_request_from_manifest(
         time_limit_sec=max(1e-6, float(resource.get("max_time_sec", 1e-6) or 1e-6)),
         max_iters=max(1, int(resource.get("max_iters", 1) or 1)),
     )
+
+
+def runtime_target_from_manifest(
+    manifest: RuntimeControlManifest | Dict[str, Any],
+) -> Dict[str, Any]:
+    raw = manifest.as_dict() if isinstance(manifest, RuntimeControlManifest) else dict(manifest)
+    return dict((raw.get("compiled", {}) or {}).get("target", {}) or {})
+
+
+def _compile_runtime_target(
+    raw_target: Dict[str, Any],
+    *,
+    intent_id: str,
+    intent: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "intent_id": str(intent_id),
+        "intent_type": str(intent.get("intent_type", "")),
+        "scope_kind": str(raw_target.get("scope_kind", "global")),
+        "task_ids": _dedupe_ints(raw_target.get("task_ids", []) or []),
+        "agent_ids": _dedupe_ints(raw_target.get("agent_ids", []) or []),
+        "focus_metrics": _dedupe_strings(raw_target.get("focus_metrics", []) or []),
+    }
 
 
 def _compile_insertion_manifest(
@@ -790,6 +840,35 @@ def _names_from_space(
     )
 
 
+def _dedupe_ints(values: Sequence[Any]) -> List[int]:
+    out: List[int] = []
+    seen: set[int] = set()
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        try:
+            item = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _dedupe_strings(values: Sequence[Any]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
 def _quantile(values: List[float], q: float) -> float:
     if not values:
         return 0.0
@@ -858,4 +937,5 @@ __all__ = [
     "compile_contract",
     "derive_solver_request",
     "solver_request_from_manifest",
+    "runtime_target_from_manifest",
 ]

@@ -92,12 +92,20 @@ class RunMemory:
             "verification_id": verification_id,
             "intent_id": intent_id,
             "intent_type": intent_type,
-            "situation_assessment": dict(
-                decision_root.get("situation_assessment", {}) or {}
-            ),
+            "decision_basis": [dict(item) for item in decision_root.get("decision_basis", []) or []],
+            "situation_summary": dict(decision_root.get("situation_summary", {}) or {}),
+            "expected_effects": [dict(item) for item in decision_root.get("expected_effects", []) or []],
             "action": manifest_dict.get("action", verification.get("action", "")),
             "control_fingerprint": _control_fingerprint(manifest_dict),
             "outcome_fingerprint": _outcome_fingerprint(verification),
+            "runtime_target": dict(
+                (manifest_dict.get("compiled", {}) or {}).get("target", {}) or {}
+            ),
+            "target_engagement": dict(trace.get("target_engagement", {}) or {}),
+            "target_agent_engagement": dict(trace.get("target_agent_engagement", {}) or {}),
+            "target_progress": dict(trace.get("target_progress", {}) or {}),
+            "effect_audit": list(verification.get("effect_audit", []) or []),
+            "operator_effectiveness": dict(trace.get("operator_effectiveness", {}) or {}),
             "manifest": manifest_dict,
             "trace": dict(trace),
             "verification": dict(verification),
@@ -242,10 +250,18 @@ def _verified_action_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "verification_id": item.get("verification_id"),
         "intent_id": item.get("intent_id"),
         "intent_type": item.get("intent_type"),
-        "situation_assessment": dict(item.get("situation_assessment", {}) or {}),
+        "decision_basis": [dict(value) for value in item.get("decision_basis", []) or []],
+        "situation_summary": dict(item.get("situation_summary", {}) or {}),
+        "expected_effects": [dict(value) for value in item.get("expected_effects", []) or []],
         "action": item.get("action"),
         "control_fingerprint": dict(item.get("control_fingerprint", {}) or {}),
         "outcome_fingerprint": dict(item.get("outcome_fingerprint", {}) or {}),
+        "runtime_target": dict(item.get("runtime_target", {}) or {}),
+        "target_engagement": dict(item.get("target_engagement", {}) or {}),
+        "target_agent_engagement": dict(item.get("target_agent_engagement", {}) or {}),
+        "target_progress": dict(item.get("target_progress", {}) or {}),
+        "effect_audit": list(item.get("effect_audit", []) or []),
+        "operator_effectiveness": dict(item.get("operator_effectiveness", {}) or {}),
     }
 
 
@@ -284,6 +300,7 @@ def _control_fingerprint(manifest: Dict[str, Any]) -> Dict[str, Any]:
     pos = insertion.get("position_signal_weights", {}) or {}
     acceptance = compiled.get("acceptance", {}) or {}
     return {
+        "runtime_target": dict(compiled.get("target", {}) or {}),
         "destroy_operator_top": _top_nonzero(destroy),
         "destroy_signal_top": _top_nonzero(destroy_signals),
         "insertion_operator_top": _top_nonzero(insertion_operators),
@@ -314,6 +331,7 @@ def _outcome_fingerprint(verification: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "feasibility_result": dict(verification.get("feasibility_result", {}) or {}),
         "improvement_flags": dict(verification.get("improvement_flags", {}) or {}),
+        "target_result": dict(verification.get("target_result", {}) or {}),
     }
 
 
@@ -333,8 +351,16 @@ def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "action": item.get("action"),
         "intent_id": item.get("intent_id"),
         "intent_type": item.get("intent_type"),
-        "situation_assessment": dict(item.get("situation_assessment", {}) or {}),
+        "decision_basis": [dict(value) for value in item.get("decision_basis", []) or []],
+        "situation_summary": dict(item.get("situation_summary", {}) or {}),
+        "expected_effects": [dict(value) for value in item.get("expected_effects", []) or []],
         "compiled_controls": dict(control),
+        "runtime_target": dict(item.get("runtime_target", {}) or {}),
+        "target_engagement": dict(item.get("target_engagement", {}) or {}),
+        "target_agent_engagement": dict(item.get("target_agent_engagement", {}) or {}),
+        "target_progress": dict(item.get("target_progress", {}) or {}),
+        "effect_audit": list(item.get("effect_audit", []) or []),
+        "operator_effectiveness": dict(item.get("operator_effectiveness", {}) or {}),
         "contract_objective_status": outcome.get("contract_objective_status"),
         "dominant_blocker": outcome.get("dominant_blocker"),
         "metric_delta": dict(outcome.get("metric_delta", {}) or {}),
@@ -344,6 +370,7 @@ def _solver_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
             outcome.get("protected_metric_result", {}) or {}
         ),
         "feasibility_result": dict(outcome.get("feasibility_result", {}) or {}),
+        "target_result": dict(outcome.get("target_result", {}) or {}),
     }
 
 
@@ -373,6 +400,9 @@ def _supervisor_memory_item(item: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "dominant_blocker": (item.get("outcome_fingerprint", {}) or {}).get(
             "dominant_blocker"
+        ),
+        "target_result": dict(
+            (item.get("outcome_fingerprint", {}) or {}).get("target_result", {}) or {}
         ),
     }
 
