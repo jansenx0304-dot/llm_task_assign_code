@@ -10,16 +10,14 @@ from typing import Any, Dict, List
 class StepDecision:
     action: str
     intent_id: str
-    decision_basis: List[Dict[str, Any]]
-    situation_summary: Dict[str, Any]
+    decision_evidence: Dict[str, Any]
     raw: Dict[str, Any]
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             "action": self.action,
             "intent_id": self.intent_id,
-            "decision_basis": [dict(item) for item in self.decision_basis],
-            "situation_summary": dict(self.situation_summary),
+            "decision_evidence": dict(self.decision_evidence),
             "raw": dict(self.raw),
         }
 

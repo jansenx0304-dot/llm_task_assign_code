@@ -10,7 +10,6 @@ from sar_alloc.step_agent import RuntimeControl
 
 
 FORBIDDEN = {
-    "expected_effects",
     "effect_audit",
     "dominant_blocker",
     "audit_note",
@@ -77,13 +76,20 @@ def _supervisor_payload(observation):
     limits = observation["action_space"].get("next_stage_resource_limits", {})
     max_actions = max(1, min(1, int(limits.get("max_solver_actions_allowed", 1) or 1)))
     if phase == "supervisor_review" and int(limits.get("max_solver_actions_allowed", 0) or 0) <= 0:
-        return {"supervisor_decision": {"action": "stop_run", "stop_explanation": "No stage budget remains."}}
+        return {
+            "supervisor_decision": {
+                "action": "stop_run",
+                "decision_evidence": _supervisor_evidence(stop=True),
+                "stop_explanation": "No stage budget remains.",
+            }
+        }
     stage_type = "initial_construction" if phase == "supervisor_kickoff" else "alns_search"
     intent_id = "construct_coverage" if stage_type == "initial_construction" else "improve_coverage"
     intent_type = "construction" if stage_type == "initial_construction" else "improvement"
     return {
         "supervisor_decision": {
             "action": "issue_stage",
+            "decision_evidence": _supervisor_evidence(stop=False),
             "global_objective": {"objective_layers": ["missed_priority", "unassigned_count"]},
             "next_stage": {
                 "stage_type": stage_type,
@@ -93,7 +99,6 @@ def _supervisor_payload(observation):
                     {
                         "intent_id": intent_id,
                         "intent_type": intent_type,
-                        "evidence_refs": ["run_context.remaining_global_resources"],
                         "rationale": "bounded stage",
                     }
                 ],
@@ -121,12 +126,8 @@ def _step_payload(observation):
         return {
             "step_decision": {
                 "action": "request_supervisor_review",
-                "review_request": {
-                    "reason": "No executable algorithm action remains.",
-                    "evidence_refs": ["execution_state.hard_executable_actions"],
-                },
-                "decision_basis": [_basis("review")],
-                "situation_summary": {"summary": "review", "basis_ids": ["B1"]},
+                "decision_evidence": _decision_evidence("request_supervisor_review"),
+                "review_request": {"reason": "No executable algorithm action remains."},
             }
         }
 
@@ -147,8 +148,7 @@ def _step_payload(observation):
             "position_signal_scores": [{"name": "insert_cost", "score": 6}],
         },
         "solver_budget": {"max_iters": 1, "max_time_sec": 0.2},
-        "decision_basis": [_basis(action)],
-        "situation_summary": {"summary": action, "basis_ids": ["B1"]},
+        "decision_evidence": _decision_evidence(action),
     }
     if action == "run_alns":
         base["destroy_control"] = {
@@ -160,11 +160,48 @@ def _step_payload(observation):
     return {"step_decision": base}
 
 
-def _basis(claim):
+def _supervisor_evidence(stop: bool):
+    if stop:
+        return {
+            "basis": [
+                {"source": "run_context", "name": "remaining_global_resources"},
+                {"source": "solution_state", "name": "best_feasible_exists"},
+            ],
+            "argument": [{"claim": "The run should stop because no useful stage budget remains.", "uses": [0, 1]}],
+            "control_intent": "Stop the run instead of issuing an infeasible or low-value stage.",
+            "expected_effects": [],
+        }
     return {
-        "basis_id": "B1",
-        "claim": claim,
-        "evidence_refs": ["execution_state.hard_executable_actions"],
+        "basis": [
+            {"source": "run_context", "name": "remaining_global_resources"},
+            {"source": "solution_state", "name": "missed_priority"},
+        ],
+        "argument": [
+            {"claim": "A bounded stage is needed under the remaining budget to reduce priority loss.", "uses": [0, 1]}
+        ],
+        "control_intent": "Issue a bounded stage focused on missed priority.",
+        "expected_effects": [{"metric": "missed_priority", "direction": "decrease"}],
+    }
+
+
+def _decision_evidence(action: str):
+    if action == "request_supervisor_review":
+        return {
+            "basis": [{"source": "execution_state", "name": "hard_executable_actions"}],
+            "argument": [{"claim": "Review is needed because no useful executable solver action remains.", "uses": [0]}],
+            "control_intent": "Request supervisor review.",
+            "expected_effects": [],
+        }
+    return {
+        "basis": [
+            {"source": "execution_state", "name": "hard_executable_actions"},
+            {"source": "solution_evidence", "name": "missed_priority"},
+        ],
+        "argument": [
+            {"claim": "The selected solver action is executable and should reduce priority loss.", "uses": [0, 1]}
+        ],
+        "control_intent": f"Execute {action} to reduce priority loss.",
+        "expected_effects": [{"metric": "missed_priority", "direction": "decrease"}],
     }
 
 

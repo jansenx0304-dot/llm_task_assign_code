@@ -109,6 +109,7 @@ class SupervisorDecision:
     def as_dict(self) -> Dict[str, Any]:
         return {
             "action": self.action,
+            "decision_evidence": dict(self.raw.get("decision_evidence", {}) or {}),
             "global_objective": [dict(item) for item in self.global_objective],
             "next_stage": None if self.next_stage is None else self.next_stage.as_observation(),
             "raw": dict(self.raw),

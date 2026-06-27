@@ -41,6 +41,7 @@ class AgentIOTest(unittest.TestCase):
         payload = {
             "supervisor_decision": {
                 "action": "issue_stage",
+                "decision_evidence": _supervisor_evidence(),
                 "global_objective": {"objective_layers": ["missed_priority"]},
                 "next_stage": _raw_stage(max_actions=2, max_iters=1, max_time=1.0),
             }
@@ -69,6 +70,71 @@ class AgentIOTest(unittest.TestCase):
             )
         self.assertIn("non-visible task id", str(ctx.exception))
 
+    def test_unknown_basis_source_is_rejected(self) -> None:
+        observation = _step_observation()
+        payload = _valid_step_payload()
+        payload["step_decision"]["decision_evidence"]["basis"][0]["source"] = "unknown_source"
+        with self.assertRaises(AgentIOError):
+            parse_validate_compile_step(
+                raw_text=json.dumps(payload),
+                schema=step_schema(observation["action_space"], observation["active_stage"]),
+                observation=observation,
+                active_stage=_stage(),
+                config=Config(),
+            )
+
+    def test_unknown_basis_name_is_rejected(self) -> None:
+        observation = _step_observation()
+        payload = _valid_step_payload()
+        payload["step_decision"]["decision_evidence"]["basis"][0]["name"] = "unknown_name"
+        with self.assertRaisesRegex(AgentIOError, "basis name is not allowed"):
+            parse_validate_compile_step(
+                raw_text=json.dumps(payload),
+                schema=step_schema(observation["action_space"], observation["active_stage"]),
+                observation=observation,
+                active_stage=_stage(),
+                config=Config(),
+            )
+
+    def test_argument_uses_index_out_of_range_is_rejected(self) -> None:
+        observation = _step_observation()
+        payload = _valid_step_payload()
+        payload["step_decision"]["decision_evidence"]["argument"][0]["uses"] = [2]
+        with self.assertRaisesRegex(AgentIOError, "uses index out of range"):
+            parse_validate_compile_step(
+                raw_text=json.dumps(payload),
+                schema=step_schema(observation["action_space"], observation["active_stage"]),
+                observation=observation,
+                active_stage=_stage(),
+                config=Config(),
+            )
+
+    def test_executable_step_requires_expected_effect(self) -> None:
+        observation = _step_observation()
+        payload = _valid_step_payload()
+        payload["step_decision"]["decision_evidence"]["expected_effects"] = []
+        with self.assertRaisesRegex(AgentIOError, "at least one expected_effect"):
+            parse_validate_compile_step(
+                raw_text=json.dumps(payload),
+                schema=step_schema(observation["action_space"], observation["active_stage"]),
+                observation=observation,
+                active_stage=_stage(),
+                config=Config(),
+            )
+
+    def test_review_request_allows_empty_expected_effects(self) -> None:
+        observation = _step_observation(actions=["request_supervisor_review"])
+        payload = _valid_review_payload()
+        decision, control = parse_validate_compile_step(
+            raw_text=json.dumps(payload),
+            schema=step_schema(observation["action_space"], observation["active_stage"]),
+            observation=observation,
+            active_stage=_stage(),
+            config=Config(),
+        )
+        self.assertEqual(decision.action, "request_supervisor_review")
+        self.assertEqual(control.action, "request_supervisor_review")
+
 
 def _stage() -> StagePlan:
     return StagePlan(
@@ -82,14 +148,15 @@ def _stage() -> StagePlan:
     )
 
 
-def _step_observation():
+def _step_observation(actions=None):
+    actions = ["construct_initial"] if actions is None else list(actions)
     action_space = build_action_space()
-    action_space["hard_executable_actions"] = ["construct_initial"]
+    action_space["hard_executable_actions"] = actions
     stage = _stage().as_observation()
     return {
         "run_context": {"observation_id": "O1"},
         "execution_state": {
-            "hard_executable_actions": ["construct_initial"],
+            "hard_executable_actions": actions,
             "remaining_stage_resources": {"actions": 1, "time_sec": 1.0, "iters": 1},
         },
         "active_stage": stage,
@@ -102,14 +169,7 @@ def _valid_step_payload():
     return {
         "step_decision": {
             "action": "construct_initial",
-            "decision_basis": [
-                {
-                    "basis_id": "B1",
-                    "claim": "construct",
-                    "evidence_refs": ["targetable_evidence.visible_task_ids"],
-                }
-            ],
-            "situation_summary": {"summary": "construct", "basis_ids": ["B1"]},
+            "decision_evidence": _step_evidence(),
             "intent_id": "construct_coverage",
             "runtime_target": {
                 "scope_kind": "task_scope",
@@ -127,6 +187,49 @@ def _valid_step_payload():
     }
 
 
+def _valid_review_payload():
+    return {
+        "step_decision": {
+            "action": "request_supervisor_review",
+            "decision_evidence": {
+                "basis": [{"source": "execution_state", "name": "hard_executable_actions"}],
+                "argument": [{"claim": "Review is needed because no useful solver action remains.", "uses": [0]}],
+                "control_intent": "Request supervisor review.",
+                "expected_effects": [],
+            },
+            "review_request": {"reason": "No useful executable algorithm action remains."},
+        }
+    }
+
+
+def _step_evidence():
+    return {
+        "basis": [
+            {"source": "execution_state", "name": "hard_executable_actions"},
+            {"source": "targetable_evidence", "name": "visible_task_ids"},
+        ],
+        "argument": [
+            {"claim": "construct_initial is executable and targetable tasks are visible.", "uses": [0, 1]}
+        ],
+        "control_intent": "Construct an initial solution using visible targetable tasks.",
+        "expected_effects": [{"metric": "missed_priority", "direction": "decrease"}],
+    }
+
+
+def _supervisor_evidence():
+    return {
+        "basis": [
+            {"source": "run_context", "name": "remaining_global_resources"},
+            {"source": "solution_state", "name": "missed_priority"},
+        ],
+        "argument": [
+            {"claim": "A bounded initial construction stage is needed under the remaining budget.", "uses": [0, 1]}
+        ],
+        "control_intent": "Issue a small initial construction stage.",
+        "expected_effects": [{"metric": "missed_priority", "direction": "decrease"}],
+    }
+
+
 def _raw_stage(max_actions: int, max_iters: int, max_time: float):
     return {
         "stage_type": "initial_construction",
@@ -136,7 +239,6 @@ def _raw_stage(max_actions: int, max_iters: int, max_time: float):
             {
                 "intent_id": "construct_coverage",
                 "intent_type": "construction",
-                "evidence_refs": ["run_context.remaining_global_resources"],
                 "rationale": "construct",
             }
         ],

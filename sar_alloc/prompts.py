@@ -9,7 +9,8 @@ from typing import Any, Dict
 def system_prompt() -> str:
     return (
         "You control a task-assignment optimizer. Return exactly one JSON object "
-        "that matches the provided schema. Use only the observation as evidence. "
+        "that matches the provided schema. Use only the user_goal and observation "
+        "as decision context. "
         "Do not add markdown or fields outside the schema."
     )
 
@@ -26,7 +27,9 @@ def supervisor_prompt(
         instruction=(
             f"Phase is {phase}. Set or revise the global objective, issue the next "
             "stage, or stop the run. Supervisor does not choose runtime operators. "
-            "decision_basis evidence_refs must be dot-paths present in the observation."
+            "Use decision_evidence.basis to cite observation inputs as {source, name}; "
+            "use decision_evidence.argument to connect those basis items into short public claims; "
+            "do not write dot-path evidence or copy observation numeric values."
         ),
         context={"user_goal": user_goal, "observation": observation},
         schema=schema,
@@ -45,8 +48,10 @@ def step_prompt(
             "Choose one hard-executable action from execution_state. If executing, "
             "choose an intent_id from active_stage, runtime_target ids only from "
             "targetable_evidence, and controls only from control_catalog. Operator "
-            "scores are preference weights, not hard filters. decision_basis "
-            "evidence_refs must be dot-paths present in the observation."
+            "scores are preference weights, not hard filters. Use decision_evidence.basis "
+            "to cite observation inputs as {source, name}; use decision_evidence.argument "
+            "to connect those basis items into short public claims; do not write dot-path evidence "
+            "or copy observation numeric values."
         ),
         context={"user_goal": user_goal, "observation": observation},
         schema=schema,

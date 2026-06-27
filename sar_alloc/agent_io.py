@@ -11,7 +11,7 @@ from jsonschema import validate as jsonschema_validate
 
 from .config import Config
 from .operators import AcceptancePolicy, DestroyPolicy, InsertionPolicy
-from .schemas import CONSTRAINT_METRICS, QUALITY_METRICS
+from .schemas import CONSTRAINT_METRICS, QUALITY_METRICS, STEP_BASIS_NAMES, SUPERVISOR_BASIS_NAMES
 from .step_agent import RuntimeControl, StepDecision
 from .supervisor import StagePlan, SupervisorDecision
 
@@ -39,7 +39,12 @@ def parse_validate_compile_supervisor(
         payload = extract_json(raw_text)
         _validate_schema(payload, schema)
         root = dict(payload["supervisor_decision"])
-        _validate_evidence_refs(root, observation)
+        _validate_decision_evidence(
+            root,
+            observation,
+            SUPERVISOR_BASIS_NAMES,
+            require_expected_effect=(str(root.get("action")) == "issue_stage"),
+        )
         _validate_supervisor_domain(root, observation)
         return _compile_supervisor_decision(
             root,
@@ -67,13 +72,17 @@ def parse_validate_compile_step(
         payload = extract_json(raw_text)
         _validate_schema(payload, schema)
         root = dict(payload["step_decision"])
-        _validate_evidence_refs(root, observation)
+        _validate_decision_evidence(
+            root,
+            observation,
+            STEP_BASIS_NAMES,
+            require_expected_effect=(str(root.get("action")) != "request_supervisor_review"),
+        )
         _validate_step_domain(root, observation, active_stage)
         decision = StepDecision(
             action=str(root["action"]),
             intent_id=str(root.get("intent_id", "")),
-            decision_basis=[dict(item) for item in root.get("decision_basis", []) or []],
-            situation_summary=dict(root.get("situation_summary", {}) or {}),
+            decision_evidence=dict(root.get("decision_evidence", {}) or {}),
             raw=root,
         )
         control = _compile_step_control(root, active_stage, observation["action_space"])
@@ -263,29 +272,54 @@ def _validate_supervisor_domain(root: Mapping[str, Any], observation: Mapping[st
         raise AgentIOError("next stage max_time_sec exceeds remaining global resources")
 
 
-def _validate_evidence_refs(root: Mapping[str, Any], observation: Mapping[str, Any]) -> None:
-    refs: List[str] = []
-    for item in root.get("decision_basis", []) or []:
-        if isinstance(item, Mapping):
-            refs.extend(str(ref) for ref in item.get("evidence_refs", []) or [])
-    for item in ((root.get("next_stage", {}) or {}).get("target_intents", []) or []):
-        if isinstance(item, Mapping):
-            refs.extend(str(ref) for ref in item.get("evidence_refs", []) or [])
-    review = root.get("review_request", {}) if isinstance(root.get("review_request"), Mapping) else {}
-    refs.extend(str(ref) for ref in review.get("evidence_refs", []) or [])
-    missing = [ref for ref in refs if not _dot_path_exists(observation, ref)]
-    if missing:
-        raise AgentIOError(f"evidence_refs not present in observation: {missing}")
+def _validate_decision_evidence(
+    root: Mapping[str, Any],
+    observation: Mapping[str, Any],
+    allowed_basis: Mapping[str, Iterable[str]],
+    *,
+    require_expected_effect: bool,
+) -> None:
+    evidence = root.get("decision_evidence", {})
+    if not isinstance(evidence, Mapping):
+        raise AgentIOError("decision_evidence must be an object")
 
+    basis = list(evidence.get("basis", []) or [])
+    if not basis:
+        raise AgentIOError("decision_evidence.basis must not be empty")
+    allowed_by_source = {str(source): {str(name) for name in names} for source, names in allowed_basis.items()}
+    for index, item in enumerate(basis):
+        if not isinstance(item, Mapping):
+            raise AgentIOError(f"decision_evidence.basis[{index}] must be an object")
+        source = str(item.get("source", ""))
+        name = str(item.get("name", ""))
+        if source not in allowed_by_source:
+            raise AgentIOError(f"decision_evidence basis source is not allowed: {source}")
+        if source not in observation:
+            raise AgentIOError(f"decision_evidence basis source is not present in observation: {source}")
+        if name not in allowed_by_source[source]:
+            raise AgentIOError(f"decision_evidence basis name is not allowed for {source}: {name}")
 
-def _dot_path_exists(root: Mapping[str, Any], path: str) -> bool:
-    node: Any = root
-    for part in str(path).split("."):
-        if isinstance(node, Mapping) and part in node:
-            node = node[part]
-            continue
-        return False
-    return True
+    argument = list(evidence.get("argument", []) or [])
+    if not argument:
+        raise AgentIOError("decision_evidence.argument must not be empty")
+    for arg_index, item in enumerate(argument):
+        if not isinstance(item, Mapping):
+            raise AgentIOError(f"decision_evidence.argument[{arg_index}] must be an object")
+        uses = list(item.get("uses", []) or [])
+        if not uses:
+            raise AgentIOError(f"decision_evidence.argument[{arg_index}].uses must not be empty")
+        for raw_index in uses:
+            idx = int(raw_index)
+            if idx < 0 or idx >= len(basis):
+                raise AgentIOError(f"decision_evidence.argument[{arg_index}].uses index out of range: {idx}")
+
+    effects = list(evidence.get("expected_effects", []) or [])
+    if require_expected_effect and not effects:
+        raise AgentIOError("executable decision must include at least one expected_effect")
+    for item in effects:
+        metric = str(item.get("metric", "")) if isinstance(item, Mapping) else ""
+        if metric not in QUALITY_METRICS:
+            raise AgentIOError(f"unknown expected_effect metric: {metric}")
 
 
 def _compile_insertion(control: Mapping[str, Any], action_space: Mapping[str, Any]) -> InsertionPolicy:

@@ -33,6 +33,145 @@ CONSTRAINT_METRICS = (
 STAGE_TYPES = ("initial_construction", "alns_search", "recovery", "final_refinement")
 FEASIBILITY_MODES = ("strict", "relaxed_recoverable", "recovery_only")
 RELAXABLE_VIOLATION_TYPES = ("time_window", "energy")
+STEP_BASIS_NAMES = {
+    "run_context": (
+        "observation_id",
+        "phase",
+        "instance",
+        "step_index",
+        "stage_id",
+    ),
+    "active_stage": (
+        "stage_id",
+        "stage_type",
+        "objective_layers",
+        "target_intents",
+        "feasibility_policy",
+        "protected_metrics",
+        "protected_metric_baseline",
+        "resource_policy",
+        "progress",
+        "remaining",
+    ),
+    "execution_state": (
+        "hard_executable_actions",
+        "hard_inexecutable_actions",
+        "working_solution_exists",
+        "remaining_stage_resources",
+        "remaining_global_resources",
+    ),
+    "solution_evidence": (
+        "working_is_feasible",
+        "best_feasible_exists",
+        "missed_priority",
+        "unassigned_count",
+        "energy_total",
+        "total_distance",
+        "makespan",
+        "route_balance",
+        "feasibility_summary",
+    ),
+    "destroy_facts": (
+        "removable_task_count",
+        "non_empty_route_count",
+        "route_len_distribution",
+        "route_cost_distribution",
+        "operator_candidate_counts",
+    ),
+    "insertion_facts": (
+        "unassigned_task_count",
+        "unassigned_task_ids",
+        "candidate_position_count_distribution",
+        "feasible_position_count_distribution",
+        "unassigned_task_facts",
+        "hard_failure_counts",
+        "truncation",
+    ),
+    "targetable_evidence": (
+        "visible_task_ids",
+        "visible_agent_ids",
+        "target_catalog",
+    ),
+    "control_catalog": (
+        "insertion_operators",
+        "insertion_task_signals",
+        "insertion_position_signals",
+        "destroy_operators",
+        "destroy_signals",
+        "acceptance_modes",
+    ),
+    "recent_records": (
+        "recent_actions",
+        "recent_quality_delta",
+        "recent_acceptance",
+    ),
+    "runtime_feedback": (
+        "last_result",
+        "last_action",
+        "last_quality_delta",
+        "last_accepted",
+        "last_protected_passed",
+        "last_trace_counts",
+    ),
+}
+SUPERVISOR_BASIS_NAMES = {
+    "run_context": (
+        "observation_id",
+        "phase",
+        "instance",
+        "remaining_global_resources",
+    ),
+    "problem_profile": (
+        "num_tasks",
+        "num_agents",
+        "priority_mass",
+        "high_priority_task_count",
+        "zero_capable_task_count",
+        "static_capability_scarce_task_count",
+        "time_window_negative_slack_frac_lb",
+        "static_capable_count_distribution",
+        "spatial",
+    ),
+    "solution_state": (
+        "working_is_feasible",
+        "best_feasible_exists",
+        "missed_priority",
+        "unassigned_count",
+        "energy_total",
+        "total_distance",
+        "makespan",
+        "route_balance",
+        "feasibility_summary",
+    ),
+    "recent_records": (
+        "recent_actions",
+        "recent_quality",
+        "recent_completion",
+    ),
+    "action_space": (
+        "next_stage_resource_limits",
+        "stage_types",
+        "objective_metrics",
+        "feasibility_modes",
+        "relaxable_violation_types",
+    ),
+    "completed_stage": (
+        "stage_id",
+        "stage_type",
+        "objective_layers",
+        "target_intents",
+        "feasibility_policy",
+        "protected_metrics",
+        "resource_policy",
+        "progress",
+        "remaining",
+    ),
+    "completed_result": (
+        "completed",
+        "status",
+        "reason",
+    ),
+}
 
 
 def build_action_space(instance: Any | None = None, config: Any | None = None) -> Dict[str, Any]:
@@ -74,19 +213,21 @@ def supervisor_schema(phase: str, action_space: Mapping[str, Any]) -> Dict[str, 
         "type": "object",
         "properties": {
             "action": {"type": "string", "const": "issue_stage"},
+            "decision_evidence": _decision_evidence_schema(SUPERVISOR_BASIS_NAMES, metrics),
             "global_objective": _global_objective_schema(metrics),
             "next_stage": stage,
         },
-        "required": ["action", "global_objective", "next_stage"],
+        "required": ["action", "decision_evidence", "global_objective", "next_stage"],
         "additionalProperties": False,
     }
     stop = {
         "type": "object",
         "properties": {
             "action": {"type": "string", "const": "stop_run"},
+            "decision_evidence": _decision_evidence_schema(SUPERVISOR_BASIS_NAMES, metrics),
             "stop_explanation": {"type": "string"},
         },
-        "required": ["action", "stop_explanation"],
+        "required": ["action", "decision_evidence", "stop_explanation"],
         "additionalProperties": False,
     }
     branches = [issue] if phase == "kickoff" else [issue, stop]
@@ -209,10 +350,9 @@ def _stage_schema(
                             "type": "string",
                             "enum": ["construction", "recovery", "improvement", "diversification", "review"],
                         },
-                        "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                         "rationale": {"type": "string"},
                     },
-                    "required": ["intent_id", "intent_type", "evidence_refs", "rationale"],
+                    "required": ["intent_id", "intent_type", "rationale"],
                     "additionalProperties": False,
                 },
             },
@@ -269,6 +409,7 @@ def _step_action_schema(
 ) -> Dict[str, Any]:
     properties: Dict[str, Any] = {
         "action": {"type": "string", "const": action},
+        "decision_evidence": _decision_evidence_schema(STEP_BASIS_NAMES, QUALITY_METRICS),
         "intent_id": {"type": "string", "enum": list(intent_ids)},
         "runtime_target": _runtime_target_schema(),
         "solver_budget": {
@@ -280,8 +421,6 @@ def _step_action_schema(
             "required": ["max_iters", "max_time_sec"],
             "additionalProperties": False,
         },
-        "decision_basis": _decision_basis_schema(),
-        "situation_summary": _situation_summary_schema(),
     }
     required = list(properties)
     if insertion:
@@ -306,19 +445,17 @@ def _review_request_schema() -> Dict[str, Any]:
         "type": "object",
         "properties": {
             "action": {"type": "string", "const": "request_supervisor_review"},
+            "decision_evidence": _decision_evidence_schema(STEP_BASIS_NAMES, QUALITY_METRICS),
             "review_request": {
                 "type": "object",
                 "properties": {
-                    "reason": {"type": "string"},
-                    "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                    "reason": {"type": "string", "minLength": 1, "maxLength": 240},
                 },
-                "required": ["reason", "evidence_refs"],
+                "required": ["reason"],
                 "additionalProperties": False,
             },
-            "decision_basis": _decision_basis_schema(),
-            "situation_summary": _situation_summary_schema(),
         },
-        "required": ["action", "review_request", "decision_basis", "situation_summary"],
+        "required": ["action", "decision_evidence", "review_request"],
         "additionalProperties": False,
     }
 
@@ -392,32 +529,60 @@ def _score_array(names: Iterable[str]) -> Dict[str, Any]:
     }
 
 
-def _decision_basis_schema() -> Dict[str, Any]:
-    return {
-        "type": "array",
-        "minItems": 1,
-        "maxItems": 4,
-        "items": {
-            "type": "object",
-            "properties": {
-                "basis_id": {"type": "string"},
-                "claim": {"type": "string"},
-                "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "string"}},
-            },
-            "required": ["basis_id", "claim", "evidence_refs"],
-            "additionalProperties": False,
-        },
-    }
-
-
-def _situation_summary_schema() -> Dict[str, Any]:
+def _decision_evidence_schema(basis_names: Mapping[str, Iterable[str]], metrics: Iterable[str]) -> Dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "summary": {"type": "string"},
-            "basis_ids": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
+            "basis": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 6,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string", "enum": list(basis_names)},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["source", "name"],
+                    "additionalProperties": False,
+                },
+            },
+            "argument": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "claim": {"type": "string", "minLength": 1, "maxLength": 220},
+                        "uses": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 3,
+                            "items": {"type": "integer", "minimum": 0},
+                        },
+                    },
+                    "required": ["claim", "uses"],
+                    "additionalProperties": False,
+                },
+            },
+            "control_intent": {"type": "string", "minLength": 1, "maxLength": 280},
+            "expected_effects": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string", "enum": list(metrics)},
+                        "direction": {"type": "string", "enum": ["decrease", "increase", "maintain"]},
+                    },
+                    "required": ["metric", "direction"],
+                    "additionalProperties": False,
+                },
+            },
         },
-        "required": ["summary", "basis_ids"],
+        "required": ["basis", "argument", "control_intent", "expected_effects"],
         "additionalProperties": False,
     }
 
@@ -456,6 +621,8 @@ def _no_stage_budget(limits: Mapping[str, Any]) -> bool:
 __all__ = [
     "QUALITY_METRICS",
     "CONSTRAINT_METRICS",
+    "STEP_BASIS_NAMES",
+    "SUPERVISOR_BASIS_NAMES",
     "build_action_space",
     "schema_text",
     "supervisor_schema",

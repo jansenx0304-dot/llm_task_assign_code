@@ -273,15 +273,16 @@ def _control_catalog(action_space: Mapping[str, Any]) -> Dict[str, Any]:
 def _last_result_feedback(result: Any | None) -> Dict[str, Any]:
     if result is None:
         return {"exists": False}
-    trace = getattr(result, "trace", {}) or {}
-    flow = trace.get("trial_flow", {}) if isinstance(trace, Mapping) else {}
+    data = dict(result or {}) if isinstance(result, Mapping) else {}
+    trace = dict(data.get("trace", {}) or {})
+    flow = dict(trace.get("trial_flow", {}) or {})
     return {
         "exists": True,
-        "last_action": getattr(result, "action", ""),
-        "quality_delta": dict(getattr(result, "quality_delta", {}) or {}),
-        "before_feasible": bool(getattr(result, "before_feasible", False)),
-        "after_feasible": bool(getattr(result, "after_feasible", False)),
-        "protected_passed": bool(getattr(result, "protected_passed", False)),
+        "last_action": str(data.get("action", "")),
+        "quality_delta": dict(data.get("quality_delta", {}) or {}),
+        "before_feasible": bool(data.get("before_feasible", False)),
+        "after_feasible": bool(data.get("after_feasible", False)),
+        "protected_passed": bool(data.get("protected_passed", False)),
         "trace_counts": {
             "candidate_trials": int(flow.get("candidate_trials", 0) or 0),
             "accepted": int(flow.get("accepted_trials", 0) or 0),

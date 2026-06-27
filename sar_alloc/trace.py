@@ -7,7 +7,7 @@ import sys
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 
 @dataclass(slots=True)
@@ -15,6 +15,7 @@ class StepRecord:
     step_id: str
     phase: str
     observation_id: str | None
+    observation: Dict[str, Any] | None = None
     stage_id: str | None = None
     raw_output: str | None = None
     parsed: Dict[str, Any] | None = None
@@ -29,6 +30,7 @@ class StepRecord:
             "step_id": self.step_id,
             "phase": self.phase,
             "observation_id": self.observation_id,
+            "observation": dict(self.observation or {}),
             "stage_id": self.stage_id,
             "raw_output": self.raw_output,
             "parsed": dict(self.parsed or {}),
@@ -133,6 +135,7 @@ class TraceWriter:
             self._md.write(f"- completion: `{record.completion.get('status')}` `{record.completion.get('reason')}`\n")
         if record.error:
             self._md.write(f"- error: `{record.error}`\n")
+        self._write_decision_evidence(record)
         self._md.write("\n```json\n")
         self._md.write(json.dumps(data, ensure_ascii=False, indent=2, default=str))
         self._md.write("\n```\n")
@@ -165,6 +168,92 @@ class TraceWriter:
     def _write_jsonl(self, record: Dict[str, Any]) -> None:
         self._jsonl.write(json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")) + "\n")
         self._jsonl.flush()
+
+    def _write_decision_evidence(self, record: StepRecord) -> None:
+        evidence = _decision_evidence_from_record(record)
+        if not evidence:
+            return
+        self._md.write("\n### Decision Evidence\n\n")
+        basis = [dict(item) for item in evidence.get("basis", []) or [] if isinstance(item, dict)]
+        if basis:
+            self._md.write("Basis:\n")
+            for index, item in enumerate(basis):
+                value = _resolve_basis_value(record.observation or {}, str(item.get("source", "")), str(item.get("name", "")))
+                suffix = "" if value is None else f" = `{_compact_json(value)}`"
+                self._md.write(f"- [{index}] {item.get('source', '')}.{item.get('name', '')}{suffix}\n")
+            self._md.write("\n")
+        argument = [dict(item) for item in evidence.get("argument", []) or [] if isinstance(item, dict)]
+        if argument:
+            self._md.write("Argument:\n")
+            for item in argument:
+                self._md.write(f"- uses {item.get('uses', [])}: {item.get('claim', '')}\n")
+            self._md.write("\n")
+        intent = str(evidence.get("control_intent", "") or "")
+        if intent:
+            self._md.write("Control intent:\n")
+            self._md.write(f"> {intent}\n\n")
+        effects = [dict(item) for item in evidence.get("expected_effects", []) or [] if isinstance(item, dict)]
+        self._md.write("Expected effects:\n")
+        if effects:
+            for item in effects:
+                self._md.write(f"- {item.get('metric', '')}: {item.get('direction', '')}\n")
+        else:
+            self._md.write("- none\n")
+        if record.result:
+            self._md.write(f"\nActual quality_delta:\n- `{record.result.get('quality_delta', {})}`\n")
+        self._md.write("\n")
+
+
+def _decision_evidence_from_record(record: StepRecord) -> Dict[str, Any]:
+    decision = dict(record.decision or {})
+    if "decision_evidence" in decision:
+        return dict(decision.get("decision_evidence") or {})
+    parsed = dict(record.parsed or {})
+    if "decision_evidence" in parsed:
+        return dict(parsed.get("decision_evidence") or {})
+    return {}
+
+
+def _resolve_basis_value(observation: Mapping[str, Any], source: str, name: str) -> Any:
+    block = observation.get(source)
+    if isinstance(block, Mapping) and name in block:
+        return block.get(name)
+    if source in {"solution_evidence", "solution_state"} and isinstance(block, Mapping):
+        working = dict(block.get("working", {}) or {})
+        best = dict(block.get("best_feasible", {}) or {})
+        quality = dict(working.get("quality", {}) or {})
+        if name in quality:
+            return quality.get(name)
+        if name == "working_is_feasible":
+            return working.get("is_feasible")
+        if name == "best_feasible_exists":
+            return best.get("exists")
+        if name == "feasibility_summary":
+            return working.get("feasibility")
+    if source == "runtime_feedback" and isinstance(block, Mapping):
+        last = dict(block.get("last_result", {}) or {})
+        aliases = {
+            "last_action": "last_action",
+            "last_quality_delta": "quality_delta",
+            "last_accepted": "accepted",
+            "last_protected_passed": "protected_passed",
+            "last_trace_counts": "trace_counts",
+        }
+        return last.get(aliases.get(name, name))
+    if source == "recent_records" and isinstance(block, list):
+        if name == "recent_actions":
+            return [dict(item).get("action") for item in block if isinstance(item, Mapping)]
+        if name in {"recent_quality", "recent_quality_delta"}:
+            return [dict(item).get("quality_delta", dict(item).get("quality")) for item in block if isinstance(item, Mapping)]
+        if name in {"recent_acceptance", "recent_completion"}:
+            key = "accepted" if name == "recent_acceptance" else "completion"
+            return [dict(item).get(key) for item in block if isinstance(item, Mapping)]
+    return None
+
+
+def _compact_json(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+    return text if len(text) <= 180 else text[:177] + "..."
 
 
 def _print_console(record: StepRecord) -> None:
