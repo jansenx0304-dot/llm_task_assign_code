@@ -40,8 +40,8 @@ class SolverConfig:
     """Placeholder for non-strategy solver settings.
 
     Weighted ALNS operator weights, metric weights, acceptance, and budget
-    requests are intentionally absent. They must come from the LLM action plan
-    or from the explicitly labeled demo policy in dummy/fallback mode.
+    requests are intentionally absent. They must come from the validated LLM
+    step action.
     """
 
 

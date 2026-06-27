@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import random
@@ -763,7 +763,7 @@ def run_insertion_kernel(
             if _stats_has_context_candidate(stats, context, out)
         ]
         if target_set and any(int(tid) in pending for tid in target_set) and not target_available:
-            diagnostics["target_insertion_fallback_count"] += 1
+            diagnostics["target_insertion_alternate_count"] += 1
         target_agent_position_count = _target_agent_position_count(
             stats_by_tid, context
         )
@@ -771,8 +771,8 @@ def run_insertion_kernel(
             "candidate_positions_on_target_agents"
         ] += target_agent_position_count
         if target_agents and target_agent_position_count <= 0:
-            diagnostics["target_agent_engagement"]["fallback_count"] += 1
-            diagnostics["target_agent_engagement"]["fallback_reasons"][
+            diagnostics["target_agent_engagement"]["alternate_count"] += 1
+            diagnostics["target_agent_engagement"]["alternate_reasons"][
                 "no_feasible_position_on_target_agent"
             ] += 1
         operator_name = _weighted_choice(insertion_policy.operator_weights, rng)
@@ -1007,14 +1007,14 @@ def _new_insertion_diagnostics(
         "target_tasks_attempted": [],
         "target_tasks_inserted": [],
         "target_tasks_failed": [],
-        "target_insertion_fallback_count": 0,
+        "target_insertion_alternate_count": 0,
         "target_agent_engagement": {
             "target_agent_ids": [int(aid) for aid in context.target_agent_ids],
             "candidate_positions_on_target_agents": 0,
             "attempts_on_target_agents": 0,
             "insertions_on_target_agents": 0,
-            "fallback_count": 0,
-            "fallback_reasons": {
+            "alternate_count": 0,
+            "alternate_reasons": {
                 "no_feasible_position_on_target_agent": 0,
             },
         },
@@ -1424,3 +1424,4 @@ __all__ = [
     "run_insertion_kernel",
     "score_insert_positions",
 ]
+

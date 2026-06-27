@@ -1,13 +1,27 @@
-"""JSON-schema dictionaries for the executable LLM surface."""
+"""LLM output schemas and public action-space enumerations."""
 
 from __future__ import annotations
 
 import json
-from copy import deepcopy
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping
 
-from .control_surface import QUALITY_METRICS
+from .operators.types import (
+    ACCEPTANCE_MODES,
+    DESTROY_OPERATOR_NAMES,
+    DESTROY_SIGNAL_NAMES,
+    INSERTION_OPERATOR_NAMES,
+    INSERTION_POSITION_SIGNAL_NAMES,
+    INSERTION_TASK_SIGNAL_NAMES,
+)
 
+QUALITY_METRICS = (
+    "missed_priority",
+    "unassigned_count",
+    "energy_total",
+    "total_distance",
+    "makespan",
+    "route_balance",
+)
 CONSTRAINT_METRICS = (
     "violation_total",
     "violation_capability",
@@ -16,905 +30,434 @@ CONSTRAINT_METRICS = (
     "recoverable_violation_total",
     "unrecoverable_violation_total",
 )
-CONTRACT_TYPES = (
-    "initial_construction",
-    "alns_search",
-    "recovery",
-    "final_refinement",
-)
-FEASIBILITY_MODES = (
-    "strict",
-    "relaxed_recoverable",
-    "recovery_only",
-)
-RELAXABLE_VIOLATION_TYPES = (
-    "time_window",
-    "energy",
-)
-SUPPORTED_CONDITION_SOURCES = (
-    "progress.solver_actions",
-    "progress.iters_used",
-    "progress.time_used_sec",
-    "last.contract_objective_status",
-    "last.dominant_blocker",
-    "last.improvement_flags.run_global_best_improved",
-    "aggregate.achieved",
-    "aggregate.partial",
-    "aggregate.not_achieved",
-    "aggregate.regressed",
-    "aggregate.solver_requested_review",
-    "working.is_feasible",
-    "working.missed_priority",
-    "working.unassigned_count",
-    "working.energy_total",
-    "working.total_distance",
-    "working.makespan",
-    "working.route_balance",
-    "best_feasible.exists",
-    "best_feasible.missed_priority",
-    "best_feasible.unassigned_count",
-    "best_feasible.energy_total",
-    "best_feasible.total_distance",
-    "best_feasible.makespan",
-    "best_feasible.route_balance",
-)
+STAGE_TYPES = ("initial_construction", "alns_search", "recovery", "final_refinement")
+FEASIBILITY_MODES = ("strict", "relaxed_recoverable", "recovery_only")
+RELAXABLE_VIOLATION_TYPES = ("time_window", "energy")
 
 
-def _string(description: str) -> Dict[str, Any]:
-    return {"type": "string", "description": description}
-
-
-AUDIT_NOTE_SCHEMA: Dict[str, Any] = {
-    "type": "string",
-    "description": "Optional non-executable note retained only for audit.",
-}
-
-DECISION_BASIS_SCHEMA: Dict[str, Any] = {
-    "type": "array",
-    "minItems": 1,
-    "maxItems": 4,
-    "items": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["basis_id", "claim", "evidence_refs"],
-        "properties": {
-            "basis_id": {
-                "type": "string",
-                "description": "Stable local id, e.g. B1.",
-            },
-            "claim": {
-                "type": "string",
-                "description": "Concise LLM interpretation based only on cited observation evidence.",
-            },
-            "evidence_refs": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 5,
-                "items": {
-                    "type": "string",
-                    "description": "Dot-path reference to a field visible in the current observation.",
-                },
-            },
-        },
-    },
-}
-
-SPARSE_SCORE_ITEM_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "A sparse score item.",
-    "properties": {
-        "name": _string("Candidate name from the current action_space."),
-        "score": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "description": "Score from 0 to 10.",
-        },
-    },
-    "required": ["name", "score"],
-    "additionalProperties": False,
-}
-
-
-def _score_array(description: str) -> Dict[str, Any]:
+def build_action_space(instance: Any | None = None, config: Any | None = None) -> Dict[str, Any]:
+    del instance, config
     return {
-        "type": "array",
-        "description": description,
-        "minItems": 0,
-        "maxItems": 3,
-        "items": deepcopy(SPARSE_SCORE_ITEM_SCHEMA),
+        "actions": ["construct_initial", "run_alns", "request_supervisor_review"],
+        "supervisor_actions": ["issue_stage", "stop_run"],
+        "stage_types": list(STAGE_TYPES),
+        "objective_metrics": list(QUALITY_METRICS),
+        "feasibility_modes": list(FEASIBILITY_MODES),
+        "relaxable_violation_types": list(RELAXABLE_VIOLATION_TYPES),
+        "insertion_operators": list(INSERTION_OPERATOR_NAMES),
+        "insertion_task_signals": list(INSERTION_TASK_SIGNAL_NAMES),
+        "insertion_position_signals": list(INSERTION_POSITION_SIGNAL_NAMES),
+        "destroy_operators": list(DESTROY_OPERATOR_NAMES),
+        "destroy_signals": list(DESTROY_SIGNAL_NAMES),
+        "acceptance_modes": list(ACCEPTANCE_MODES),
     }
-
-
-def _enum_string(names: Iterable[str], description: str) -> Dict[str, Any]:
-    """Return a string schema restricted to the supplied candidate names."""
-    return {
-        "type": "string",
-        "enum": list(dict.fromkeys(str(name) for name in names)),
-        "description": description,
-    }
-
-
-def _score_item_schema(names: Iterable[str], description: str) -> Dict[str, Any]:
-    return {
-        "type": "object",
-        "description": description,
-        "properties": {
-            "name": _enum_string(
-                names, "Candidate name allowed for this exact score field."
-            ),
-            "score": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10,
-                "description": "Executable emphasis score from 0 to 10.",
-            },
-        },
-        "required": ["name", "score"],
-        "additionalProperties": False,
-    }
-
-
-def _score_array_for(
-    names: Iterable[str], description: str, max_items: int = 3
-) -> Dict[str, Any]:
-    names = tuple(names)
-    return {
-        "type": "array",
-        "description": description,
-        "minItems": 0,
-        "maxItems": max_items,
-        "items": _score_item_schema(names, description),
-    }
-
-
-INSERTION_CONTROL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Executable insertion controls.",
-    "properties": {
-        "operator_scores": _score_array(
-            "Sparse prior preference scores for insertion operators. These are not hard filters."
-        ),
-        "task_signal_scores": _score_array(
-            "Sparse direct scoring coefficients for choosing the next task."
-        ),
-        "position_signal_scores": _score_array(
-            "Sparse direct scoring coefficients for choosing an insertion position."
-        ),
-    },
-    "required": ["operator_scores", "task_signal_scores", "position_signal_scores"],
-    "additionalProperties": False,
-}
-
-DESTROY_CONTROL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Executable destroy controls.",
-    "properties": {
-        "operator_scores": _score_array(
-            "Sparse prior preference scores for destroy operators. These are not hard filters."
-        ),
-        "signal_scores": _score_array("Sparse direct scoring coefficients for destroy signals."),
-        "intensity_score": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "description": "Removal intensity from 0 to 10.",
-        },
-    },
-    "required": ["operator_scores", "signal_scores", "intensity_score"],
-    "additionalProperties": False,
-}
-
-ACCEPTANCE_CONTROL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Executable acceptance control.",
-    "properties": {
-        "mode": _string("Acceptance mode from action_space.allowed_acceptance_modes."),
-        "intensity_score": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "description": "Acceptance exploration intensity.",
-        },
-    },
-    "required": ["mode", "intensity_score"],
-    "additionalProperties": False,
-}
-
-GLOBAL_OBJECTIVE_SHAPE: Dict[str, Any] = {
-    "type": "object",
-    "description": "Run-level objective used to compare global best solutions.",
-    "properties": {
-        "objective_layers": {
-            "type": "array",
-            "description": "Ordered global quality metrics. Earlier metrics dominate later metrics.",
-            "minItems": 1,
-            "maxItems": 4,
-            "items": {"type": "string", "enum": list(QUALITY_METRICS)},
-        },
-        "audit_note": AUDIT_NOTE_SCHEMA,
-    },
-    "required": ["objective_layers"],
-    "additionalProperties": False,
-}
-
-RELAXATION_RATIO_ITEM_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "One temporary recoverable relaxation allowance.",
-    "properties": {
-        "violation_type": {
-            "type": "string",
-            "enum": list(RELAXABLE_VIOLATION_TYPES),
-            "description": "Relaxable violation type.",
-        },
-        "max_ratio": {
-            "type": "number",
-            "minimum": 0.0,
-            "maximum": 0.30,
-            "description": "Normalized temporary allowance for this violation type.",
-        },
-    },
-    "required": ["violation_type", "max_ratio"],
-    "additionalProperties": False,
-}
-
-FEASIBILITY_CONTROL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Stage-level feasibility handling selected by Supervisor.",
-    "properties": {
-        "mode": {
-            "type": "string",
-            "enum": list(FEASIBILITY_MODES),
-            "description": "Feasibility mode for this contract.",
-        },
-        "relaxation_ratios": {
-            "type": "array",
-            "description": "Temporary recoverable relaxation ratios. Used by relaxed_recoverable.",
-            "maxItems": 2,
-            "items": RELAXATION_RATIO_ITEM_SCHEMA,
-        },
-    },
-    "required": ["mode", "relaxation_ratios"],
-    "additionalProperties": False,
-}
-
-SITUATION_SUMMARY_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "LLM-authored summary linked to decision_basis items.",
-    "properties": {
-        "summary": {"type": "string"},
-        "basis_ids": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 4,
-            "items": {"type": "string"},
-        },
-    },
-    "required": ["summary", "basis_ids"],
-    "additionalProperties": False,
-}
-
-EXPECTED_EFFECT_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "LLM-authored expected metric effect linked to decision_basis.",
-    "properties": {
-        "effect_id": {"type": "string"},
-        "metric": {"type": "string", "enum": list(QUALITY_METRICS)},
-        "direction": {"type": "string", "enum": ["decrease", "increase", "stabilize"]},
-        "scope": {"type": "string", "enum": ["working", "best", "contract"]},
-        "basis_ids": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 4,
-            "items": {"type": "string"},
-        },
-    },
-    "required": ["effect_id", "metric", "direction", "scope", "basis_ids"],
-    "additionalProperties": False,
-}
-
-TARGET_INTENT_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Supervisor-created intent anchor. It does not automatically control the algorithm; Solver controls do.",
-    "properties": {
-        "intent_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z][A-Za-z0-9_\\-]{0,63}$",
-            "description": "Supervisor-defined stable id unique inside the contract.",
-        },
-        "intent_type": {
-            "type": "string",
-            "enum": ["construction", "repair", "improvement", "diversification", "review"],
-        },
-        "evidence_refs": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {"type": "string"},
-        },
-        "expected_effects": {
-            "type": "array",
-            "minItems": 0,
-            "maxItems": 4,
-            "items": EXPECTED_EFFECT_SCHEMA,
-        },
-        "rationale": {"type": "string"},
-    },
-    "required": [
-        "intent_id",
-        "intent_type",
-        "evidence_refs",
-        "expected_effects",
-        "rationale",
-    ],
-    "additionalProperties": False,
-}
-
-RUNTIME_TARGET_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": (
-        "Executable target chosen by Solver for this action. It binds the "
-        "selected intent_id to concrete visible tasks/routes/metrics and is "
-        "consumed by runtime insertion and destroy logic."
-    ),
-    "properties": {
-        "scope_kind": {
-            "type": "string",
-            "enum": ["global", "task_scope", "route_scope", "mixed_scope"],
-            "description": "Target scope for this action.",
-        },
-        "task_ids": {
-            "type": "array",
-            "minItems": 0,
-            "maxItems": 8,
-            "items": {"type": "integer"},
-            "description": "Task ids selected from observation.targetable_evidence.visible_task_ids.",
-        },
-        "agent_ids": {
-            "type": "array",
-            "minItems": 0,
-            "maxItems": 6,
-            "items": {"type": "integer"},
-            "description": "Agent/route ids selected from observation.targetable_evidence.visible_agent_ids.",
-        },
-        "focus_metrics": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 3,
-            "items": {"type": "string", "enum": list(QUALITY_METRICS)},
-            "description": "Metrics used to audit target progress for this action.",
-        },
-    },
-    "required": ["scope_kind", "task_ids", "agent_ids", "focus_metrics"],
-    "additionalProperties": False,
-}
-
-PROTECTED_METRIC_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": (
-        "Hard non-worsening bound for this contract. max_worsen is measured "
-        "relative to contract_start_quality. A violating candidate is ineligible "
-        "for trial acceptance, action-best, returned-working, or best updates."
-    ),
-    "properties": {
-        "metric": {"type": "string", "enum": list(QUALITY_METRICS)},
-        "max_worsen": {"type": "number", "minimum": 0.0},
-    },
-    "required": ["metric", "max_worsen"],
-    "additionalProperties": False,
-}
-
-RESOURCE_POLICY_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Executable resource limits for this contract.",
-    "properties": {
-        "min_actions": {"type": "integer", "minimum": 1, "maximum": 20},
-        "max_actions": {"type": "integer", "minimum": 1},
-        "max_iters": {"type": "integer", "minimum": 1},
-        "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
-    },
-    "required": ["min_actions", "max_actions", "max_iters", "max_time_sec"],
-    "additionalProperties": False,
-}
-
-CONDITION_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Typed condition evaluated by ContractMonitor.",
-    "properties": {
-        "condition_id": _string("Stable id unique inside this contract condition set."),
-        "source": {
-            "type": "string",
-            "enum": list(SUPPORTED_CONDITION_SOURCES),
-            "description": "Executable source path read by ContractMonitor.",
-        },
-        "op": {"type": "string", "enum": ["<", "<=", "==", "!=", ">=", ">"]},
-        "value": {"type": ["number", "string", "boolean"]},
-        "window": {"type": "integer", "minimum": 1, "maximum": 20},
-    },
-    "required": ["condition_id", "source", "op", "value", "window"],
-    "additionalProperties": False,
-}
-
-EXIT_CONDITIONS_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Typed success and failure conditions.",
-    "properties": {
-        "success": {"type": "array", "maxItems": 4, "items": CONDITION_SCHEMA},
-        "failure": {"type": "array", "maxItems": 4, "items": CONDITION_SCHEMA},
-    },
-    "required": ["success", "failure"],
-    "additionalProperties": False,
-}
-
-CONTRACT_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "A supervisor-issued executable search contract.",
-    "properties": {
-        "contract_type": {"type": "string", "enum": list(CONTRACT_TYPES)},
-        "objective_layers": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 4,
-            "items": {"type": "string", "enum": list(QUALITY_METRICS)},
-        },
-        "feasibility_control": FEASIBILITY_CONTROL_SCHEMA,
-        "decision_basis": DECISION_BASIS_SCHEMA,
-        "situation_summary": SITUATION_SUMMARY_SCHEMA,
-        "target_intents": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 6,
-            "items": TARGET_INTENT_SCHEMA,
-        },
-        "protected_metrics": {
-            "type": "array",
-            "maxItems": 4,
-            "items": PROTECTED_METRIC_SCHEMA,
-        },
-        "resource_policy": RESOURCE_POLICY_SCHEMA,
-        "exit_conditions": EXIT_CONDITIONS_SCHEMA,
-        "audit_note": AUDIT_NOTE_SCHEMA,
-    },
-    "required": [
-        "contract_type",
-        "objective_layers",
-        "feasibility_control",
-        "decision_basis",
-        "situation_summary",
-        "target_intents",
-        "protected_metrics",
-        "resource_policy",
-        "exit_conditions",
-    ],
-    "additionalProperties": False,
-}
-
-CONTRACT_REVIEW_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Human-readable review ignored by runtime.",
-    "properties": {
-        "outcome_summary": _string("What happened during the completed contract."),
-        "main_lesson": _string("Most important lesson for the next stage."),
-    },
-    "required": ["outcome_summary", "main_lesson"],
-    "additionalProperties": False,
-}
-
-SUPERVISOR_KICKOFF_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Supervisor kickoff decision at the beginning of a run.",
-    "properties": {
-        "supervisor_decision": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "const": "start_run"},
-                "global_objective": GLOBAL_OBJECTIVE_SHAPE,
-                "next_contract": CONTRACT_SCHEMA,
-            },
-            "required": ["action", "global_objective", "next_contract"],
-            "additionalProperties": False,
-        }
-    },
-    "required": ["supervisor_decision"],
-    "additionalProperties": False,
-}
-
-SUPERVISOR_REVIEW_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "description": "Supervisor decision after a contract has ended.",
-    "properties": {
-        "supervisor_decision": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "const": "issue_contract"},
-                        "contract_review": CONTRACT_REVIEW_SCHEMA,
-                        "next_contract": CONTRACT_SCHEMA,
-                    },
-                    "required": ["action", "contract_review", "next_contract"],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "const": "stop_run"},
-                        "contract_review": CONTRACT_REVIEW_SCHEMA,
-                        "stop_explanation": _string(
-                            "Why the supervisor decides the run should stop."
-                        ),
-                    },
-                    "required": ["action", "contract_review", "stop_explanation"],
-                    "additionalProperties": False,
-                },
-            ]
-        }
-    },
-    "required": ["supervisor_decision"],
-    "additionalProperties": False,
-}
-
-_SOLVER_DECISION_SCHEMA_TEMPLATE: Dict[str, Any] = {
-    "type": "object",
-    "description": "One Solver decision under the active supervisor contract.",
-    "properties": {
-        "solver_decision": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "const": "construct_initial"},
-                        "decision_basis": DECISION_BASIS_SCHEMA,
-                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
-                        "intent_id": _string("Intent id from active_contract.target_intents."),
-                        "runtime_target": RUNTIME_TARGET_SCHEMA,
-                        "insertion_control": INSERTION_CONTROL_SCHEMA,
-                        "solver_budget": {
-                            "type": "object",
-                            "properties": {
-                                "max_iters": {"type": "integer", "minimum": 1},
-                                "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
-                            },
-                            "required": ["max_iters", "max_time_sec"],
-                            "additionalProperties": False,
-                        },
-                        "expected_effects": {
-                            "type": "array",
-                            "maxItems": 4,
-                            "items": EXPECTED_EFFECT_SCHEMA,
-                        },
-                        "audit_note": AUDIT_NOTE_SCHEMA,
-                    },
-                    "required": [
-                        "action",
-                        "decision_basis",
-                        "situation_summary",
-                        "intent_id",
-                        "runtime_target",
-                        "insertion_control",
-                        "solver_budget",
-                        "expected_effects",
-                    ],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "const": "run_alns"},
-                        "decision_basis": DECISION_BASIS_SCHEMA,
-                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
-                        "intent_id": _string("Intent id from active_contract.target_intents."),
-                        "runtime_target": RUNTIME_TARGET_SCHEMA,
-                        "destroy_control": DESTROY_CONTROL_SCHEMA,
-                        "insertion_control": INSERTION_CONTROL_SCHEMA,
-                        "acceptance_control": ACCEPTANCE_CONTROL_SCHEMA,
-                        "solver_budget": {
-                            "type": "object",
-                            "properties": {
-                                "max_iters": {"type": "integer", "minimum": 1},
-                                "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
-                            },
-                            "required": ["max_iters", "max_time_sec"],
-                            "additionalProperties": False,
-                        },
-                        "expected_effects": {
-                            "type": "array",
-                            "maxItems": 4,
-                            "items": EXPECTED_EFFECT_SCHEMA,
-                        },
-                        "audit_note": AUDIT_NOTE_SCHEMA,
-                    },
-                    "required": [
-                        "action",
-                        "decision_basis",
-                        "situation_summary",
-                        "intent_id",
-                        "runtime_target",
-                        "destroy_control",
-                        "insertion_control",
-                        "acceptance_control",
-                        "solver_budget",
-                        "expected_effects",
-                    ],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "const": "request_supervisor_review",
-                        },
-                        "decision_basis": DECISION_BASIS_SCHEMA,
-                        "situation_summary": SITUATION_SUMMARY_SCHEMA,
-                        "review_request": {
-                            "type": "object",
-                            "properties": {
-                                "reason": {"type": "string"},
-                                "evidence_refs": {
-                                    "type": "array",
-                                    "minItems": 1,
-                                    "maxItems": 8,
-                                    "items": {"type": "string"},
-                                },
-                            },
-                            "required": ["reason", "evidence_refs"],
-                            "additionalProperties": False,
-                        },
-                        "audit_note": AUDIT_NOTE_SCHEMA,
-                    },
-                    "required": ["action", "decision_basis", "situation_summary", "review_request"],
-                    "additionalProperties": False,
-                },
-            ]
-        }
-    },
-    "required": ["solver_decision"],
-    "additionalProperties": False,
-}
-
-
-def solver_decision_schema_for_candidates(
-    candidates: Any, observation: Optional[Mapping[str, Any]] = None
-) -> Dict[str, Any]:
-    """Build a Solver schema whose executable fields use their own candidate enums."""
-    action_space = (
-        observation.get("execution_state") if isinstance(observation, Mapping) else None
-    )
-    catalog = (
-        observation.get("control_catalog") if isinstance(observation, Mapping) else None
-    )
-
-    def allowed(action_key: str, candidate_key: str) -> tuple[str, ...]:
-        if isinstance(action_space, Mapping) and action_key in action_space:
-            values = action_space.get(action_key) or []
-            return tuple(dict.fromkeys(str(value) for value in values))
-        if isinstance(catalog, Mapping) and action_key in catalog:
-            values = catalog.get(action_key) or []
-            return tuple(
-                dict.fromkeys(
-                    str(value.get("name")) if isinstance(value, Mapping) else str(value)
-                    for value in values
-                )
-            )
-        if candidates is not None and hasattr(candidates, "names"):
-            return tuple(
-                dict.fromkeys(str(value) for value in candidates.names(candidate_key))
-            )
-        if isinstance(candidates, Mapping):
-            values = candidates.get(candidate_key) or []
-            return tuple(
-                dict.fromkeys(
-                    str(value.get("name")) if isinstance(value, Mapping) else str(value)
-                    for value in values
-                )
-            )
-        return ()
-
-    insertion = deepcopy(INSERTION_CONTROL_SCHEMA)
-    insertion["properties"]["operator_scores"] = _score_array_for(
-        allowed("insertion_operators", "insertion_operator_candidates"),
-        "Sparse emphasis scores for insertion operators.",
-    )
-    insertion["properties"]["task_signal_scores"] = _score_array_for(
-        allowed("insertion_task_signals", "insertion_task_signal_candidates"),
-        "Sparse emphasis scores for choosing the next task.",
-    )
-    insertion["properties"]["position_signal_scores"] = _score_array_for(
-        allowed("insertion_position_signals", "insertion_position_signal_candidates"),
-        "Sparse emphasis scores for choosing an insertion position.",
-    )
-
-    destroy = deepcopy(DESTROY_CONTROL_SCHEMA)
-    destroy["properties"]["operator_scores"] = _score_array_for(
-        allowed("destroy_operators", "destroy_operator_candidates"),
-        "Sparse emphasis scores for destroy operators.",
-    )
-    destroy["properties"]["signal_scores"] = _score_array_for(
-        allowed("destroy_signals", "destroy_signal_candidates"),
-        "Sparse emphasis scores for destroy signals.",
-    )
-
-    acceptance = deepcopy(ACCEPTANCE_CONTROL_SCHEMA)
-    acceptance["properties"]["mode"] = _enum_string(
-        allowed("acceptance_modes", "acceptance_candidates"),
-        "Acceptance mode allowed for the current action space.",
-    )
-
-    schema = deepcopy(_SOLVER_DECISION_SCHEMA_TEMPLATE)
-    branches = schema["properties"]["solver_decision"]["oneOf"]
-    allowed_actions = None
-    if isinstance(action_space, Mapping) and "hard_executable_actions" in action_space:
-        allowed_actions = {
-            str(value) for value in (action_space.get("allowed_actions") or [])
-        }
-        allowed_actions = {
-            str(value)
-            for value in (action_space.get("hard_executable_actions") or [])
-        }
-        branches[:] = [
-            branch
-            for branch in branches
-            if branch["properties"]["action"].get("const") in allowed_actions
-        ]
-
-    intent_ids = []
-    if isinstance(observation, Mapping):
-        for item in ((observation.get("active_contract") or {}).get("target_intents") or []):
-            if not isinstance(item, Mapping) or item.get("intent_id") is None:
-                continue
-            intent_ids.append(str(item["intent_id"]))
-    for branch in branches:
-        properties = branch["properties"]
-        action = branch["properties"]["action"].get("const")
-        if action != "request_supervisor_review":
-            properties["intent_id"] = _enum_string(
-                intent_ids, "Intent id executable for this action."
-            )
-        if "insertion_control" in properties:
-            properties["insertion_control"] = deepcopy(insertion)
-        if "destroy_control" in properties:
-            properties["destroy_control"] = deepcopy(destroy)
-        if "acceptance_control" in properties:
-            properties["acceptance_control"] = deepcopy(acceptance)
-    return schema
-
-
-# Compatibility export only. Runtime Solver calls must use
-# solver_decision_schema_for_candidates().
-SOLVER_DECISION_SCHEMA = deepcopy(_SOLVER_DECISION_SCHEMA_TEMPLATE)
 
 
 def schema_text(schema: Dict[str, Any]) -> str:
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
-def supervisor_kickoff_schema_for_limits(
-    resource_limits: Dict[str, Any],
-) -> Dict[str, Any]:
-    return _supervisor_schema_for_limits(SUPERVISOR_KICKOFF_SCHEMA, resource_limits)
+def supervisor_schema(phase: str, action_space: Mapping[str, Any]) -> Dict[str, Any]:
+    """Schema for supervisor kickoff/review decisions."""
+    space = dict(action_space or {})
+    stage_types = _values(space, "stage_types", STAGE_TYPES)
+    if phase == "kickoff":
+        stage_types = [name for name in stage_types if name == "initial_construction"]
+    metrics = _values(space, "objective_metrics", QUALITY_METRICS)
+    feasibility_modes = _values(space, "feasibility_modes", FEASIBILITY_MODES)
+    relaxable = _values(space, "relaxable_violation_types", RELAXABLE_VIOLATION_TYPES)
+    resource_limits = dict(space.get("next_stage_resource_limits", {}) or {})
+
+    stage = _stage_schema(stage_types, metrics, feasibility_modes, relaxable)
+    _apply_resource_limits(stage, resource_limits)
+    issue = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "const": "issue_stage"},
+            "global_objective": _global_objective_schema(metrics),
+            "next_stage": stage,
+        },
+        "required": ["action", "global_objective", "next_stage"],
+        "additionalProperties": False,
+    }
+    stop = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "const": "stop_run"},
+            "stop_explanation": {"type": "string"},
+        },
+        "required": ["action", "stop_explanation"],
+        "additionalProperties": False,
+    }
+    branches = [issue] if phase == "kickoff" else [issue, stop]
+    if _no_stage_budget(resource_limits) and phase != "kickoff":
+        branches = [stop]
+    return {
+        "type": "object",
+        "properties": {"supervisor_decision": {"oneOf": branches}},
+        "required": ["supervisor_decision"],
+        "additionalProperties": False,
+    }
 
 
-def supervisor_review_schema_for_limits(
-    resource_limits: Dict[str, Any],
-) -> Dict[str, Any]:
-    return _supervisor_schema_for_limits(SUPERVISOR_REVIEW_SCHEMA, resource_limits)
-
-
-def _supervisor_schema_for_limits(
-    schema: Dict[str, Any], action_space_or_limits: Dict[str, Any]
-) -> Dict[str, Any]:
-    out = deepcopy(schema)
-    action_space = dict(action_space_or_limits or {})
-    resource_limits = dict(
-        action_space.get("next_contract_resource_limits", action_space) or {}
-    )
-    _apply_contract_limits(out, resource_limits)
-    _apply_supervisor_enums(out, action_space)
-    if any(
-        float(resource_limits.get(name, 0) or 0) <= 0.0
-        for name in (
-            "max_solver_actions_allowed",
-            "max_time_sec_allowed",
-            "max_iters_allowed",
-        )
-    ):
-        decision = (out.get("properties", {}) or {}).get("supervisor_decision", {})
-        branches = decision.get("oneOf") if isinstance(decision, dict) else None
-        if isinstance(branches, list):
-            branches[:] = [
-                branch
-                for branch in branches
-                if (branch.get("properties", {}) or {})
-                .get("action", {})
-                .get("const")
-                == "stop_run"
-            ]
-    return out
-
-
-def _apply_supervisor_enums(node: Any, action_space: Dict[str, Any]) -> None:
-    if not action_space:
-        return
-    if isinstance(node, dict):
-        properties = node.get("properties")
-        if isinstance(properties, dict):
-            if "contract_type" in properties and action_space.get(
-                "allowed_contract_types"
-            ):
-                properties["contract_type"]["enum"] = list(
-                    action_space["allowed_contract_types"]
-                )
-            if "objective_layers" in properties and action_space.get(
-                "allowed_objective_metrics"
-            ):
-                properties["objective_layers"]["items"]["enum"] = list(
-                    action_space["allowed_objective_metrics"]
-                )
-            if (
-                "mode" in properties
-                and "relaxation_ratios" in properties
-                and action_space.get("allowed_feasibility_modes")
-            ):
-                properties["mode"]["enum"] = list(
-                    action_space["allowed_feasibility_modes"]
-                )
-            if (
-                "violation_type" in properties
-                and action_space.get("allowed_relaxable_violation_types")
-            ):
-                properties["violation_type"]["enum"] = list(
-                    action_space["allowed_relaxable_violation_types"]
-                )
-        for value in node.values():
-            _apply_supervisor_enums(value, action_space)
-    elif isinstance(node, list):
-        for value in node:
-            _apply_supervisor_enums(value, action_space)
-
-
-def _apply_contract_limits(node: Any, resource_limits: Dict[str, Any]) -> None:
-    if isinstance(node, dict):
-        properties = node.get("properties")
-        if isinstance(properties, dict) and "resource_policy" in properties:
-            policy = properties["resource_policy"]
-            policy_props = (
-                policy.get("properties", {}) if isinstance(policy, dict) else {}
+def step_schema(action_space: Mapping[str, Any], active_stage: Mapping[str, Any]) -> Dict[str, Any]:
+    """Schema for one step-agent decision under the active stage."""
+    space = dict(action_space or {})
+    allowed_actions = _values(space, "hard_executable_actions", space.get("actions", []))
+    if not allowed_actions:
+        allowed_actions = ["request_supervisor_review"]
+    intent_ids = [
+        str(item["intent_id"])
+        for item in active_stage.get("target_intents", []) or []
+        if isinstance(item, Mapping) and item.get("intent_id")
+    ]
+    branches = []
+    if "construct_initial" in allowed_actions:
+        branches.append(
+            _step_action_schema(
+                "construct_initial",
+                intent_ids,
+                insertion=True,
+                destroy=False,
+                acceptance=False,
+                action_space=space,
             )
-            if isinstance(policy_props, dict):
-                if "max_actions" in policy_props:
-                    policy_props["max_actions"]["maximum"] = int(
-                        resource_limits["max_solver_actions_allowed"]
-                    )
-                if "min_actions" in policy_props:
-                    policy_props["min_actions"]["maximum"] = min(
-                        20, int(resource_limits["max_solver_actions_allowed"])
-                    )
-                if "max_time_sec" in policy_props:
-                    policy_props["max_time_sec"]["maximum"] = float(
-                        resource_limits["max_time_sec_allowed"]
-                    )
-                if "max_iters" in policy_props:
-                    policy_props["max_iters"]["maximum"] = int(
-                        resource_limits["max_iters_allowed"]
-                    )
-        for value in node.values():
-            _apply_contract_limits(value, resource_limits)
-    elif isinstance(node, list):
-        for value in node:
-            _apply_contract_limits(value, resource_limits)
+        )
+    if "run_alns" in allowed_actions:
+        branches.append(
+            _step_action_schema(
+                "run_alns",
+                intent_ids,
+                insertion=True,
+                destroy=True,
+                acceptance=True,
+                action_space=space,
+            )
+        )
+    if "request_supervisor_review" in allowed_actions:
+        branches.append(_review_request_schema())
+    return {
+        "type": "object",
+        "properties": {"step_decision": {"oneOf": branches}},
+        "required": ["step_decision"],
+        "additionalProperties": False,
+    }
+
+
+def _global_objective_schema(metrics: Iterable[str]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "objective_layers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {"type": "string", "enum": list(metrics)},
+            }
+        },
+        "required": ["objective_layers"],
+        "additionalProperties": False,
+    }
+
+
+def _stage_schema(
+    stage_types: Iterable[str],
+    metrics: Iterable[str],
+    feasibility_modes: Iterable[str],
+    relaxable: Iterable[str],
+) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "stage_type": {"type": "string", "enum": list(stage_types)},
+            "objective_layers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {"type": "string", "enum": list(metrics)},
+            },
+            "feasibility_control": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": list(feasibility_modes)},
+                    "relaxation_ratios": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "violation_type": {"type": "string", "enum": list(relaxable)},
+                                "max_ratio": {"type": "number", "minimum": 0.0, "maximum": 0.3},
+                            },
+                            "required": ["violation_type", "max_ratio"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["mode", "relaxation_ratios"],
+                "additionalProperties": False,
+            },
+            "target_intents": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 6,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "intent_id": {"type": "string"},
+                        "intent_type": {
+                            "type": "string",
+                            "enum": ["construction", "recovery", "improvement", "diversification", "review"],
+                        },
+                        "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["intent_id", "intent_type", "evidence_refs", "rationale"],
+                    "additionalProperties": False,
+                },
+            },
+            "protected_metrics": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string", "enum": list(metrics)},
+                        "max_worsen": {"type": "number", "minimum": 0.0},
+                    },
+                    "required": ["metric", "max_worsen"],
+                    "additionalProperties": False,
+                },
+            },
+            "resource_policy": {
+                "type": "object",
+                "properties": {
+                    "min_actions": {"type": "integer", "minimum": 1},
+                    "max_actions": {"type": "integer", "minimum": 1},
+                    "max_iters": {"type": "integer", "minimum": 1},
+                    "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
+                    "require_feasible": {"type": "boolean"},
+                    "metric_thresholds": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number"},
+                    },
+                },
+                "required": ["min_actions", "max_actions", "max_iters", "max_time_sec", "require_feasible", "metric_thresholds"],
+                "additionalProperties": False,
+            },
+        },
+        "required": [
+            "stage_type",
+            "objective_layers",
+            "feasibility_control",
+            "target_intents",
+            "protected_metrics",
+            "resource_policy",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _step_action_schema(
+    action: str,
+    intent_ids: Iterable[str],
+    *,
+    insertion: bool,
+    destroy: bool,
+    acceptance: bool,
+    action_space: Mapping[str, Any],
+) -> Dict[str, Any]:
+    properties: Dict[str, Any] = {
+        "action": {"type": "string", "const": action},
+        "intent_id": {"type": "string", "enum": list(intent_ids)},
+        "runtime_target": _runtime_target_schema(),
+        "solver_budget": {
+            "type": "object",
+            "properties": {
+                "max_iters": {"type": "integer", "minimum": 1},
+                "max_time_sec": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "required": ["max_iters", "max_time_sec"],
+            "additionalProperties": False,
+        },
+        "decision_basis": _decision_basis_schema(),
+        "situation_summary": _situation_summary_schema(),
+    }
+    required = list(properties)
+    if insertion:
+        properties["insertion_control"] = _insertion_control_schema(action_space)
+        required.append("insertion_control")
+    if destroy:
+        properties["destroy_control"] = _destroy_control_schema(action_space)
+        required.append("destroy_control")
+    if acceptance:
+        properties["acceptance_control"] = _acceptance_control_schema(action_space)
+        required.append("acceptance_control")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _review_request_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "const": "request_supervisor_review"},
+            "review_request": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string"},
+                    "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                },
+                "required": ["reason", "evidence_refs"],
+                "additionalProperties": False,
+            },
+            "decision_basis": _decision_basis_schema(),
+            "situation_summary": _situation_summary_schema(),
+        },
+        "required": ["action", "review_request", "decision_basis", "situation_summary"],
+        "additionalProperties": False,
+    }
+
+
+def _runtime_target_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "scope_kind": {"type": "string", "enum": ["global", "task_scope", "route_scope", "mixed_scope"]},
+            "task_ids": {"type": "array", "maxItems": 8, "items": {"type": "integer"}},
+            "agent_ids": {"type": "array", "maxItems": 6, "items": {"type": "integer"}},
+            "focus_metrics": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "enum": list(QUALITY_METRICS)}},
+        },
+        "required": ["scope_kind", "task_ids", "agent_ids", "focus_metrics"],
+        "additionalProperties": False,
+    }
+
+
+def _insertion_control_schema(action_space: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "operator_scores": _score_array(_values(action_space, "insertion_operators", INSERTION_OPERATOR_NAMES)),
+            "task_signal_scores": _score_array(_values(action_space, "insertion_task_signals", INSERTION_TASK_SIGNAL_NAMES)),
+            "position_signal_scores": _score_array(_values(action_space, "insertion_position_signals", INSERTION_POSITION_SIGNAL_NAMES)),
+        },
+        "required": ["operator_scores", "task_signal_scores", "position_signal_scores"],
+        "additionalProperties": False,
+    }
+
+
+def _destroy_control_schema(action_space: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "operator_scores": _score_array(_values(action_space, "destroy_operators", DESTROY_OPERATOR_NAMES)),
+            "signal_scores": _score_array(_values(action_space, "destroy_signals", DESTROY_SIGNAL_NAMES)),
+            "intensity_score": {"type": "integer", "minimum": 0, "maximum": 10},
+        },
+        "required": ["operator_scores", "signal_scores", "intensity_score"],
+        "additionalProperties": False,
+    }
+
+
+def _acceptance_control_schema(action_space: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": _values(action_space, "acceptance_modes", ACCEPTANCE_MODES)},
+            "intensity_score": {"type": "integer", "minimum": 0, "maximum": 10},
+        },
+        "required": ["mode", "intensity_score"],
+        "additionalProperties": False,
+    }
+
+
+def _score_array(names: Iterable[str]) -> Dict[str, Any]:
+    return {
+        "type": "array",
+        "minItems": 0,
+        "maxItems": 3,
+        "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "enum": list(names)},
+                "score": {"type": "integer", "minimum": 0, "maximum": 10},
+            },
+            "required": ["name", "score"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _decision_basis_schema() -> Dict[str, Any]:
+    return {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+            "type": "object",
+            "properties": {
+                "basis_id": {"type": "string"},
+                "claim": {"type": "string"},
+                "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "string"}},
+            },
+            "required": ["basis_id", "claim", "evidence_refs"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _situation_summary_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "basis_ids": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
+        },
+        "required": ["summary", "basis_ids"],
+        "additionalProperties": False,
+    }
+
+
+def _values(space: Mapping[str, Any], key: str, default: Iterable[str]) -> list[str]:
+    raw = space.get(key, default)
+    out = []
+    for item in raw or []:
+        out.append(str(item.get("name")) if isinstance(item, Mapping) else str(item))
+    return list(dict.fromkeys(out))
+
+
+def _apply_resource_limits(schema: Dict[str, Any], limits: Mapping[str, Any]) -> None:
+    if not limits:
+        return
+    policy = schema["properties"]["resource_policy"]["properties"]
+    if "max_solver_actions_allowed" in limits:
+        max_actions = int(float(limits["max_solver_actions_allowed"]))
+        policy["max_actions"]["maximum"] = max_actions
+        policy["min_actions"]["maximum"] = max_actions
+    if "max_iters_allowed" in limits:
+        policy["max_iters"]["maximum"] = int(float(limits["max_iters_allowed"]))
+    if "max_time_sec_allowed" in limits:
+        policy["max_time_sec"]["maximum"] = float(limits["max_time_sec_allowed"])
+
+
+def _no_stage_budget(limits: Mapping[str, Any]) -> bool:
+    if not limits:
+        return False
+    return any(
+        float(limits.get(key, 0) or 0) <= 0
+        for key in ("max_solver_actions_allowed", "max_time_sec_allowed", "max_iters_allowed")
+    )
 
 
 __all__ = [
     "QUALITY_METRICS",
     "CONSTRAINT_METRICS",
-    "SUPERVISOR_KICKOFF_SCHEMA",
-    "SUPERVISOR_REVIEW_SCHEMA",
-    "SOLVER_DECISION_SCHEMA",
-    "CONTRACT_SCHEMA",
-    "RUNTIME_TARGET_SCHEMA",
+    "build_action_space",
     "schema_text",
-    "solver_decision_schema_for_candidates",
-    "supervisor_kickoff_schema_for_limits",
-    "supervisor_review_schema_for_limits",
+    "supervisor_schema",
+    "step_schema",
 ]

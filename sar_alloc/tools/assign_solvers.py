@@ -1,4 +1,4 @@
-"""Weighted ALNS solver with separate operator-level scoring profiles.
+﻿"""Weighted ALNS solver with separate operator-level scoring profiles.
 
 Reinsert-task score decides which task to insertion next. Insert score decides the
 order of filtered insertion positions. Insertion scans the full ranked candidate
@@ -11,12 +11,11 @@ import math
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ..config import Budget, Config
-from ..console import info, subsection
 from ..evaluator import build_objective_keys, compare_quality, evaluate as _evaluate_raw
-from ..feasibility_policy import check_feasibility_admissibility
+from ..evaluator import check_protected_metrics, evaluation_quality
 from ..models import Instance
 from ..operators import (
     DestroyPolicy,
@@ -31,11 +30,6 @@ from ..operators.destroy import (
     enumerate_random_removal,
 )
 from ..operators.insertion import InsertionContext, run_insertion_kernel
-from ..protected_metrics import (
-    ProtectedMetricBound,
-    check_protected_metrics,
-    evaluation_quality,
-)
 from ..solution import AssignmentSolution, EvalResult
 
 
@@ -46,6 +40,14 @@ class _EvalStats:
 
 
 EVAL_STATS = _EvalStats()
+
+
+@dataclass(frozen=True)
+class FeasibilityDecision:
+    admissible: bool
+    accept_scope: str
+    reason: str
+    events: List[str]
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,72 @@ def evaluate(*args, **kwargs):  # noqa: F811
     return ev
 
 
+def _check_feasibility_admissibility(
+    current_report: Any,
+    trial_report: Any,
+    policy: Dict[str, Any],
+) -> FeasibilityDecision:
+    mode = str(policy.get("mode", ""))
+    if mode == "strict":
+        return _strict_feasibility_decision(trial_report)
+    if mode == "relaxed_recoverable":
+        return _relaxed_recoverable_decision(current_report, trial_report, policy)
+    if mode == "recovery_only":
+        return _recovery_only_decision(current_report, trial_report)
+    raise ValueError(f"unknown feasibility policy mode: {mode}")
+
+
+def _strict_feasibility_decision(trial: Any) -> FeasibilityDecision:
+    if trial.is_feasible:
+        return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible under strict policy.", [])
+    return FeasibilityDecision(
+        False,
+        "reject",
+        "feasibility_rejected_infeasible_trial",
+        ["feasibility_rejected_infeasible_trial"],
+    )
+
+
+def _relaxed_recoverable_decision(current: Any, trial: Any, policy: Dict[str, Any]) -> FeasibilityDecision:
+    events: List[str] = []
+    per_type = dict(policy.get("per_type", {}) or {})
+    for violation_type, value in trial.violation_by_type.items():
+        if value > 1e-9 and violation_type not in per_type:
+            return FeasibilityDecision(False, "reject", f"{violation_type}_not_relaxable", ["feasibility_rejected_infeasible_trial"])
+
+    for violation_type, limits in per_type.items():
+        limit_ratio = float(limits["limit_ratio"])
+        delta_ratio = float(limits["delta_ratio"])
+        trial_ratio = float(trial.violation_ratio_by_type.get(violation_type, 0.0))
+        current_ratio = float(current.violation_ratio_by_type.get(violation_type, 0.0))
+        if trial_ratio - limit_ratio > 1e-9:
+            return FeasibilityDecision(False, "reject", f"{violation_type}_limit_exceeded", ["feasibility_debt_limit_exceeded"])
+        if (trial_ratio - current_ratio) - delta_ratio > 1e-9:
+            return FeasibilityDecision(False, "reject", f"{violation_type}_delta_exceeded", ["feasibility_debt_delta_exceeded"])
+        for item in trial.violation_details_by_type.get(violation_type, []):
+            if float(item.get("ratio", 0.0)) - limit_ratio > 1e-9:
+                return FeasibilityDecision(False, "reject", f"{violation_type}_individual_limit_exceeded", ["feasibility_debt_limit_exceeded"])
+
+    if trial.is_feasible:
+        if current.violation_total > 1e-9:
+            events.append("feasibility_recovered")
+        return FeasibilityDecision(True, "working_and_best_candidate", "Trial is feasible.", events)
+
+    if trial.recoverable_violation_total > current.recoverable_violation_total + 1e-9:
+        events.append("feasibility_debt_increased")
+    elif trial.recoverable_violation_total < current.recoverable_violation_total - 1e-9:
+        events.append("recovery_debt_reduced")
+    return FeasibilityDecision(True, "working_only", "Trial is relaxed-admissible under per-type ratio policy.", events)
+
+
+def _recovery_only_decision(current: Any, trial: Any) -> FeasibilityDecision:
+    if trial.is_feasible:
+        return FeasibilityDecision(True, "working_and_best_candidate", "Trial restored feasibility.", ["feasibility_recovered"])
+    if trial.violation_total < current.violation_total - 1e-9:
+        return FeasibilityDecision(True, "working_only", "recovery_debt_reduced", ["recovery_debt_reduced"])
+    return FeasibilityDecision(False, "reject", "recovery_non_reducing_trial", ["recovery_non_reducing_trial"])
+
+
 def solve_assignment(
     instance: Instance,
     init_solution: AssignmentSolution,
@@ -79,11 +147,11 @@ def solve_assignment(
     budget: Budget,
     policy: CompiledALNSPolicy,
     rng_seed: int = 0,
-    contract_objective_layers: Optional[List[Dict[str, Any]]] = None,
+    stage_objective_layers: Optional[List[Dict[str, Any]]] = None,
     feasibility_policy: Optional[Dict[str, Any]] = None,
     global_objective_layers: Optional[List[Dict[str, Any]]] = None,
     trace_id: str = "X_solver",
-    protected_metric_bounds: Optional[List[ProtectedMetricBound]] = None,
+    protected_metric_bounds: Optional[List[Mapping[str, Any]]] = None,
     runtime_target: Optional[Dict[str, Any]] = None,
 ) -> ALNSResult:
     """Run weighted ALNS from an incumbent using an already validated policy."""
@@ -92,16 +160,6 @@ def solve_assignment(
     cur = init_solution.clone(deep=True)
     cur.normalize(instance)
     cur_ev = evaluate(cur, instance, config, update_solution_schedule=False)
-    subsection("ALNS START")
-    info(
-        f"acceptance={policy.acceptance_policy.mode} "
-        f"strength_ratio={float(policy.destroy_policy.remove_ratio)} "
-        f"time_limit={budget.time_limit_sec} "
-        f"iters={budget.max_iters} "
-        f"init_feasible={_bool_text(cur_ev.is_feasible)} "
-        f"init_contract_key={build_objective_keys(cur_ev, contract_objective_layers or _config_objective_layers(config), global_objective_layers or _config_objective_layers(config))['contract']['key']}"
-    )
-
     return _solve_weighted_alns(
         instance,
         cur,
@@ -110,7 +168,7 @@ def solve_assignment(
         budget,
         policy,
         rng,
-        contract_objective_layers=contract_objective_layers
+        stage_objective_layers=stage_objective_layers
         or _config_objective_layers(config),
         feasibility_policy=feasibility_policy or {"mode": "strict"},
         global_objective_layers=global_objective_layers
@@ -130,11 +188,11 @@ def _solve_weighted_alns(
     policy: CompiledALNSPolicy,
     rng: random.Random,
     *,
-    contract_objective_layers: List[Dict[str, Any]],
+    stage_objective_layers: List[Dict[str, Any]],
     feasibility_policy: Dict[str, Any],
     global_objective_layers: List[Dict[str, Any]],
     trace_id: str,
-    protected_metric_bounds: List[ProtectedMetricBound],
+    protected_metric_bounds: List[Mapping[str, Any]],
     runtime_target: Dict[str, Any],
 ) -> ALNSResult:
     destroy_ops: Dict[str, DestroyOperator] = dict(DESTROY_OPERATORS)
@@ -159,15 +217,15 @@ def _solve_weighted_alns(
     accept_level = float(policy.acceptance_policy.accept_level)
     temperature = 0.05 + 0.50 * accept_level
     cooling = _clamp_float(0.999 - 0.02 * accept_level, 0.90, 0.9999)
-    contract_start_solution = cur.clone(deep=True)
-    contract_start_eval = cur_ev
-    contract_start_constraint_report = cur_ev.constraint_report
+    stage_start_solution = cur.clone(deep=True)
+    stage_start_eval = cur_ev
+    stage_start_constraint_report = cur_ev.constraint_report
     initial_solution_feasible = bool(cur_ev.is_feasible)
     initial_protected_check = check_protected_metrics(
         evaluation_quality(cur_ev), protected_metric_bounds
     )
     initial_working_objective_keys = build_objective_keys(
-        cur_ev, contract_objective_layers, global_objective_layers
+        cur_ev, stage_objective_layers, global_objective_layers
     )
 
     initial_is_eligible = bool(cur_ev.is_feasible and initial_protected_check.passed)
@@ -210,7 +268,7 @@ def _solve_weighted_alns(
         "accepted_trials": 0,
         "global_best_improved_trials": 0,
     }
-    repair_failure_reasons: Dict[str, int] = {}
+    insertion_failure_reasons: Dict[str, int] = {}
     removed_task_count_sum = 0.0
 
     iteration = 0
@@ -272,14 +330,14 @@ def _solve_weighted_alns(
         trial_flow["candidate_trials"] += 1
         if int(last_insertion.get("inserted_count", 0) or 0) == 0:
             trial_flow["hard_filter_failed"] += 1
-            repair_failure_reasons["no_reinserted_task"] = (
-                repair_failure_reasons.get("no_reinserted_task", 0) + 1
+            insertion_failure_reasons["no_reinserted_task"] = (
+                insertion_failure_reasons.get("no_reinserted_task", 0) + 1
             )
         for name, count in dict(
             last_insertion.get("failure_breakdown", {}) or {}
         ).items():
             if int(count):
-                repair_failure_reasons[str(name)] = repair_failure_reasons.get(
+                insertion_failure_reasons[str(name)] = insertion_failure_reasons.get(
                     str(name), 0
                 ) + int(count)
 
@@ -296,7 +354,7 @@ def _solve_weighted_alns(
             evaluation_quality(ev_trial), protected_metric_bounds
         )
 
-        feasibility_decision = check_feasibility_admissibility(
+        feasibility_decision = _check_feasibility_admissibility(
             cur_ev.constraint_report,
             ev_trial.constraint_report,
             feasibility_policy,
@@ -316,7 +374,7 @@ def _solve_weighted_alns(
             acceptance = _alns_accept(
                 cur_ev=cur_ev,
                 trial_ev=ev_trial,
-                objective_layers=contract_objective_layers,
+                objective_layers=stage_objective_layers,
                 mode=policy.acceptance_policy.mode,
                 rng=rng,
                 temperature=temperature,
@@ -348,11 +406,10 @@ def _solve_weighted_alns(
                 f"[ALNS] iter={iteration} "
                 f"destroy={actual_d_name} insertion=kernel "
                 f"accepted={_bool_text(accepted)} feasible={_bool_text(ev_trial.is_feasible)} "
-                f"contract_key={build_objective_keys(ev_trial, contract_objective_layers, global_objective_layers)['contract']['key']} "
+                f"stage_key={build_objective_keys(ev_trial, stage_objective_layers, global_objective_layers)['stage']['key']} "
                 f"unassigned={len(trial.unassigned)}"
             )
-            subsection("ALNS ITERATION")
-            info(message)
+            del message
 
         reward = 0.0
         if accepted:
@@ -373,7 +430,7 @@ def _solve_weighted_alns(
             and (
                 action_best_feasible_ev is None
                 or compare_quality(
-                    ev_trial, action_best_feasible_ev, contract_objective_layers
+                    ev_trial, action_best_feasible_ev, stage_objective_layers
                 )
                 < 0
             )
@@ -399,7 +456,7 @@ def _solve_weighted_alns(
             best_update_objective_keys.append(
                 build_objective_keys(
                     global_best_feasible_ev,
-                    contract_objective_layers,
+                    stage_objective_layers,
                     global_objective_layers,
                 )
             )
@@ -414,14 +471,14 @@ def _solve_weighted_alns(
                 "insertion_operator": "kernel",
                 "accepted": bool(accepted),
                 "current_objective_keys": build_objective_keys(
-                    cur_ev, contract_objective_layers, global_objective_layers
+                    cur_ev, stage_objective_layers, global_objective_layers
                 ),
                 "action_best_objective_keys": (
                     None
                     if action_best_feasible_ev is None
                     else build_objective_keys(
                         action_best_feasible_ev,
-                        contract_objective_layers,
+                        stage_objective_layers,
                         global_objective_layers,
                     )
                 ),
@@ -430,7 +487,7 @@ def _solve_weighted_alns(
                     if global_best_feasible_ev is None
                     else build_objective_keys(
                         global_best_feasible_ev,
-                        contract_objective_layers,
+                        stage_objective_layers,
                         global_objective_layers,
                     )
                 ),
@@ -483,9 +540,9 @@ def _solve_weighted_alns(
         working_solution = action_best_feasible.clone(deep=True)
         returned_source = "action_best_feasible"
     elif protected_metric_bounds:
-        working_solution = contract_start_solution.clone(deep=True)
+        working_solution = stage_start_solution.clone(deep=True)
         evaluate(working_solution, instance, config, update_solution_schedule=True)
-        returned_source = "contract_start_solution_due_to_protected_bounds"
+        returned_source = "stage_start_solution_due_to_protected_bounds"
     else:
         working_solution = final_current.clone(deep=True)
         returned_source = "final_current_no_feasible"
@@ -515,7 +572,7 @@ def _solve_weighted_alns(
                 else {}
             ),
         },
-        repair_failure_reasons=repair_failure_reasons,
+        insertion_failure_reasons=insertion_failure_reasons,
         removed_task_count_sum=removed_task_count_sum,
         operator_prior_trace={
             "llm_prior": dict(destroy_priors),
@@ -529,8 +586,8 @@ def _solve_weighted_alns(
         feasibility_policy=feasibility_policy,
         feasibility_rejection_reasons=feasibility_rejection_reasons,
         final_constraint_report=working_solution.eval.constraint_report,
-        initial_constraint_report=contract_start_constraint_report,
-        protected_metric_bounds=[bound.as_dict() for bound in protected_metric_bounds],
+        initial_constraint_report=stage_start_constraint_report,
+        protected_metric_bounds=[dict(bound) for bound in protected_metric_bounds],
         protected_metric_rejections=protected_metric_rejections,
         protected_metric_rejection_reasons=protected_metric_rejection_reasons,
         returned_protected_result=returned_protected_check.as_dict(),
@@ -538,9 +595,9 @@ def _solve_weighted_alns(
         returned_solution_source=returned_source,
         iteration_trace=iteration_trace,
         last_insertion=last_insertion,
-        before_solution=contract_start_solution,
+        before_solution=stage_start_solution,
         after_solution=working_solution,
-        before_eval=contract_start_eval,
+        before_eval=stage_start_eval,
         after_eval=working_solution.eval,
     )
     diagnostics = _build_solver_diagnostics(
@@ -557,7 +614,7 @@ def _solve_weighted_alns(
         last_acceptance_decision=last_acceptance_decision,
         last_destroy_move=last_destroy_move,
         destroy_operator_summary=trace["destroy"]["selected_operator_counts"],
-        insertion_operator_summary=trace["repair"],
+        insertion_operator_summary=trace["insertion"],
         iteration_trace=iteration_trace,
         last_insertion=last_insertion,
         operator_weights={
@@ -577,7 +634,7 @@ def _solve_weighted_alns(
         feasibility_rejection_reasons=feasibility_rejection_reasons,
         protected_metric_rejections=protected_metric_rejections,
         protected_metric_rejection_reasons=protected_metric_rejection_reasons,
-        protected_metric_bounds=[bound.as_dict() for bound in protected_metric_bounds],
+        protected_metric_bounds=[dict(bound) for bound in protected_metric_bounds],
         returned_protected_result=returned_protected_check.as_dict(),
         execution_trace=trace,
     )
@@ -585,7 +642,7 @@ def _solve_weighted_alns(
         "initial_working": {"objective_keys": initial_working_objective_keys},
         "final_current": {
             "objective_keys": build_objective_keys(
-                final_current.eval, contract_objective_layers, global_objective_layers
+                final_current.eval, stage_objective_layers, global_objective_layers
             ),
             "is_feasible": bool(final_current.eval.is_feasible),
         },
@@ -595,7 +652,7 @@ def _solve_weighted_alns(
             else {
                 "objective_keys": build_objective_keys(
                     action_best_feasible.eval,
-                    contract_objective_layers,
+                    stage_objective_layers,
                     global_objective_layers,
                 ),
                 "is_feasible": True,
@@ -604,14 +661,6 @@ def _solve_weighted_alns(
         "returned_solution_source": returned_source,
         "protected_metric_result": returned_protected_check.as_dict(),
     }
-    subsection("ALNS DONE")
-    info(
-        f"returned_source={returned_source} "
-        f"total_iters={iteration} "
-        f"best_update_count={len(best_update_iters)} "
-        f"actual_time_used_sec={round(actual_time_used_sec, 4)} "
-        f"returned_feasible={_bool_text(getattr(working_solution.eval, 'is_feasible', False))}"
-    )
     final_current.solver_diagnostics = diagnostics
     working_solution.solver_diagnostics = diagnostics
     if action_best_feasible is not None:
@@ -663,7 +712,7 @@ def select_destroy_move(
                 score=0.0,
                 metadata={"target_k": 0},
             ),
-            **_target_destroy_metadata((), target, 0, 0, fallback=bool(_has_local_target(target))),
+            **_target_destroy_metadata((), target, 0, 0, alternate=bool(_has_local_target(target))),
         )
     strength = compute_destroy_strength(sol, policy.remove_ratio)
     moves = operator(sol, instance, config, policy, strength, rng)
@@ -681,7 +730,7 @@ def select_destroy_move(
     target_moves = [
         move for move in moves if _is_target_related_destroy_move(move, target)
     ]
-    fallback = bool(_has_local_target(target) and not target_moves)
+    alternate = bool(_has_local_target(target) and not target_moves)
     sample_pool = target_moves or moves
     selected = _sample_rank_weighted_destroy_move(sample_pool, rng)
     return _with_target_metadata(
@@ -691,7 +740,7 @@ def select_destroy_move(
             target,
             candidate_count_before,
             len(target_moves),
-            fallback=fallback,
+            alternate=alternate,
         ),
     )
 
@@ -715,7 +764,7 @@ def _target_destroy_metadata(
     candidate_count_before: int,
     candidate_count_after: int,
     *,
-    fallback: bool,
+    alternate: bool,
 ) -> Dict[str, Any]:
     target_tasks = {int(tid) for tid in runtime_target.get("task_ids", []) or []}
     target_agents = {int(aid) for aid in runtime_target.get("agent_ids", []) or []}
@@ -725,7 +774,7 @@ def _target_destroy_metadata(
     agent_hits = sorted(move_agents & target_agents)
     return {
         "target_related": bool(task_hits or agent_hits),
-        "target_destroy_fallback": bool(fallback),
+        "target_destroy_alternate": bool(alternate),
         "target_task_hit_count": len(task_hits),
         "target_agent_hit_count": len(agent_hits),
         "target_task_hits": task_hits[:20],
@@ -1021,7 +1070,7 @@ def _build_execution_trace(
     insertion_operator_summary: Dict[str, Any],
     trial_flow: Dict[str, int],
     rejection_reasons: Dict[str, int],
-    repair_failure_reasons: Dict[str, int],
+    insertion_failure_reasons: Dict[str, int],
     removed_task_count_sum: float,
     operator_prior_trace: Dict[str, Any],
     runtime_target: Dict[str, Any],
@@ -1057,8 +1106,8 @@ def _build_execution_trace(
         for values in insertion_operator_summary.values()
         if isinstance(values, dict)
     )
-    dominant_repair = max(
-        repair_failure_reasons.items(),
+    dominant_insertion = max(
+        insertion_failure_reasons.items(),
         key=lambda item: int(item[1]),
         default=("none", 0),
     )[0]
@@ -1109,13 +1158,13 @@ def _build_execution_trace(
                 float(removed_task_count_sum) / candidate_trials, 6
             ),
         },
-        "repair": {
+        "insertion": {
             "candidate_tasks_total": int(tasks_reinserted + tasks_left),
             "tasks_reinserted": int(tasks_reinserted),
             "tasks_left_unassigned": int(tasks_left),
-            "dominant_repair_failure": str(dominant_repair),
-            "repair_failure_reasons": {
-                str(k): int(v) for k, v in repair_failure_reasons.items()
+            "dominant_insertion_failure": str(dominant_insertion),
+            "insertion_failure_reasons": {
+                str(k): int(v) for k, v in insertion_failure_reasons.items()
             },
         },
         "trial_flow": {str(k): int(v) for k, v in trial_flow.items()},
@@ -1152,26 +1201,26 @@ def _build_target_engagement(
     last_insertion: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     destroy_used = 0
-    destroy_fallback = 0
+    destroy_alternate = 0
     destroy_available = 0
     attempted: List[int] = []
     inserted: List[int] = []
-    insertion_fallback = 0
+    insertion_alternate = 0
     still_unassigned: List[int] = []
     for item in iteration_trace:
         metadata = dict(item.get("destroy_target_metadata", {}) or {})
         if metadata.get("target_related"):
             destroy_used += 1
-        if metadata.get("target_destroy_fallback"):
-            destroy_fallback += 1
+        if metadata.get("target_destroy_alternate"):
+            destroy_alternate += 1
         destroy_available += int(
             metadata.get("target_candidate_count_after_filter", 0) or 0
         )
         target_insertion = dict(item.get("target_insertion", {}) or {})
         attempted.extend(int(tid) for tid in target_insertion.get("target_tasks_attempted", []) or [])
         inserted.extend(int(tid) for tid in target_insertion.get("target_tasks_inserted", []) or [])
-        insertion_fallback += int(
-            target_insertion.get("target_insertion_fallback_count", 0) or 0
+        insertion_alternate += int(
+            target_insertion.get("target_insertion_alternate_count", 0) or 0
         )
         progress = dict(item.get("target_progress", {}) or {})
         still_unassigned = [
@@ -1190,11 +1239,11 @@ def _build_target_engagement(
         "target_agent_count": len(runtime_target.get("agent_ids", []) or []),
         "target_destroy_moves_available": int(destroy_available),
         "target_destroy_moves_used": int(destroy_used),
-        "target_destroy_fallback_count": int(destroy_fallback),
+        "target_destroy_alternate_count": int(destroy_alternate),
         "target_tasks_attempted": _unique_ints(attempted),
         "target_tasks_inserted": _unique_ints(inserted),
         "target_tasks_still_unassigned": _unique_ints(still_unassigned),
-        "target_insertion_fallback_count": int(insertion_fallback),
+        "target_insertion_alternate_count": int(insertion_alternate),
     }
 
 
@@ -1211,8 +1260,8 @@ def _target_agent_engagement_from_insertion(
         "candidate_positions_on_target_agents": 0,
         "attempts_on_target_agents": 0,
         "insertions_on_target_agents": 0,
-        "fallback_count": 0,
-        "fallback_reasons": {
+        "alternate_count": 0,
+        "alternate_reasons": {
             "no_feasible_position_on_target_agent": 0,
         },
     }
@@ -1266,8 +1315,8 @@ def _compact_insertion_target(last_insertion: Optional[Dict[str, Any]]) -> Dict[
         "target_tasks_failed": _unique_ints(
             insertion.get("target_tasks_failed", []) or []
         ),
-        "target_insertion_fallback_count": int(
-            insertion.get("target_insertion_fallback_count", 0) or 0
+        "target_insertion_alternate_count": int(
+            insertion.get("target_insertion_alternate_count", 0) or 0
         ),
         "target_agent_engagement": dict(
             insertion.get("target_agent_engagement", {}) or {}
@@ -1641,3 +1690,5 @@ def _clamp_float(value: float, lo: float, hi: float) -> float:
 
 def _bool_text(value: Any) -> str:
     return str(bool(value)).lower()
+
+

@@ -1,11 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ..config import Config
-from ..console import info, subsection
 from ..evaluator import evaluate
 from ..models import Instance
 from ..operators import InsertionPolicy
@@ -25,14 +24,14 @@ def build_initial_solution_with_insertion(
     config: Config,
     insertion_policy: InsertionPolicy,
     rng_seed: int = 0,
-    manifest: Optional[Dict[str, Any]] = None,
+    runtime_context: Optional[Dict[str, Any]] = None,
 ) -> InitialConstructionResult:
     empty_solution = AssignmentSolution.empty_from_instance(
         instance, put_all_unassigned=False
     )
-    compiled_target = dict((manifest or {}).get("compiled", {}).get("target", {}) or {})
+    compiled_target = dict((runtime_context or {}).get("runtime_target", {}) or {})
     compiled_feasibility = dict(
-        (manifest or {}).get("compiled", {}).get("feasibility", {}) or {}
+        (runtime_context or {}).get("feasibility_policy", {}) or {}
     )
     solution = run_insertion_kernel(
         partial_solution=empty_solution,
@@ -55,7 +54,7 @@ def build_initial_solution_with_insertion(
     solution.normalize(instance)
     evaluation = evaluate(solution, instance, config, update_solution_schedule=True)
     trace = _initial_trace(
-        solution, instance, str((manifest or {}).get("trace_id", "X_initial"))
+        solution, instance, str((runtime_context or {}).get("trace_id", "X_initial"))
     )
     trace["runtime_target"] = compiled_target
     diagnostics = dict(
@@ -73,11 +72,6 @@ def build_initial_solution_with_insertion(
     trace["target_progress"] = _initial_target_progress(
         solution=solution,
         target=compiled_target,
-    )
-    subsection("INITIAL INSERTION")
-    info(
-        f"assigned={len(solution.all_assigned_tasks())} "
-        f"unassigned={len(solution.unassigned)}"
     )
     return InitialConstructionResult(
         solution=solution, evaluation=evaluation, trace=trace
@@ -138,7 +132,7 @@ def _initial_target_engagement(
         "target_tasks_still_unassigned": _limited_ints(
             [tid for tid in target_task_ids if tid in still_unassigned]
         ),
-        "target_insertion_fallback_count": int(bool(target_task_ids and not inserted)),
+        "target_insertion_alternate_count": int(bool(target_task_ids and not inserted)),
         "target_agent_engagement": dict(
             diagnostics.get("target_agent_engagement", {}) or {}
         ),
@@ -184,3 +178,4 @@ def _limited_ints(values: List[int], limit: int = 20) -> List[int]:
 
 
 __all__ = ["InitialConstructionResult", "build_initial_solution_with_insertion"]
+
